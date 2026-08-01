@@ -9,6 +9,16 @@ const num = (v) => {
 }
 const quickPortions = (unit) => (unit === 'мл' ? [100, 150, 200, 250, 330, 500] : [30, 50, 100, 150, 200, 300])
 
+// Одна чайная ложка сахара ≈ 4 г → 16 ккал, 4 г углеводов (всё — свободные сахара).
+const SUGAR_TSP = { grams: 4, kcal: 16, carbs: 4 }
+// Горячие напитки, в которые обычно кладут сахар (чай, кофе, какао и т.п.).
+const isHotDrink = (food) => {
+  if (!food) return false
+  if (food.emoji === '☕' || food.emoji === '🍵') return true
+  const n = (food.name || '').toLowerCase().replace(/ё/g, 'е')
+  return /(чай|кофе|капучино|латте|американо|эспрессо|раф|какао|матча|цикори|глинтвейн|горячий шоколад|мокко|флэт|флет|flat white|glühwein)/.test(n)
+}
+
 const SECTIONS = [
   { key: 'drink', label: 'Напитки' }, { key: 'grain', label: 'Крупы' }, { key: 'meat', label: 'Мясо' },
   { key: 'poultry', label: 'Птица' }, { key: 'fish', label: 'Рыба' }, { key: 'veg', label: 'Овощи' },
@@ -25,6 +35,7 @@ export default function AddMealSheet({ onClose, onAdd }) {
   const [selected, setSelected] = useState(null)
   const [method, setMethod] = useState(null)
   const [grams, setGrams] = useState('150')
+  const [sugar, setSugar] = useState(0)
   const [query, setQuery] = useState('')
   const [manual, setManual] = useState({ name: '', kcal: '', protein: '', carbs: '', fat: '' })
   const [mode, setMode] = useState('search')
@@ -81,6 +92,7 @@ export default function AddMealSheet({ onClose, onAdd }) {
   const pickFood = (food) => {
     setSelected(food)
     setMethod(food.hasVariants ? food.methods[0] : null)
+    setSugar(0)
     const u = food.unit || (food.cat === 'drink' ? 'мл' : 'г')
     const last = recents.find((r) => r.name === food.name && r.unit === u && r.grams)
     setGrams(last ? String(last.grams) : u === 'мл' ? '250' : '150')
@@ -99,6 +111,7 @@ export default function AddMealSheet({ onClose, onAdd }) {
   const clearFood = () => {
     setSelected(null)
     setMethod(null)
+    setSugar(0)
   }
 
   const addPreset = () => {
@@ -106,6 +119,20 @@ export default function AddMealSheet({ onClose, onAdd }) {
     const s = scale(effective, g)
     const name = selected.hasVariants && method ? `${selected.name}, ${method.label.toLowerCase()}` : selected.name
     onAdd({ type, name, emoji: selected.emoji, grams: g, unit, ...s })
+    // Сахар добавляем отдельной записью, чтобы он корректно учитывался как свободный сахар.
+    if (isHotDrink(selected) && sugar > 0) {
+      onAdd({
+        type,
+        name: `Сахар, ${sugar} ч.л.`,
+        emoji: '🥄',
+        grams: sugar * SUGAR_TSP.grams,
+        unit: 'г',
+        kcal: sugar * SUGAR_TSP.kcal,
+        protein: 0,
+        carbs: sugar * SUGAR_TSP.carbs,
+        fat: 0,
+      })
+    }
     onClose()
   }
 
@@ -293,13 +320,31 @@ export default function AddMealSheet({ onClose, onAdd }) {
                 )
               })()}
             </div>
+
+            {isHotDrink(selected) && (
+              <div className="field">
+                <div className="row between" style={{ alignItems: 'center' }}>
+                  <div>
+                    <label style={{ marginBottom: 2 }}>Сахар, ч.л.</label>
+                    <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>Сколько ложек положили в напиток</p>
+                  </div>
+                  <Stepper value={sugar} set={setSugar} min={0} />
+                </div>
+                {sugar > 0 && (
+                  <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '8px 0 0' }}>
+                    🥄 {sugar} ч.л. ≈ {sugar * SUGAR_TSP.grams} г · +{sugar * SUGAR_TSP.kcal} ккал · +{sugar * SUGAR_TSP.carbs} г сахара
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="row gap8" style={{ marginBottom: 22 }}>
-              <PreviewStat label="ккал" v={preview.kcal} />
+              <PreviewStat label="ккал" v={preview.kcal + sugar * SUGAR_TSP.kcal} />
               <PreviewStat label="белки" v={preview.protein} />
-              <PreviewStat label="угл." v={preview.carbs} />
+              <PreviewStat label="угл." v={round1(preview.carbs + sugar * SUGAR_TSP.carbs)} />
               <PreviewStat label="жиры" v={preview.fat} />
             </div>
-            <button className="btn" onClick={addPreset} disabled={g <= 0}>Добавить {preview.kcal} ккал</button>
+            <button className="btn" onClick={addPreset} disabled={g <= 0}>Добавить {preview.kcal + sugar * SUGAR_TSP.kcal} ккал</button>
           </div>
         )}
 
