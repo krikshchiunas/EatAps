@@ -5,10 +5,6 @@ export default function AuthSheet({ onClose }) {
   const { auth } = useStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [phone, setPhone] = useState('')
-  const [code, setCode] = useState('')
-  const [phoneOpen, setPhoneOpen] = useState(false)
-  const [otpSent, setOtpSent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null) // {type:'err'|'ok', text}
 
@@ -103,40 +99,12 @@ export default function AuthSheet({ onClose }) {
           </button>
         </div>
 
-        <div className="divider" />
-
-        {!phoneOpen ? (
-          <button className="btn soft" onClick={() => setPhoneOpen(true)}>Войти по номеру телефона</button>
-        ) : (
-          <div>
-            <div className="field">
-              <label>Телефон</label>
-              <input className="input" type="tel" inputMode="tel" placeholder="+380..." value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </div>
-            {!otpSent ? (
-              <button className="btn" disabled={busy || phone.length < 8} onClick={() => run(() => auth.sendPhoneOtp(phone)).then(() => setOtpSent(true))}>
-                Получить SMS-код
-              </button>
-            ) : (
-              <>
-                <div className="field">
-                  <label>Код из SMS</label>
-                  <input className="input" type="text" inputMode="numeric" placeholder="123456" value={code} onChange={(e) => setCode(e.target.value)} />
-                </div>
-                <button className="btn" disabled={busy || code.length < 4} onClick={() => run(() => auth.verifyPhoneOtp(phone, code))}>
-                  Подтвердить и войти
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
         {msg && (
           <p style={{ marginTop: 16, fontSize: 14, color: msg.type === 'err' ? 'var(--danger)' : 'var(--primary-strong)' }}>{msg.text}</p>
         )}
 
         <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 18, textAlign: 'center' }}>
-          Google и вход по телефону работают после настройки провайдеров в Supabase.
+          Google и вход по кошельку работают после настройки провайдеров в Supabase.
         </p>
       </div>
     </div>
