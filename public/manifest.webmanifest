@@ -1,0 +1,17 @@
+{
+  "name": "EatAps — питание и здоровье",
+  "short_name": "EatAps",
+  "description": "Персональная система управления питанием. Больше здоровья за меньше денег.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#EBF0EE",
+  "theme_color": "#4F8375",
+  "categories": ["health", "lifestyle", "food"],
+  "lang": "ru",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
