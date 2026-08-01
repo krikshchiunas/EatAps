@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
-import AuthSheet from './AuthSheet.jsx'
+// Ленивая загрузка: AuthSheet тянет тяжёлый Web3-стек (AppKit). Грузим его
+// только когда пользователь открывает вход — ядро приложения остаётся лёгким
+// и надёжно работает офлайн.
+const AuthSheet = lazy(() => import('./AuthSheet.jsx'))
 
 const THEMES = [
   { key: 'system', label: 'Система' },
@@ -95,7 +98,11 @@ export default function ProfileScreen() {
         EatAps{supabaseEnabled && user ? ' · данные в облаке' : ' · данные на этом устройстве'}
       </p>
 
-      {authOpen && <AuthSheet onClose={() => setAuthOpen(false)} />}
+      {authOpen && (
+        <Suspense fallback={null}>
+          <AuthSheet onClose={() => setAuthOpen(false)} />
+        </Suspense>
+      )}
     </div>
   )
 }

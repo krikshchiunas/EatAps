@@ -1,5 +1,17 @@
-const CACHE = 'eataps-v1'
-const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg']
+const CACHE = 'eataps-v4'
+// Стартовые ассеты ядра (entry-скрипт + css) подставляются при сборке скриптом
+// scripts/inject-precache.mjs вместо маркера ниже.
+const BUILD_ASSETS = /* __BUILD_ASSETS__ */ []
+const ASSETS = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icon.svg',
+  '/apple-touch-icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  ...BUILD_ASSETS,
+]
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()))
@@ -11,21 +23,30 @@ self.addEventListener('activate', (e) => {
   )
 })
 
+// Cache-first: если ресурс уже в кэше — отдаём его и НЕ ходим в сеть
+// (иначе фоновый сетевой запрос офлайн падает и шумит). Промах кэша — идём
+// в сеть и кладём копию в кэш; при офлайне для навигации отдаём главную.
 self.addEventListener('fetch', (e) => {
   const { request } = e
   if (request.method !== 'GET') return
   e.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request)
-        .then((res) => {
-          if (res && res.status === 200 && request.url.startsWith(self.location.origin)) {
-            const copy = res.clone()
-            caches.open(CACHE).then((c) => c.put(request, copy))
-          }
-          return res
-        })
-        .catch(() => cached)
-      return cached || network
-    })
+    (async () => {
+      const cached = await caches.match(request)
+      if (cached) return cached
+      try {
+        const res = await fetch(request)
+        if (res && res.status === 200 && request.url.startsWith(self.location.origin)) {
+          const copy = res.clone()
+          caches.open(CACHE).then((c) => c.put(request, copy))
+        }
+        return res
+      } catch {
+        if (request.mode === 'navigate') {
+          const shell = await caches.match('/')
+          if (shell) return shell
+        }
+        return Response.error()
+      }
+    })()
   )
 })
