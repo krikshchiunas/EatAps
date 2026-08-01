@@ -27,6 +27,7 @@ const authApi = supabaseEnabled
       signInEmail: (email, password) => supabase.auth.signInWithPassword({ email, password }),
       signInMagic: (email) => supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } }),
       signInOAuth: (provider) => supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } }),
+      signInWeb3: (chain) => supabase.auth.signInWithWeb3({ chain, statement: 'EatAps: подтвердите вход в аккаунт' }),
       signUpPhone: (phone, password) => supabase.auth.signUp({ phone, password }),
       signInPhone: (phone, password) => supabase.auth.signInWithPassword({ phone, password }),
       sendPhoneOtp: (phone) => supabase.auth.signInWithOtp({ phone }),

@@ -28,6 +28,24 @@ export default function AuthSheet({ onClose }) {
 
   const emailOk = /\S+@\S+\.\S+/.test(email)
 
+  const web3 = (chain) => {
+    const hasWallet =
+      chain === 'ethereum'
+        ? typeof window !== 'undefined' && window.ethereum
+        : typeof window !== 'undefined' && (window.solana || window.phantom?.solana)
+    if (!hasWallet) {
+      setMsg({
+        type: 'err',
+        text:
+          chain === 'ethereum'
+            ? 'Не найден Ethereum-кошелёк. Установите MetaMask и попробуйте снова.'
+            : 'Не найден Solana-кошелёк. Установите Phantom и попробуйте снова.',
+      })
+      return
+    }
+    run(() => auth.signInWeb3(chain))
+  }
+
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
@@ -43,6 +61,12 @@ export default function AuthSheet({ onClose }) {
         <div className="stack">
           <button className="btn ghost" disabled={busy} onClick={() => run(() => auth.signInOAuth('google'))}>
             <span style={{ fontWeight: 700 }}>G</span> Продолжить с Google
+          </button>
+          <button className="btn ghost" disabled={busy} onClick={() => web3('ethereum')}>
+            🦊 Кошелёк Ethereum (MetaMask)
+          </button>
+          <button className="btn ghost" disabled={busy} onClick={() => web3('solana')}>
+            👻 Кошелёк Solana (Phantom)
           </button>
         </div>
 
