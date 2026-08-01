@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from '@reown/appkit/react'
 import { useStore } from '../store.jsx'
+import { web3Enabled } from '../lib/appkit.js'
 
 export default function AuthSheet({ onClose }) {
   const { auth } = useStore()
@@ -24,23 +26,36 @@ export default function AuthSheet({ onClose }) {
 
   const emailOk = /\S+@\S+\.\S+/.test(email)
 
-  const web3 = (chain) => {
-    const hasWallet =
-      chain === 'ethereum'
-        ? typeof window !== 'undefined' && window.ethereum
-        : typeof window !== 'undefined' && (window.solana || window.phantom?.solana)
-    if (!hasWallet) {
-      setMsg({
-        type: 'err',
-        text:
-          chain === 'ethereum'
-            ? 'Не найден Ethereum-кошелёк. Установите MetaMask и попробуйте снова.'
-            : 'Не найден Solana-кошелёк. Установите Phantom и попробуйте снова.',
-      })
-      return
-    }
-    run(() => auth.signInWeb3(chain))
+  // --- Web3 через Reown AppKit (список кошельков + WalletConnect) ---
+  const { open } = useAppKit()
+  const { isConnected, caipAddress } = useAppKitAccount()
+  const { walletProvider: ethProvider } = useAppKitProvider('eip155')
+  const { walletProvider: solProvider } = useAppKitProvider('solana')
+  const { disconnect } = useDisconnect()
+  const [awaitingWeb3, setAwaitingWeb3] = useState(false)
+
+  const openWeb3 = () => {
+    setMsg(null)
+    setAwaitingWeb3(true)
+    open() // модалка AppKit со списком кошельков
   }
+
+  // Кошелёк подключился → просим подпись и логинимся в Supabase.
+  useEffect(() => {
+    if (!awaitingWeb3 || !isConnected || !caipAddress) return
+    const ns = caipAddress.split(':')[0] // eip155 | solana
+    const chain = ns === 'eip155' ? 'ethereum' : ns === 'solana' ? 'solana' : null
+    const provider = ns === 'eip155' ? ethProvider : solProvider
+    if (!chain || !provider) return // провайдер ещё не готов — ждём следующий тик
+    setAwaitingWeb3(false)
+    run(async () => {
+      const res = await auth.signInWeb3(chain, provider)
+      // Кошелёк подключён к AppKit, но в Supabase логиниться не обязательно повторно —
+      // при ошибке/отмене подписи отключаем кошелёк, чтобы можно было начать заново.
+      if (res?.error) disconnect().catch(() => {})
+      return res
+    })
+  }, [awaitingWeb3, isConnected, caipAddress, ethProvider, solProvider]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
@@ -58,12 +73,11 @@ export default function AuthSheet({ onClose }) {
           <button className="btn ghost" disabled={busy} onClick={() => run(() => auth.signInOAuth('google'))}>
             <span style={{ fontWeight: 700 }}>G</span> Продолжить с Google
           </button>
-          <button className="btn ghost" disabled={busy} onClick={() => web3('ethereum')}>
-            🦊 Кошелёк Ethereum (MetaMask)
-          </button>
-          <button className="btn ghost" disabled={busy} onClick={() => web3('solana')}>
-            👻 Кошелёк Solana (Phantom)
-          </button>
+          {web3Enabled && (
+            <button className="btn ghost" disabled={busy} onClick={openWeb3}>
+              👛 Web3 кошелёк
+            </button>
+          )}
         </div>
 
         <div className="row" style={{ alignItems: 'center', gap: 12, margin: '18px 0' }}>

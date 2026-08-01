@@ -27,7 +27,9 @@ const authApi = supabaseEnabled
       signInEmail: (email, password) => supabase.auth.signInWithPassword({ email, password }),
       signInMagic: (email) => supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } }),
       signInOAuth: (provider) => supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } }),
-      signInWeb3: (chain) => supabase.auth.signInWithWeb3({ chain, statement: 'EatAps: подтвердите вход в аккаунт' }),
+      // wallet — EIP-1193 (Ethereum) или Solana-провайдер из AppKit. Текст ASCII:
+      // некоторые кошельки (Phantom) отклоняют кириллицу в сообщении подписи.
+      signInWeb3: (chain, wallet) => supabase.auth.signInWithWeb3({ chain, statement: 'Sign in to EatAps', wallet }),
       resetPassword: (email) => supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
       signOut: () => supabase.auth.signOut(),
     }
