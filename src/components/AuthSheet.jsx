@@ -44,9 +44,6 @@ export default function AuthSheet({ onClose }) {
           <button className="btn ghost" disabled={busy} onClick={() => run(() => auth.signInOAuth('google'))}>
             <span style={{ fontWeight: 700 }}>G</span> Продолжить с Google
           </button>
-          <button className="btn ghost" disabled={busy} onClick={() => run(() => auth.signInOAuth('apple'))}>
-             Продолжить с Apple
-          </button>
         </div>
 
         <div className="row" style={{ alignItems: 'center', gap: 12, margin: '18px 0' }}>
@@ -115,7 +112,7 @@ export default function AuthSheet({ onClose }) {
         )}
 
         <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 18, textAlign: 'center' }}>
-          Google, Apple и вход по телефону работают после настройки провайдеров в Supabase.
+          Google и вход по телефону работают после настройки провайдеров в Supabase.
         </p>
       </div>
     </div>
