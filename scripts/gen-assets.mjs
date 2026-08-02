@@ -1,0 +1,66 @@
+// Одноразовая генерация иконок и iOS splash-экранов из brand/logo-source.png.
+// Требует установленного sharp (ставится временно: npm i -D sharp).
+import sharp from 'sharp'
+import { mkdirSync } from 'node:fs'
+
+const SRC = 'brand/logo-source.png'
+const BG = { r: 0x1e, g: 0x24, b: 0x20, alpha: 1 } // #1e2420 — фон исходного лого
+
+mkdirSync('public/splash', { recursive: true })
+
+// Обрезанный «знак» без тёмной рамки (края сглажены на том же фоне BG).
+const markBuf = await sharp(SRC).trim({ threshold: 12 }).toBuffer()
+const mark = sharp(markBuf)
+const markMeta = await mark.metadata()
+
+// --- Иконки: знак на тёмной плитке с отступом ---
+async function icon(size, out, ratio) {
+  const inner = Math.round(size * ratio)
+  const resized = await sharp(markBuf).resize(inner, inner, { fit: 'contain', background: BG }).toBuffer()
+  const pad = Math.round((size - inner) / 2)
+  await sharp(resized)
+    .extend({ top: pad, bottom: pad, left: pad, right: pad, background: BG })
+    .resize(size, size)
+    .flatten({ background: BG })
+    .png()
+    .toFile(out)
+  console.log('icon', out, size)
+}
+
+await icon(180, 'public/apple-touch-icon.png', 0.82)
+await icon(192, 'public/icon-192.png', 0.82)
+await icon(512, 'public/icon-512.png', 0.82)
+await icon(64, 'public/favicon.png', 0.9)
+
+// --- iOS splash-экраны: знак по центру тёмного полотна под размер устройства ---
+const DEVICES = [
+  { w: 1290, h: 2796, cw: 430, ch: 932, dpr: 3 },
+  { w: 1179, h: 2556, cw: 393, ch: 852, dpr: 3 },
+  { w: 1284, h: 2778, cw: 428, ch: 926, dpr: 3 },
+  { w: 1170, h: 2532, cw: 390, ch: 844, dpr: 3 },
+  { w: 1125, h: 2436, cw: 375, ch: 812, dpr: 3 },
+  { w: 1242, h: 2688, cw: 414, ch: 896, dpr: 3 },
+  { w: 828, h: 1792, cw: 414, ch: 896, dpr: 2 },
+  { w: 750, h: 1334, cw: 375, ch: 667, dpr: 2 },
+  { w: 1242, h: 2208, cw: 414, ch: 736, dpr: 3 },
+  { w: 640, h: 1136, cw: 320, ch: 568, dpr: 2 },
+]
+
+const links = []
+for (const d of DEVICES) {
+  const markW = Math.round(Math.min(d.w, d.h) * 0.44)
+  const scaledMark = await sharp(markBuf)
+    .resize(markW, Math.round((markW * markMeta.height) / markMeta.width))
+    .toBuffer()
+  const file = `public/splash/apple-splash-${d.w}x${d.h}.png`
+  await sharp({ create: { width: d.w, height: d.h, channels: 4, background: BG } })
+    .composite([{ input: scaledMark, gravity: 'center' }])
+    .png()
+    .toFile(file)
+  links.push(
+    `<link rel="apple-touch-startup-image" media="(device-width: ${d.cw}px) and (device-height: ${d.ch}px) and (-webkit-device-pixel-ratio: ${d.dpr}) and (orientation: portrait)" href="/splash/apple-splash-${d.w}x${d.h}.png" />`
+  )
+  console.log('splash', file)
+}
+
+console.log('\n--- apple-touch-startup-image links ---\n' + links.join('\n'))
