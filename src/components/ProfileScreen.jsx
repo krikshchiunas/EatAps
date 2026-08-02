@@ -8,7 +8,6 @@ import LazyBoundary from './LazyBoundary.jsx'
 // и надёжно работает офлайн. lazyWithReload самолечит сбой загрузки чанка.
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const MyProfileSheet = lazyWithReload(() => import('./MyProfileSheet.jsx'))
-const AddFriendSheet = lazyWithReload(() => import('./AddFriendSheet.jsx'))
 
 const THEMES = [
   { key: 'system', label: 'Система' },
@@ -23,7 +22,6 @@ export default function ProfileScreen() {
   const t = profile.targets
   const [authOpen, setAuthOpen] = useState(false)
   const [myProfileOpen, setMyProfileOpen] = useState(false)
-  const [addFriendOpen, setAddFriendOpen] = useState(false)
 
   const reset = () => {
     if (confirm('Сбросить профиль и все данные? Это действие нельзя отменить.')) resetAll()
@@ -53,10 +51,7 @@ export default function ProfileScreen() {
                   </div>
                 </div>
               </div>
-              <div className="row gap8">
-                <button className="btn" style={{ flex: 1 }} onClick={() => setMyProfileOpen(true)}>Мой профиль</button>
-                <button className="btn ghost" style={{ flex: 1 }} onClick={() => setAddFriendOpen(true)}>Друзья</button>
-              </div>
+              <button className="btn" onClick={() => setMyProfileOpen(true)}>Мой профиль</button>
             </>
           ) : (
             <>
@@ -126,13 +121,6 @@ export default function ProfileScreen() {
         <LazyBoundary onClose={() => setMyProfileOpen(false)}>
           <Suspense fallback={null}>
             <MyProfileSheet onClose={() => setMyProfileOpen(false)} />
-          </Suspense>
-        </LazyBoundary>
-      )}
-      {addFriendOpen && (
-        <LazyBoundary onClose={() => setAddFriendOpen(false)}>
-          <Suspense fallback={null}>
-            <AddFriendSheet onClose={() => setAddFriendOpen(false)} />
           </Suspense>
         </LazyBoundary>
       )}
