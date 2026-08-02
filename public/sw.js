@@ -1,4 +1,4 @@
-const CACHE = 'eataps-v4'
+const CACHE = 'eataps-v5'
 // Стартовые ассеты ядра (entry-скрипт + css) подставляются при сборке скриптом
 // scripts/inject-precache.mjs вместо маркера ниже.
 const BUILD_ASSETS = /* __BUILD_ASSETS__ */ []
@@ -6,7 +6,7 @@ const ASSETS = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/icon.svg',
+  '/favicon.png',
   '/apple-touch-icon.png',
   '/icon-192.png',
   '/icon-512.png',

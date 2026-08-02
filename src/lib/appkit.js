@@ -21,7 +21,7 @@ if (web3Enabled) {
         name: 'EatAps',
         description: 'EatAps — трекер питания',
         url: 'https://eataps.vercel.app',
-        icons: ['https://eataps.vercel.app/icon.svg'],
+        icons: ['https://eataps.vercel.app/icon-512.png'],
       },
       features: { analytics: false, email: false, socials: [] },
     })

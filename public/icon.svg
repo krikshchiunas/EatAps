@@ -1,8 +1,0 @@
-<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EatAps">
-  <rect width="512" height="512" rx="112" fill="#EBF0EE"/>
-  <rect x="40" y="40" width="432" height="432" rx="92" fill="#4F8375"/>
-  <path d="M256 132c-58 0-104 44-104 104 0 70 66 116 96 138 5 4 11 4 16 0 30-22 96-68 96-138 0-60-46-104-104-104z" fill="#EBF0EE" opacity="0.16"/>
-  <path d="M256 148c-30 0-54 24-54 54 0 20 10 36 26 46v96a28 28 0 0 0 56 0v-96c16-10 26-26 26-46 0-30-24-54-54-54z" fill="#9FC4B8"/>
-  <path d="M256 148v244" stroke="#EBF0EE" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
-  <path d="M214 200c0 22 18 40 40 40" fill="none" stroke="#EBF0EE" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
-</svg>

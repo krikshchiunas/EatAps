@@ -50,7 +50,7 @@ export default function Onboarding() {
 
       {name === 'intro' && (
         <div style={{ paddingTop: 40, textAlign: 'center' }}>
-          <img src="/icon.svg" width="80" height="80" style={{ borderRadius: 25, margin: '0 auto 24px', display: 'block', boxShadow: 'var(--shadow-card)' }} alt="" />
+          <img src="/icon-192.png" width="80" height="80" style={{ borderRadius: 25, margin: '0 auto 24px', display: 'block', boxShadow: 'var(--shadow-card)' }} alt="" />
           <div className="eyebrow">EatAps</div>
           <h1 className="h1" style={{ margin: '8px 0 12px' }}>Больше здоровья<br />за меньше денег</h1>
           <p className="muted" style={{ fontSize: 16, maxWidth: 320, margin: '0 auto 40px' }}>
