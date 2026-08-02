@@ -5,6 +5,7 @@ import { ACTIVITY, GOALS } from '../lib/nutrition.js'
 // только когда пользователь открывает вход — ядро приложения остаётся лёгким
 // и надёжно работает офлайн.
 const AuthSheet = lazy(() => import('./AuthSheet.jsx'))
+const FriendsSheet = lazy(() => import('./FriendsSheet.jsx'))
 
 const THEMES = [
   { key: 'system', label: 'Система' },
@@ -18,6 +19,7 @@ export default function ProfileScreen() {
   const { profile, theme, setTheme, resetAll, supabaseEnabled, user, syncStatus, auth } = useStore()
   const t = profile.targets
   const [authOpen, setAuthOpen] = useState(false)
+  const [friendsOpen, setFriendsOpen] = useState(false)
 
   const reset = () => {
     if (confirm('Сбросить профиль и все данные? Это действие нельзя отменить.')) resetAll()
@@ -43,7 +45,10 @@ export default function ProfileScreen() {
                   </div>
                 </div>
               </div>
-              <button className="btn ghost" onClick={() => auth.signOut()}>Выйти</button>
+              <div className="row gap8">
+                <button className="btn" style={{ flex: 1 }} onClick={() => setFriendsOpen(true)}>👥 Друзья</button>
+                <button className="btn ghost" style={{ flex: 1 }} onClick={() => auth.signOut()}>Выйти</button>
+              </div>
             </>
           ) : (
             <>
@@ -101,6 +106,11 @@ export default function ProfileScreen() {
       {authOpen && (
         <Suspense fallback={null}>
           <AuthSheet onClose={() => setAuthOpen(false)} />
+        </Suspense>
+      )}
+      {friendsOpen && (
+        <Suspense fallback={null}>
+          <FriendsSheet onClose={() => setFriendsOpen(false)} />
         </Suspense>
       )}
     </div>
