@@ -5,7 +5,8 @@ import { ACTIVITY, GOALS } from '../lib/nutrition.js'
 // только когда пользователь открывает вход — ядро приложения остаётся лёгким
 // и надёжно работает офлайн.
 const AuthSheet = lazy(() => import('./AuthSheet.jsx'))
-const FriendsSheet = lazy(() => import('./FriendsSheet.jsx'))
+const MyProfileSheet = lazy(() => import('./MyProfileSheet.jsx'))
+const AddFriendSheet = lazy(() => import('./AddFriendSheet.jsx'))
 
 const THEMES = [
   { key: 'system', label: 'Система' },
@@ -19,7 +20,8 @@ export default function ProfileScreen() {
   const { profile, theme, setTheme, resetAll, supabaseEnabled, user, syncStatus, auth } = useStore()
   const t = profile.targets
   const [authOpen, setAuthOpen] = useState(false)
-  const [friendsOpen, setFriendsOpen] = useState(false)
+  const [myProfileOpen, setMyProfileOpen] = useState(false)
+  const [addFriendOpen, setAddFriendOpen] = useState(false)
 
   const reset = () => {
     if (confirm('Сбросить профиль и все данные? Это действие нельзя отменить.')) resetAll()
@@ -34,20 +36,24 @@ export default function ProfileScreen() {
         <div className="card" style={{ marginBottom: 14 }}>
           {user ? (
             <>
-              <div className="row gap12" style={{ marginBottom: 12 }}>
-                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--primary-weak)', display: 'grid', placeItems: 'center', fontSize: 18, color: 'var(--primary-strong)' }}>
-                  {(user.email || user.phone || '?').slice(0, 1).toUpperCase()}
-                </div>
+              <div className="row gap12" style={{ marginBottom: 14 }}>
+                {profile.avatar ? (
+                  <img src={profile.avatar} alt="" style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', flex: '0 0 auto' }} />
+                ) : (
+                  <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--primary-weak)', display: 'grid', placeItems: 'center', fontSize: 20, color: 'var(--primary-strong)', flex: '0 0 auto', fontWeight: 600 }}>
+                    {(profile.name || user.email || user.phone || '?').trim().slice(0, 1).toUpperCase()}
+                  </div>
+                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email || user.phone}</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.name || user.email || user.phone}</div>
                   <div style={{ fontSize: 13, color: syncStatus === 'error' ? 'var(--danger)' : 'var(--ink-3)' }}>
                     {syncStatus === 'synced' ? '☁ ' : ''}{SYNC_LABEL[syncStatus] || 'В облаке'}
                   </div>
                 </div>
               </div>
               <div className="row gap8">
-                <button className="btn" style={{ flex: 1 }} onClick={() => setFriendsOpen(true)}>👥 Друзья</button>
-                <button className="btn ghost" style={{ flex: 1 }} onClick={() => auth.signOut()}>Выйти</button>
+                <button className="btn" style={{ flex: 1 }} onClick={() => setMyProfileOpen(true)}>Мой профиль</button>
+                <button className="btn ghost" style={{ flex: 1 }} onClick={() => setAddFriendOpen(true)}>Друзья</button>
               </div>
             </>
           ) : (
@@ -96,7 +102,11 @@ export default function ProfileScreen() {
         </div>
       </div>
 
-      <button className="btn ghost" style={{ marginTop: 20, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} onClick={reset}>
+      {supabaseEnabled && user && (
+        <button className="btn ghost" style={{ marginTop: 20 }} onClick={() => auth.signOut()}>Выйти из аккаунта</button>
+      )}
+
+      <button className="btn ghost" style={{ marginTop: 12, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} onClick={reset}>
         Сбросить профиль и данные
       </button>
       <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', marginTop: 16 }}>
@@ -108,9 +118,14 @@ export default function ProfileScreen() {
           <AuthSheet onClose={() => setAuthOpen(false)} />
         </Suspense>
       )}
-      {friendsOpen && (
+      {myProfileOpen && (
         <Suspense fallback={null}>
-          <FriendsSheet onClose={() => setFriendsOpen(false)} />
+          <MyProfileSheet onClose={() => setMyProfileOpen(false)} />
+        </Suspense>
+      )}
+      {addFriendOpen && (
+        <Suspense fallback={null}>
+          <AddFriendSheet onClose={() => setAddFriendOpen(false)} />
         </Suspense>
       )}
     </div>

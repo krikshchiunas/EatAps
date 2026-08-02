@@ -5,6 +5,7 @@ import Onboarding from './components/Onboarding.jsx'
 import DayScreen from './components/DayScreen.jsx'
 import HistoryScreen from './components/HistoryScreen.jsx'
 import ProfileScreen from './components/ProfileScreen.jsx'
+import FriendsScreen from './components/FriendsScreen.jsx'
 import BottomNav from './components/BottomNav.jsx'
 import AddMealSheet from './components/AddMealSheet.jsx'
 
@@ -31,6 +32,7 @@ export default function App() {
     <div className="app">
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} />}
       {tab === 'history' && <HistoryScreen onPickDay={pickDay} />}
+      {tab === 'friends' && <FriendsScreen />}
       {tab === 'profile' && <ProfileScreen />}
 
       <BottomNav tab={tab} setTab={setTab} onAdd={() => { setTab('day'); setSheet(true) }} />

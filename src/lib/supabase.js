@@ -103,15 +103,18 @@ export async function listFriendships(myId) {
     else outgoing.push({ rowId: r.id, id: other })
   }
 
-  // Имена принятых друзей — одним запросом, только имя из JSON (не весь блоб).
+  // Имя и фото принятых друзей — одним запросом (только нужные поля из JSON).
   if (friends.length) {
     const { data: rows } = await supabase
       .from('app_state')
-      .select('user_id, fname:state->profile->>name')
+      .select('user_id, fname:state->profile->>name, favatar:state->profile->>avatar')
       .in('user_id', friends.map((f) => f.id))
-    const nameById = {}
-    for (const r of rows || []) nameById[r.user_id] = r.fname
-    for (const f of friends) f.name = nameById[f.id]
+    const byId = {}
+    for (const r of rows || []) byId[r.user_id] = r
+    for (const f of friends) {
+      f.name = byId[f.id]?.fname
+      f.avatar = byId[f.id]?.favatar
+    }
   }
   return { friends, incoming, outgoing }
 }

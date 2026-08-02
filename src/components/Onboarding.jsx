@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS, computeTargets } from '../lib/nutrition.js'
 import Ring from './Ring.jsx'
+import AvatarPicker from './AvatarPicker.jsx'
 
-const STEPS = ['intro', 'sex', 'body', 'activity', 'goal', 'result']
+const STEPS = ['intro', 'name', 'sex', 'body', 'activity', 'goal', 'result']
 
 export default function Onboarding() {
   const { setProfile } = useStore()
   const [step, setStep] = useState(0)
-  const [data, setData] = useState({ sex: 'male', age: '', height: '', weight: '', activity: 'moderate', goal: 'maintain' })
+  const [data, setData] = useState({ name: '', avatar: null, sex: 'male', age: '', height: '', weight: '', activity: 'moderate', goal: 'maintain' })
 
   const set = (patch) => setData((d) => ({ ...d, ...patch }))
   const name = STEPS[step]
@@ -23,6 +24,8 @@ export default function Onboarding() {
 
   const finish = () => {
     setProfile({
+      name: data.name.trim() || undefined,
+      avatar: data.avatar || undefined,
       sex: data.sex,
       age: +data.age,
       height: +data.height,
@@ -59,6 +62,19 @@ export default function Onboarding() {
           <button className="btn" onClick={next}>Начать</button>
           <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 16 }}>Займёт меньше минуты</p>
         </div>
+      )}
+
+      {name === 'name' && (
+        <StepShell title="Как вас зовут?" hint="Имя увидят друзья. Фото — по желанию.">
+          <div style={{ marginBottom: 8 }}>
+            <AvatarPicker value={data.avatar} onChange={(a) => set({ avatar: a })} />
+          </div>
+          <div className="field" style={{ marginTop: 18 }}>
+            <label>Имя или никнейм</label>
+            <input className="input" placeholder="Напр. Денис" value={data.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
+          </div>
+          <Continue onClick={next} />
+        </StepShell>
       )}
 
       {name === 'sex' && (
