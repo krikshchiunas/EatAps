@@ -11,6 +11,10 @@ export const web3Enabled = Boolean(projectId)
 // Инициализируем один раз при импорте модуля. Модалка со списком кошельков
 // (MetaMask, Phantom, Coinbase, Rabby… + WalletConnect QR) и подключение
 // Ethereum/Solana берёт на себя AppKit.
+// Домен берём из текущего адреса — так метаданные всегда совпадают с сайтом
+// и ничего не надо править при смене домена.
+const origin = typeof window !== 'undefined' ? window.location.origin : 'https://eataps.vercel.app'
+
 if (web3Enabled) {
   try {
     createAppKit({
@@ -20,8 +24,8 @@ if (web3Enabled) {
       metadata: {
         name: 'EatAps',
         description: 'EatAps — трекер питания',
-        url: 'https://eataps.vercel.app',
-        icons: ['https://eataps.vercel.app/icon-512.png'],
+        url: origin,
+        icons: [`${origin}/icon-512.png`],
       },
       features: { analytics: false, email: false, socials: [] },
     })
