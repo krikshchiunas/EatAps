@@ -7,29 +7,19 @@ import HistoryScreen from './components/HistoryScreen.jsx'
 import ProfileScreen from './components/ProfileScreen.jsx'
 import BottomNav from './components/BottomNav.jsx'
 import AddMealSheet from './components/AddMealSheet.jsx'
-import IntroSplash from './components/IntroSplash.jsx'
-
-const INTRO_KEY = 'eataps:introSeen'
 
 export default function App() {
   const { profile, addMeal } = useStore()
   const [tab, setTab] = useState('day')
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(false)
-  // Заставка только при первом запуске.
-  const [intro, setIntro] = useState(() => {
-    try {
-      return !localStorage.getItem(INTRO_KEY)
-    } catch {
-      return false
-    }
-  })
 
-  const finishIntro = () => {
-    try {
-      localStorage.setItem(INTRO_KEY, '1')
-    } catch {}
-    setIntro(false)
+  if (!profile) {
+    return (
+      <div className="app">
+        <Onboarding />
+      </div>
+    )
   }
 
   const pickDay = (k) => {
@@ -37,11 +27,7 @@ export default function App() {
     setTab('day')
   }
 
-  const screen = !profile ? (
-    <div className="app">
-      <Onboarding />
-    </div>
-  ) : (
+  return (
     <div className="app">
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} />}
       {tab === 'history' && <HistoryScreen onPickDay={pickDay} />}
@@ -56,12 +42,5 @@ export default function App() {
         />
       )}
     </div>
-  )
-
-  return (
-    <>
-      {screen}
-      {intro && <IntroSplash onDone={finishIntro} />}
-    </>
   )
 }
