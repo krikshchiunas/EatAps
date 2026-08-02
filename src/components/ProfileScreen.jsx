@@ -1,12 +1,14 @@
-import { useState, lazy, Suspense } from 'react'
+import { useState, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
+import { lazyWithReload } from '../lib/lazyWithReload.js'
+import LazyBoundary from './LazyBoundary.jsx'
 // Ленивая загрузка: AuthSheet тянет тяжёлый Web3-стек (AppKit). Грузим его
 // только когда пользователь открывает вход — ядро приложения остаётся лёгким
-// и надёжно работает офлайн.
-const AuthSheet = lazy(() => import('./AuthSheet.jsx'))
-const MyProfileSheet = lazy(() => import('./MyProfileSheet.jsx'))
-const AddFriendSheet = lazy(() => import('./AddFriendSheet.jsx'))
+// и надёжно работает офлайн. lazyWithReload самолечит сбой загрузки чанка.
+const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
+const MyProfileSheet = lazyWithReload(() => import('./MyProfileSheet.jsx'))
+const AddFriendSheet = lazyWithReload(() => import('./AddFriendSheet.jsx'))
 
 const THEMES = [
   { key: 'system', label: 'Система' },
@@ -114,19 +116,25 @@ export default function ProfileScreen() {
       </p>
 
       {authOpen && (
-        <Suspense fallback={null}>
-          <AuthSheet onClose={() => setAuthOpen(false)} />
-        </Suspense>
+        <LazyBoundary onClose={() => setAuthOpen(false)}>
+          <Suspense fallback={null}>
+            <AuthSheet onClose={() => setAuthOpen(false)} />
+          </Suspense>
+        </LazyBoundary>
       )}
       {myProfileOpen && (
-        <Suspense fallback={null}>
-          <MyProfileSheet onClose={() => setMyProfileOpen(false)} />
-        </Suspense>
+        <LazyBoundary onClose={() => setMyProfileOpen(false)}>
+          <Suspense fallback={null}>
+            <MyProfileSheet onClose={() => setMyProfileOpen(false)} />
+          </Suspense>
+        </LazyBoundary>
       )}
       {addFriendOpen && (
-        <Suspense fallback={null}>
-          <AddFriendSheet onClose={() => setAddFriendOpen(false)} />
-        </Suspense>
+        <LazyBoundary onClose={() => setAddFriendOpen(false)}>
+          <Suspense fallback={null}>
+            <AddFriendSheet onClose={() => setAddFriendOpen(false)} />
+          </Suspense>
+        </LazyBoundary>
       )}
     </div>
   )

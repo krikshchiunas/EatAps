@@ -1,4 +1,4 @@
-const CACHE = 'eataps-v6'
+const CACHE = 'eataps-v7'
 // Стартовые ассеты ядра (entry-скрипт + css) подставляются при сборке скриптом
 // scripts/inject-precache.mjs вместо маркера ниже.
 const BUILD_ASSETS = /* __BUILD_ASSETS__ */ []
@@ -23,12 +23,32 @@ self.addEventListener('activate', (e) => {
   )
 })
 
-// Cache-first: если ресурс уже в кэше — отдаём его и НЕ ходим в сеть
-// (иначе фоновый сетевой запрос офлайн падает и шумит). Промах кэша — идём
-// в сеть и кладём копию в кэш; при офлайне для навигации отдаём главную.
 self.addEventListener('fetch', (e) => {
   const { request } = e
   if (request.method !== 'GET') return
+
+  // Навигация (HTML) — network-first: всегда берём свежий index из сети, чтобы
+  // хэши ленивых чанков совпадали с задеплоенными (иначе после деплоя старый
+  // кэш ссылается на исчезнувший чанк → «зелёный экран»). Офлайн — из кэша.
+  if (request.mode === 'navigate') {
+    e.respondWith(
+      (async () => {
+        try {
+          const res = await fetch(request)
+          if (res && res.status === 200) {
+            const copy = res.clone()
+            caches.open(CACHE).then((c) => c.put('/', copy))
+          }
+          return res
+        } catch {
+          return (await caches.match('/')) || (await caches.match('/index.html')) || Response.error()
+        }
+      })()
+    )
+    return
+  }
+
+  // Остальное (хэшированные ассеты, иконки) — cache-first: они неизменяемы.
   e.respondWith(
     (async () => {
       const cached = await caches.match(request)
@@ -41,10 +61,6 @@ self.addEventListener('fetch', (e) => {
         }
         return res
       } catch {
-        if (request.mode === 'navigate') {
-          const shell = await caches.match('/')
-          if (shell) return shell
-        }
         return Response.error()
       }
     })()
