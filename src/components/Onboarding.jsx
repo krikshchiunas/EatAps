@@ -71,7 +71,7 @@ export default function Onboarding() {
           </div>
           <div className="field" style={{ marginTop: 18 }}>
             <label>Имя или никнейм</label>
-            <input className="input" placeholder="Напр. Денис" value={data.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
+            <input className="input" value={data.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
           </div>
           <Continue onClick={next} />
         </StepShell>
