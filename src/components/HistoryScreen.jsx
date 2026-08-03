@@ -5,7 +5,7 @@ import { keyOf, MONTH_NAMES } from '../lib/date.js'
 
 const DOW = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
-export default function HistoryScreen({ onPickDay }) {
+export default function HistoryScreen({ onPickDay, onClose }) {
   const { days, profile } = useStore()
   const now = new Date()
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() })
@@ -49,8 +49,13 @@ export default function HistoryScreen({ onPickDay }) {
 
   return (
     <div className="screen">
-      <div className="eyebrow">История</div>
-      <h1 className="h1" style={{ margin: '4px 0 20px' }}>Календарь</h1>
+      <div className="row between" style={{ alignItems: 'flex-start', margin: '0 0 20px' }}>
+        <div>
+          <div className="eyebrow">История</div>
+          <h1 className="h1" style={{ margin: '4px 0 0' }}>Календарь</h1>
+        </div>
+        {onClose && <button className="iconbtn" onClick={onClose} aria-label="Закрыть" style={{ flex: '0 0 auto' }}>✕</button>}
+      </div>
 
       <div className="card">
         <div className="row between" style={{ marginBottom: 16 }}>

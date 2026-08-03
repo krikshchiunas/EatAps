@@ -31,9 +31,6 @@ export default function BottomNav({ tab, setTab, onAdd }) {
       <button className={tab === 'day' ? 'on' : ''} onClick={() => setTab('day')}>
         {ICONS.day}<span>День</span>
       </button>
-      <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>
-        {ICONS.history}<span>История</span>
-      </button>
       <div className="fab-slot">
         <button className="fab" onClick={onAdd} aria-label="Добавить приём пищи">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" width="26" height="26">

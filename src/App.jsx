@@ -15,6 +15,7 @@ export default function App() {
   const [tab, setTab] = useState('day')
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(false)
+  const [calendarOpen, setCalendarOpen] = useState(false)
 
   // Ссылка «сброс пароля» из письма — форма нового пароля поверх всего.
   const recoverySheet = recovery ? <ResetPasswordSheet onClose={clearRecovery} /> : null
@@ -31,16 +32,22 @@ export default function App() {
   const pickDay = (k) => {
     setDate(k)
     setTab('day')
+    setCalendarOpen(false)
   }
 
   return (
     <div className="app">
-      {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} />}
-      {tab === 'history' && <HistoryScreen onPickDay={pickDay} />}
+      {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} onOpenCalendar={() => setCalendarOpen(true)} />}
       {tab === 'friends' && <FriendsScreen />}
       {tab === 'profile' && <ProfileScreen />}
 
       <BottomNav tab={tab} setTab={setTab} onAdd={() => { setTab('day'); setSheet(true) }} />
+
+      {calendarOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 200, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <HistoryScreen onPickDay={pickDay} onClose={() => setCalendarOpen(false)} />
+        </div>
+      )}
 
       {sheet && (
         <AddMealSheet
