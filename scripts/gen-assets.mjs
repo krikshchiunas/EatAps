@@ -30,10 +30,10 @@ async function icon(size, out, ratio) {
   console.log('icon', out, size)
 }
 
-await icon(180, 'public/apple-touch-icon.png', 0.82)
-await icon(192, 'public/icon-192.png', 0.82)
-await icon(512, 'public/icon-512.png', 0.82)
-await icon(64, 'public/favicon.png', 0.9)
+await icon(180, 'public/apple-touch-icon.png', 1.0)
+await icon(192, 'public/icon-192.png', 1.0)
+await icon(512, 'public/icon-512.png', 1.0)
+await icon(64, 'public/favicon.png', 1.0)
 
 // --- iOS splash-экраны: знак по центру тёмного полотна под размер устройства ---
 const DEVICES = [
