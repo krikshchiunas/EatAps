@@ -13,8 +13,6 @@ mkdirSync('public/splash', { recursive: true })
 
 // Обрезанный «знак» без тёмной рамки (края сглажены на том же фоне BG).
 const markBuf = await sharp(SRC).trim({ threshold: 12 }).toBuffer()
-const mark = sharp(markBuf)
-const markMeta = await mark.metadata()
 
 // --- Иконки: знак на тёмной плитке с отступом ---
 async function icon(size, out, ratio) {
@@ -35,7 +33,7 @@ await icon(192, 'public/icon-192.png', 1.0)
 await icon(512, 'public/icon-512.png', 1.0)
 await icon(64, 'public/favicon.png', 1.0)
 
-// --- iOS splash-экраны: знак по центру тёмного полотна под размер устройства ---
+// --- iOS splash-экраны: сплошной фон цвета логотипа (без логотипа по центру) ---
 const DEVICES = [
   { w: 1290, h: 2796, cw: 430, ch: 932, dpr: 3 },
   { w: 1179, h: 2556, cw: 393, ch: 852, dpr: 3 },
@@ -51,13 +49,8 @@ const DEVICES = [
 
 const links = []
 for (const d of DEVICES) {
-  const markW = Math.round(Math.min(d.w, d.h) * 0.44)
-  const scaledMark = await sharp(markBuf)
-    .resize(markW, Math.round((markW * markMeta.height) / markMeta.width))
-    .toBuffer()
   const file = `public/splash/apple-splash-${d.w}x${d.h}.png`
   await sharp({ create: { width: d.w, height: d.h, channels: 4, background: BG } })
-    .composite([{ input: scaledMark, gravity: 'center' }])
     .png()
     .toFile(file)
   links.push(

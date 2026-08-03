@@ -6,7 +6,7 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#FFFFFF",
+  "background_color": "#fcffff",
   "theme_color": "#2554B0",
   "categories": ["health", "lifestyle", "food"],
   "lang": "ru",
