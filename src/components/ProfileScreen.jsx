@@ -12,7 +12,6 @@ const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const MyProfileSheet = lazyWithReload(() => import('./MyProfileSheet.jsx'))
 
 const THEMES = [
-  { key: 'system', label: 'Система' },
   { key: 'light', label: 'Светлая' },
   { key: 'dark', label: 'Тёмная' },
 ]

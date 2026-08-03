@@ -140,6 +140,7 @@ function FriendView({ friend, onClose }) {
   const [state, setState] = useState(null)
   const [err, setErr] = useState(null)
   const [date, setDate] = useState(keyOf())
+  const [tab, setTab] = useState('diary') // diary | profile
   const today = keyOf()
 
   useEffect(() => {
@@ -160,28 +161,36 @@ function FriendView({ friend, onClose }) {
   const day = state?.days?.[date] || { meals: [] }
   const totals = sumDay(day.meals || [])
   const target = state?.profile?.targets?.calories
-  const name = state?.profile?.name || friend.name || 'Друг'
-  const avatar = state?.profile?.avatar || friend.avatar
+  const p = state?.profile || {}
+  const name = p.name || friend.name || 'Друг'
+  const avatar = p.avatar || friend.avatar
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 16 }}>
-          <div className="row gap12" style={{ alignItems: 'center', minWidth: 0 }}>
+          <div className="row gap12" style={{ alignItems: 'center', minWidth: 0, flex: 1 }}>
             <Avatar src={avatar} name={name} size={40} />
             <div style={{ minWidth: 0 }}>
-              <div className="h2" style={{ fontSize: 18 }}>{name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>Что ест друг</div>
+              <div className="h2" style={{ fontSize: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+              <button
+                onClick={() => setTab(tab === 'diary' ? 'profile' : 'diary')}
+                style={{ fontSize: 13, color: 'var(--primary)', fontWeight: 550 }}
+              >
+                {tab === 'diary' ? 'Посмотреть профиль →' : '← Что ест друг'}
+              </button>
             </div>
           </div>
-          <button className="iconbtn" onClick={onClose} aria-label="Закрыть">✕</button>
+          <button className="iconbtn" onClick={onClose} aria-label="Закрыть" style={{ flex: '0 0 auto' }}>✕</button>
         </div>
 
         {err ? (
           <p style={{ color: 'var(--danger)', fontSize: 14 }}>{err}</p>
         ) : !state ? (
           <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
+        ) : tab === 'profile' ? (
+          <FriendProfile p={p} />
         ) : (
           <>
             <div className="row between" style={{ alignItems: 'center', marginBottom: 14 }}>
@@ -223,6 +232,38 @@ function FriendView({ friend, onClose }) {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+// Профиль друга: «о себе», любимый ресторан и блюдо (только чтение).
+function FriendProfile({ p }) {
+  const rows = [
+    { label: 'Любимый ресторан', value: p.favRestaurant, emoji: '🍴' },
+    { label: 'Любимое блюдо', value: p.favDish, emoji: '🍲' },
+  ].filter((r) => r.value)
+
+  if (!p.bio && rows.length === 0) {
+    return <p className="muted" style={{ fontSize: 14, padding: '8px 0 4px' }}>Друг пока не заполнил профиль.</p>
+  }
+
+  return (
+    <div style={{ paddingBottom: 4 }}>
+      {p.bio && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>О себе</div>
+          <div style={{ fontSize: 15, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{p.bio}</div>
+        </div>
+      )}
+      {rows.map((r) => (
+        <div key={r.label} className="card" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 22 }}>{r.emoji}</span>
+          <div style={{ minWidth: 0 }}>
+            <div className="muted" style={{ fontSize: 12 }}>{r.label}</div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{r.value}</div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

@@ -8,6 +8,17 @@ const StoreCtx = createContext(null)
 
 const empty = { profile: null, theme: 'system', days: {}, customFoods: [], customIngredients: [], recents: [], prefs: {} }
 
+// Тема: «система» больше не хранится как режим — при первом запуске берём
+// текущую настройку телефона и фиксируем как 'light'/'dark'. Дальше пользователь
+// меняет вручную в профиле. 'system' и мусор нормализуются в конкретный режим.
+function systemTheme() {
+  return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function normalizeTheme(t) {
+  return t === 'light' || t === 'dark' ? t : systemTheme()
+}
+
 // Слияние при входе в СУЩЕСТВУЮЩИЙ аккаунт, когда локальные данные — не его
 // (гость, другой аккаунт, свежий опросник). Облако — источник истины для
 // профиля (ник, фото, цели); локальные дни/еда/недавние ДОЛИВАЮТСЯ, но никогда
@@ -21,7 +32,7 @@ export function mergeCloudOverLocal(cloud, local) {
     ...local,
     ...cloud,
     profile: cloud.profile || local.profile,
-    theme: cloud.theme || local.theme,
+    theme: normalizeTheme(cloud.theme || local.theme),
     days: { ...local.days, ...cloud.days },
     customFoods: uniqByName(cloud.customFoods, local.customFoods),
     customIngredients: uniqByName(cloud.customIngredients, local.customIngredients),
@@ -33,10 +44,10 @@ export function mergeCloudOverLocal(cloud, local) {
 function load() {
   try {
     const raw = localStorage.getItem(KEY)
-    if (!raw) return empty
-    return { ...empty, ...JSON.parse(raw) }
+    const base = raw ? { ...empty, ...JSON.parse(raw) } : empty
+    return { ...base, theme: normalizeTheme(base.theme) } // мигрируем legacy 'system' → конкретный режим
   } catch {
-    return empty
+    return { ...empty, theme: systemTheme() }
   }
 }
 
@@ -83,19 +94,9 @@ export function StoreProvider({ children }) {
     } catch {}
   }, [state])
 
-  // theme
+  // theme — тема всегда конкретная ('light'/'dark'); систему больше не «следим»
   useEffect(() => {
-    const root = document.documentElement
-    const apply = () => {
-      const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      root.setAttribute('data-theme', state.theme === 'system' ? sys : state.theme)
-    }
-    apply()
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    if (state.theme === 'system') {
-      mq.addEventListener('change', apply)
-      return () => mq.removeEventListener('change', apply)
-    }
+    document.documentElement.setAttribute('data-theme', normalizeTheme(state.theme))
   }, [state.theme])
 
   // auth boot + subscription
@@ -252,7 +253,7 @@ export function StoreProvider({ children }) {
     // должно считаться «новее облака» при следующем входе.
     localStorage.removeItem(LASTUID)
     localStorage.removeItem(META)
-    setState(empty)
+    setState({ ...empty, theme: systemTheme() })
   }, [])
 
   const value = {
