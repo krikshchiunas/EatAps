@@ -91,7 +91,45 @@ function Datenschutz() {
         werden <b>keine Tracking-Cookies</b> und keine Werbe-Analyse eingesetzt.
       </p>
 
+      <h3 style={H}>8. Minderjährige</h3>
+      <p style={P}>
+        Ein Konto mit Cloud-Speicherung ist erst ab <b>16 Jahren</b> zulässig. Nutzer unter 16
+        Jahren dürfen die Cloud-Funktionen nur mit Einwilligung der Sorgeberechtigten nutzen
+        (Art. 8 DSGVO). Der lokale Gast-Modus bleibt hiervon unberührt.
+      </p>
+
+      <h3 style={H}>9. Kontakt für Datenschutzanfragen</h3>
+      <p style={P}>
+        Anfragen zu Ihren Rechten richten Sie bitte an [datenschutz@ihre-domain.de]. Wir antworten
+        innerhalb eines Monats (Art. 12 Abs. 3 DSGVO).
+      </p>
+
       <p style={{ ...P, color: 'var(--ink-3)', fontSize: 13, marginTop: 16 }}>Stand: [Datum]. Version v1.</p>
+    </div>
+  )
+}
+
+function AGB() {
+  return (
+    <div>
+      <p style={{ ...P, color: 'var(--danger)' }}>
+        ⚠️ Шаблон условий использования. Проверьте у юриста и дополните.
+      </p>
+      <h3 style={H}>1. Geltungsbereich</h3>
+      <p style={P}>Diese Nutzungsbedingungen gelten für die Nutzung der App/Website EatAps, bereitgestellt von [Name] (siehe Impressum).</p>
+      <h3 style={H}>2. Leistung</h3>
+      <p style={P}>EatAps ist ein digitales Ernährungstagebuch (Kalorien-/Nährstoff-Tracking, Verlauf, Freundesfunktion). Es ist <b>kein Medizinprodukt</b> und ersetzt keine ärztliche oder ernährungsmedizinische Beratung.</p>
+      <h3 style={H}>3. Konto & Registrierung</h3>
+      <p style={P}>Für Cloud-Funktionen ist ein Konto nötig. Sie sind für die Geheimhaltung Ihrer Zugangsdaten verantwortlich. Nutzung ab 16 Jahren (siehe Datenschutz).</p>
+      <h3 style={H}>4. Pflichten der Nutzer</h3>
+      <p style={P}>Keine rechtswidrigen Inhalte, kein Missbrauch der Freundesfunktion, keine Beeinträchtigung des Dienstes. Über Freunde geteilte Daten sind nur für bestätigte Freunde sichtbar.</p>
+      <h3 style={H}>5. Haftung</h3>
+      <p style={P}>Die Nutzung erfolgt auf eigenes Risiko. Haftung nur für Vorsatz und grobe Fahrlässigkeit sowie nach zwingenden gesetzlichen Vorschriften. Keine Gewähr für die Richtigkeit der Nährwertdaten.</p>
+      <h3 style={H}>6. Kündigung</h3>
+      <p style={P}>Sie können Ihr Konto jederzeit in der App löschen (Profil → Приватность и данные).</p>
+      <h3 style={H}>7. Änderungen & Recht</h3>
+      <p style={P}>Wir können diese Bedingungen mit Vorankündigung ändern. Es gilt deutsches Recht. Gerichtsstand [Ort], soweit zulässig.</p>
+      <p style={{ ...P, color: 'var(--ink-3)', fontSize: 13, marginTop: 16 }}>Stand: [Datum].</p>
     </div>
   )
 }
@@ -109,8 +147,9 @@ export default function LegalSheet({ onClose, initial = 'impressum' }) {
         <div className="seg" style={{ marginBottom: 16 }}>
           <button className={tab === 'impressum' ? 'on' : ''} onClick={() => setTab('impressum')}>Impressum</button>
           <button className={tab === 'privacy' ? 'on' : ''} onClick={() => setTab('privacy')}>Datenschutz</button>
+          <button className={tab === 'agb' ? 'on' : ''} onClick={() => setTab('agb')}>AGB</button>
         </div>
-        {tab === 'impressum' ? <Impressum /> : <Datenschutz />}
+        {tab === 'impressum' ? <Impressum /> : tab === 'agb' ? <AGB /> : <Datenschutz />}
       </div>
     </div>
   )
