@@ -6,20 +6,10 @@ import { mealMeta } from '../lib/foods.js'
 import Ring from './Ring.jsx'
 import MacroBar from './MacroBar.jsx'
 
-// Настроение теперь без эмодзи — просто текстовые «чипы» (по просьбе: убрать
-// эмодзи из блока самочувствия).
-const MOODS = [
-  { v: 1, label: 'Плохо' },
-  { v: 2, label: 'Так себе' },
-  { v: 3, label: 'Норм' },
-  { v: 4, label: 'Хорошо' },
-  { v: 5, label: 'Отлично' },
-]
-
 const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
 
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar }) {
-  const { profile, dayOf, removeMeal, setMood, toggleWellbeing, addMeal } = useStore()
+  const { profile, dayOf, removeMeal, toggleWellbeing, addMeal } = useStore()
   const today = keyOf()
   const day = dayOf(date)
   const totals = sumDay(day.meals)
@@ -140,21 +130,6 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar }) 
 
       <div className="card" style={{ marginTop: 14 }}>
         <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Самочувствие</div>
-        <div style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 8 }}>Настроение</div>
-        <div className="row wrap gap8" style={{ marginBottom: 16 }}>
-          {MOODS.map((m) => (
-            <button
-              key={m.v}
-              className={`chip ${day.mood === m.v ? 'on' : ''}`}
-              onClick={() => setMood(date, day.mood === m.v ? null : m.v)}
-              style={day.mood === m.v ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-        <div className="divider" />
-        <div style={{ fontSize: 13, color: 'var(--ink-3)', margin: '2px 0 8px' }}>Ощущения</div>
         <div className="row wrap gap8">
           {WELLBEING.map((w) => (
             <button key={w} className={`chip ${day.wellbeing.includes(w) ? 'on' : ''}`} onClick={() => toggleWellbeing(date, w)} style={day.wellbeing.includes(w) ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}>

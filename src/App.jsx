@@ -51,6 +51,7 @@ export default function App() {
 
       {sheet && (
         <AddMealSheet
+          date={date}
           onClose={() => setSheet(false)}
           onAdd={(meal) => addMeal(date, meal)}
         />
