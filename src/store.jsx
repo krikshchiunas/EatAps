@@ -60,17 +60,24 @@ const authApi = supabaseEnabled
       signUpEmail: (email, password) => supabase.auth.signUp({ email, password }),
       signInEmail: (email, password) => supabase.auth.signInWithPassword({ email, password }),
       signInMagic: (email) => supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } }),
-      signInOAuth: (provider) => supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } }),
+      // prompt=select_account: Google всегда показывает выбор аккаунта, а не
+      // молча входит в прошлый — иначе «выйти и войти в другой» невозможно.
+      signInOAuth: (provider) =>
+        supabase.auth.signInWithOAuth({
+          provider,
+          options: { redirectTo: window.location.origin, queryParams: { prompt: 'select_account' } },
+        }),
       // wallet — EIP-1193 (Ethereum) или Solana-провайдер из AppKit. Текст ASCII:
       // некоторые кошельки (Phantom) отклоняют кириллицу в сообщении подписи.
       signInWeb3: (chain, wallet) => supabase.auth.signInWithWeb3({ chain, statement: 'Sign in to EatAps', wallet }),
       resetPassword: (email) => supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
-      // После выхода локальные данные считаются «ничейными»: следующий вход
-      // в любой аккаунт возьмёт профиль из облака, а не затрёт его локальным.
-      signOut: () => {
-        localStorage.removeItem(LASTUID)
-        return supabase.auth.signOut()
-      },
+      updatePassword: (password) => supabase.auth.updateUser({ password }),
+      // LASTUID при выходе НЕ трогаем: это метка «чьи данные лежат локально».
+      // Она нужна, чтобы при входе другого человека на этом устройстве его
+      // облако не смешалось с чужими локальными днями (см. reconcile ниже).
+      // scope 'local' — выход только с ЭТОГО устройства; по умолчанию Supabase
+      // разлогинивает все устройства сразу.
+      signOut: () => supabase.auth.signOut({ scope: 'local' }),
     }
   : null
 
@@ -78,12 +85,17 @@ export function StoreProvider({ children }) {
   const [state, setState] = useState(load)
   const [session, setSession] = useState(null)
   const [syncStatus, setSyncStatus] = useState('idle') // idle | syncing | synced | error
+  const [recovery, setRecovery] = useState(false) // пришли по ссылке сброса пароля
 
   const stateRef = useRef(state)
   stateRef.current = state
   const bootRef = useRef(false)
   const suppressPush = useRef(false)
   const pushTimer = useRef(null)
+  // Пока reconcile при входе не завершился успешно, авто-push запрещён:
+  // иначе при сбое сверки можно затереть облако локальными данными.
+  const reconciledRef = useRef(false)
+  const [syncTick, setSyncTick] = useState(0) // ручной перезапуск reconcile
 
   // persist locally + track local change time
   useEffect(() => {
@@ -99,48 +111,73 @@ export function StoreProvider({ children }) {
     document.documentElement.setAttribute('data-theme', normalizeTheme(state.theme))
   }, [state.theme])
 
-  // auth boot + subscription
+  // auth boot + subscription. PASSWORD_RECOVERY = пользователь пришёл по
+  // ссылке «сброс пароля» — App покажет форму нового пароля.
   useEffect(() => {
     if (!supabaseEnabled) return
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    const { data } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s)
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true)
+    })
     return () => data.subscription.unsubscribe()
   }, [])
 
   // on login → reconcile cloud vs local.
-  // Три случая:
-  // 1. Локальные данные — от ЭТОГО же аккаунта (lastUid совпал) → честный
-  //    last-write-wins по метке времени, как раньше.
-  // 2. Локальные данные — чужие/гостевые, а в облаке есть профиль → облако
-  //    главнее (ник, фото, цели восстанавливаются), локальные дни доливаются.
-  // 3. Облако пустое (новый аккаунт) → заливаем локальное состояние.
+  // Четыре случая по владельцу локальных данных (LASTUID):
+  // 1. Локальные данные — ЭТОГО аккаунта → честный last-write-wins по времени.
+  // 2. Локальные данные — ДРУГОГО аккаунта → не смешиваем: облако полностью
+  //    заменяет локальное (чужие дни не должны утечь в этот аккаунт).
+  //    Если облако пустое — начинаем с чистого листа (онбординг).
+  // 3. Локальные данные гостевые (LASTUID пуст), в облаке есть профиль →
+  //    облако главнее, гостевые дни/еда ДОЛИВАЮТСЯ и уходят в облако.
+  // 4. Гостевые данные, облако пустое (новый аккаунт) → заливаем локальное.
   const uid = session?.user?.id
   useEffect(() => {
     if (!supabaseEnabled || !uid) return
     let cancelled = false
+    reconciledRef.current = false
     ;(async () => {
       setSyncStatus('syncing')
       try {
         const cloud = await pullState(uid)
         const localTs = Number(localStorage.getItem(META) || 0)
-        const sameUser = localStorage.getItem(LASTUID) === uid
+        const lastUid = localStorage.getItem(LASTUID)
+        const sameUser = lastUid === uid
+        const foreignLocal = Boolean(lastUid) && !sameUser
 
-        if (cloud && cloud.state?.profile && !sameUser) {
-          // Вход в существующий аккаунт с «не его» локальными данными.
+        if (sameUser) {
+          if (cloud && Date.parse(cloud.updatedAt) > localTs) {
+            suppressPush.current = true
+            setState({ ...empty, ...cloud.state })
+            localStorage.setItem(META, String(Date.parse(cloud.updatedAt)))
+          } else {
+            const ts = await pushState(uid, stateRef.current)
+            localStorage.setItem(META, String(Date.parse(ts)))
+          }
+        } else if (foreignLocal) {
+          // Устройство с данными другого аккаунта: берём только облако.
+          suppressPush.current = true
+          if (cloud) {
+            setState({ ...empty, ...cloud.state, theme: normalizeTheme(cloud.state?.theme) })
+            localStorage.setItem(META, String(Date.parse(cloud.updatedAt)))
+          } else {
+            setState({ ...empty, theme: normalizeTheme(stateRef.current.theme) })
+            localStorage.setItem(META, '0')
+          }
+        } else if (cloud && cloud.state?.profile) {
+          // Гостевые данные + существующий аккаунт: доливаем гостевое в облако.
           const merged = mergeCloudOverLocal({ ...empty, ...cloud.state }, stateRef.current)
           suppressPush.current = true
           setState(merged)
-          const ts = await pushState(uid, merged) // долитые локальные дни — в облако
+          const ts = await pushState(uid, merged)
           localStorage.setItem(META, String(Date.parse(ts)))
-        } else if (cloud && sameUser && Date.parse(cloud.updatedAt) > localTs) {
-          suppressPush.current = true
-          setState({ ...empty, ...cloud.state })
-          localStorage.setItem(META, String(Date.parse(cloud.updatedAt)))
         } else {
           const ts = await pushState(uid, stateRef.current)
           localStorage.setItem(META, String(Date.parse(ts)))
         }
         localStorage.setItem(LASTUID, uid)
+        reconciledRef.current = true
         if (!cancelled) setSyncStatus('synced')
       } catch {
         if (!cancelled) setSyncStatus('error')
@@ -149,15 +186,26 @@ export function StoreProvider({ children }) {
     return () => {
       cancelled = true
     }
-  }, [uid])
+  }, [uid, syncTick])
 
-  // debounced push on any change while logged in
+  // Синк упал (офлайн/сбой) → при возвращении сети повторяем reconcile целиком.
+  useEffect(() => {
+    if (!supabaseEnabled || !uid || syncStatus !== 'error') return
+    const retry = () => setSyncTick((t) => t + 1)
+    window.addEventListener('online', retry)
+    return () => window.removeEventListener('online', retry)
+  }, [uid, syncStatus])
+
+  // debounced push on any change while logged in (только после успешной сверки)
   useEffect(() => {
     if (!supabaseEnabled || !uid) return
+    // Сначала гасим флаг «это setState самой синхронизации», чтобы он не
+    // застрял и не съел первый настоящий пуш пользователя.
     if (suppressPush.current) {
       suppressPush.current = false
       return
     }
+    if (!reconciledRef.current) return
     clearTimeout(pushTimer.current)
     pushTimer.current = setTimeout(async () => {
       try {
@@ -280,6 +328,8 @@ export function StoreProvider({ children }) {
     user: session?.user || null,
     syncStatus,
     auth: authApi,
+    recovery,
+    clearRecovery: () => setRecovery(false),
   }
 
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>

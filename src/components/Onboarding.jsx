@@ -1,4 +1,4 @@
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS, computeTargets } from '../lib/nutrition.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
@@ -19,6 +19,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(0)
   const [intent, setIntent] = useState('guest') // guest | account
   const [auth, setAuth] = useState(null) // null | { mode: 'login' | 'register' }
+  const registeredRef = useRef(false) // email-регистрация прошла — сохранить анкету при закрытии шторки
   const [data, setData] = useState({ name: '', avatar: null, sex: 'male', age: '', height: '', weight: '', activity: 'moderate', goal: 'maintain' })
 
   const set = (patch) => setData((d) => ({ ...d, ...patch }))
@@ -85,7 +86,10 @@ export default function Onboarding() {
             </p>
 
             <div className="stack" style={{ maxWidth: 340, margin: '0 auto' }}>
-              {supabaseEnabled ? (
+              {supabaseEnabled && session ? (
+                // Уже вошли — тянем данные из облака; кнопки тут только запутают.
+                <p className="muted" style={{ fontSize: 15, padding: '12px 0' }}>Входим в аккаунт…</p>
+              ) : supabaseEnabled ? (
                 <>
                   <button className="btn" onClick={() => startSurvey('account')}>Зарегистрироваться</button>
                   <button className="btn ghost" onClick={() => setAuth({ mode: 'login' })}>Войти</button>
@@ -238,8 +242,18 @@ export default function Onboarding() {
       {auth && (
         <LazyBoundary onClose={() => setAuth(null)}>
           <Suspense fallback={null}>
-            {/* onBeforeAuth сохраняет профиль из опросника до входа/редиректа */}
-            <AuthSheet mode={auth.mode} onBeforeAuth={finish} onClose={() => setAuth(null)} />
+            {/* onBeforeAuth сохраняет анкету до OAuth-редиректа; onRegistered —
+                после email-регистрации анкета сохраняется при закрытии шторки,
+                чтобы человек успел прочитать «подтвердите почту». */}
+            <AuthSheet
+              mode={auth.mode}
+              onBeforeAuth={finish}
+              onRegistered={() => { registeredRef.current = true }}
+              onClose={() => {
+                setAuth(null)
+                if (registeredRef.current) finish()
+              }}
+            />
           </Suspense>
         </LazyBoundary>
       )}

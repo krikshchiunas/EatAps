@@ -141,6 +141,7 @@ function FriendView({ friend, onClose }) {
   const [err, setErr] = useState(null)
   const [date, setDate] = useState(keyOf())
   const [tab, setTab] = useState('diary') // diary | profile
+  const [expandedMeal, setExpandedMeal] = useState(null)
   const today = keyOf()
 
   useEffect(() => {
@@ -216,18 +217,52 @@ function FriendView({ friend, onClose }) {
             {(day.meals || []).length === 0 ? (
               <p className="muted" style={{ fontSize: 14 }}>В этот день ничего не записано.</p>
             ) : (
-              (day.meals || []).map((m) => (
-                <div key={m.id} className="row between" style={{ alignItems: 'center', padding: '8px 2px', borderBottom: '1px solid var(--border)' }}>
-                  <div className="row gap8" style={{ alignItems: 'center', minWidth: 0 }}>
-                    <span style={{ fontSize: 20 }}>{m.emoji || '🍽️'}</span>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</div>
-                      {m.grams != null && <div className="muted" style={{ fontSize: 12 }}>{m.grams} {m.unit || 'г'}</div>}
+              (day.meals || []).map((m) => {
+                const customFood = (state.customFoods || []).find(
+                  (f) => f.name === m.name && f.kind === 'composite' && f.recipe
+                )
+                const isExpanded = expandedMeal === m.id
+                return (
+                  <div key={m.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div className="row between" style={{ alignItems: 'center', padding: '8px 2px' }}>
+                      <div className="row gap8" style={{ alignItems: 'center', minWidth: 0, flex: 1 }}>
+                        <span style={{ fontSize: 20 }}>{m.emoji || '🍽️'}</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</div>
+                          <div className="row gap8" style={{ alignItems: 'center' }}>
+                            {m.grams != null && <span className="muted" style={{ fontSize: 12 }}>{m.grams} {m.unit || 'г'}</span>}
+                            {customFood && (
+                              <button
+                                style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 550 }}
+                                onClick={() => setExpandedMeal(isExpanded ? null : m.id)}
+                              >
+                                {isExpanded ? 'Скрыть ▲' : 'Состав ▼'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="tabular" style={{ fontWeight: 600 }}>{m.kcal} ккал</span>
                     </div>
+                    {isExpanded && customFood && (
+                      <div style={{ padding: '6px 8px 10px 36px', background: 'var(--surface-2)', borderRadius: 10, marginBottom: 6 }}>
+                        <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Состав блюда:</div>
+                        <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 4 }}>
+                          🍞 {customFood.recipe.base} × {customFood.recipe.slices} шт.
+                        </div>
+                        {(customFood.recipe.items || []).filter((i) => i.count > 0).map((i) => (
+                          <div key={i.name} style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 2 }}>
+                            · {i.name} × {i.count}
+                          </div>
+                        ))}
+                        {(customFood.recipe.items || []).filter((i) => i.count > 0).length === 0 && (
+                          <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Только основа</div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <span className="tabular" style={{ fontWeight: 600 }}>{m.kcal} ккал</span>
-                </div>
-              ))
+                )
+              })
             )}
           </>
         )}

@@ -33,14 +33,21 @@ export default function AddFriendSheet({ onClose, onSent }) {
 
         <div className="field">
           <label>ID друга</label>
-          <input className="input" placeholder="Вставьте ID друга" value={targetId} onChange={(e) => setTargetId(e.target.value)} style={{ marginBottom: 10 }} />
+          <input
+            className="input"
+            placeholder="Напр. AB000042"
+            value={targetId}
+            onChange={(e) => setTargetId(e.target.value.toUpperCase())}
+            maxLength={8}
+            style={{ marginBottom: 10, fontSize: 18, fontWeight: 650, letterSpacing: '0.06em', textAlign: 'center' }}
+          />
           <button className="btn" disabled={busy || !targetId.trim()} onClick={send}>Отправить заявку</button>
         </div>
 
         {msg && (
           <p style={{ marginTop: 6, fontSize: 14, color: msg.type === 'err' ? 'var(--danger)' : 'var(--primary-strong)' }}>{msg.text}</p>
         )}
-        <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>Свой ID можно скопировать в «Профиль → Мой профиль».</p>
+        <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>Свой ID можно скопировать в «Профиль → Мой профиль». Формат: 2 буквы + 6 цифр.</p>
       </div>
     </div>
   )

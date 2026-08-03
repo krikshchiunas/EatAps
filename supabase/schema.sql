@@ -78,6 +78,82 @@ drop policy if exists "friendship delete" on public.friendships;
 create policy "friendship delete" on public.friendships
   for delete using (auth.uid() = requester or auth.uid() = addressee);
 
+-- ---------------- Публичные ID (серия AA + 6 цифр) ----------------
+-- Читаемый ID для добавления в друзья: AA000001, AA000002, … AA999999,
+-- затем AB000001 и так далее. Выдаётся по порядку регистрации.
+
+create sequence if not exists public.public_id_seq start 1;
+
+create or replace function public.generate_public_id()
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n          bigint;
+  series_idx int;
+  num        int;
+begin
+  n          := nextval('public.public_id_seq');
+  series_idx := ((n - 1) / 999999)::int;
+  num        := ((n - 1) % 999999 + 1)::int;
+  return chr(65 + series_idx / 26) || chr(65 + series_idx % 26) || lpad(num::text, 6, '0');
+end;
+$$;
+
+create table if not exists public.profiles (
+  user_id   uuid primary key references auth.users(id) on delete cascade,
+  public_id text unique not null
+);
+
+alter table public.profiles enable row level security;
+
+drop policy if exists "read own public_id" on public.profiles;
+create policy "read own public_id" on public.profiles
+  for select using (auth.uid() = user_id);
+
+-- Автовыдача ID при регистрации.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (user_id, public_id)
+  values (new.id, public.generate_public_id());
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- Поиск UUID по публичному ID (для заявок в друзья; обходит RLS).
+create or replace function public.find_user_by_public_id(p_public_id text)
+returns uuid
+language sql
+security definer
+set search_path = public
+as $$
+  select user_id from public.profiles
+  where public_id = upper(trim(p_public_id))
+  limit 1;
+$$;
+
+revoke all on function public.find_user_by_public_id(text) from public, anon;
+grant execute on function public.find_user_by_public_id(text) to authenticated;
+
+-- Бэкфилл: выдать ID существующим пользователям по порядку регистрации.
+insert into public.profiles (user_id, public_id)
+select id, public.generate_public_id()
+from auth.users
+where id not in (select user_id from public.profiles)
+order by created_at;
+
 -- ---------------- Удаление аккаунта (DSGVO Art. 17) ----------------
 -- Пользователь удаляет сам себя. Удаление auth.users каскадно стирает
 -- app_state и friendships (ON DELETE CASCADE выше).

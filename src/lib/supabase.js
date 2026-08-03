@@ -49,15 +49,42 @@ export async function pushState(userId, state) {
   return data.updated_at
 }
 
+// ---------------- Публичные ID (AA000001) ----------------
+const PUBLIC_ID_RE = /^[A-Z]{2}\d{6}$/i
+
+// Получить читаемый публичный ID текущего пользователя (из таблицы profiles).
+export async function getMyPublicId(userId) {
+  if (!supabase || !userId) return null
+  const { data } = await supabase.from('profiles').select('public_id').eq('user_id', userId).maybeSingle()
+  return data?.public_id || null
+}
+
+// Найти UUID по публичному ID через RPC (обходит RLS).
+async function resolvePublicId(publicId) {
+  const { data } = await supabase.rpc('find_user_by_public_id', { p_public_id: publicId.toUpperCase() })
+  return data || null
+}
+
 // ---------------- Друзья ----------------
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// Отправить запрос в друзья по ID. Если встречный запрос уже есть — принимает его.
+// Отправить запрос в друзья по ID. Принимает как публичный ID (AA000001), так и UUID.
+// Если встречный запрос уже есть — принимает его.
 // Возвращает { ok } или { error } (сообщение по-русски).
 export async function sendFriendRequest({ myId, myName, targetId }) {
   if (!supabase) return { error: 'Нет подключения к серверу' }
-  const t = (targetId || '').trim().toLowerCase()
-  if (!UUID_RE.test(t)) return { error: 'Неверный ID' }
+  const raw = (targetId || '').trim()
+
+  let t
+  if (PUBLIC_ID_RE.test(raw)) {
+    t = await resolvePublicId(raw)
+    if (!t) return { error: 'Пользователь с таким ID не найден' }
+  } else if (UUID_RE.test(raw)) {
+    t = raw.toLowerCase()
+  } else {
+    return { error: 'Неверный формат ID (ожидается AA000001)' }
+  }
+
   if (t === myId) return { error: 'Это ваш собственный ID' }
 
   const { data: existing, error: e1 } = await supabase

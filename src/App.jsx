@@ -8,17 +8,22 @@ import ProfileScreen from './components/ProfileScreen.jsx'
 import FriendsScreen from './components/FriendsScreen.jsx'
 import BottomNav from './components/BottomNav.jsx'
 import AddMealSheet from './components/AddMealSheet.jsx'
+import ResetPasswordSheet from './components/ResetPasswordSheet.jsx'
 
 export default function App() {
-  const { profile, addMeal } = useStore()
+  const { profile, addMeal, recovery, clearRecovery } = useStore()
   const [tab, setTab] = useState('day')
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(false)
+
+  // Ссылка «сброс пароля» из письма — форма нового пароля поверх всего.
+  const recoverySheet = recovery ? <ResetPasswordSheet onClose={clearRecovery} /> : null
 
   if (!profile) {
     return (
       <div className="app">
         <Onboarding />
+        {recoverySheet}
       </div>
     )
   }
@@ -43,6 +48,7 @@ export default function App() {
           onAdd={(meal) => addMeal(date, meal)}
         />
       )}
+      {recoverySheet}
     </div>
   )
 }

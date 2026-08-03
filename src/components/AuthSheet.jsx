@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from '@reown/appkit/react'
 import { useStore } from '../store.jsx'
 import { web3Enabled } from '../lib/appkit.js'
+import { ruAuthError } from '../lib/authErrors.js'
 
-export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth }) {
-  const { auth } = useStore()
+export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onRegistered }) {
+  const { auth, user } = useStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -12,22 +13,43 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth }) {
 
   const isRegister = mode === 'register'
 
-  const run = async (fn, okText) => {
-    // В режиме регистрации сохраняем профиль из опросника ДО запуска входа —
-    // иначе при OAuth-редиректе данные опросника потерялись бы.
-    onBeforeAuth?.()
+  // Появилась сессия → вход удался, шторка больше не нужна.
+  useEffect(() => {
+    if (user) onClose?.()
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // beforeAuth — только для потоков с редиректом (OAuth): страница вот-вот
+  // умрёт, анкету надо сохранить ДО ухода. Для email-потоков профиль
+  // сохраняется после (onRegistered → закрытие шторки), чтобы человек успел
+  // прочитать «подтвердите почту», а онбординг не размонтировал шторку.
+  const run = async (fn, okText, { beforeAuth = false } = {}) => {
+    if (beforeAuth) onBeforeAuth?.()
     setBusy(true)
     setMsg(null)
     try {
       const { error } = (await fn()) || {}
-      if (error) setMsg({ type: 'err', text: error.message })
+      if (error) setMsg({ type: 'err', text: ruAuthError(error.message) })
       else if (okText) setMsg({ type: 'ok', text: okText })
     } catch (e) {
-      setMsg({ type: 'err', text: e.message || 'Что-то пошло не так' })
+      setMsg({ type: 'err', text: ruAuthError(e.message) })
     } finally {
       setBusy(false)
     }
   }
+
+  const doLogin = () => run(() => auth.signInEmail(email, password))
+
+  // Supabase при регистрации на занятый email возвращает «успех» с пустыми
+  // identities (защита от перебора адресов). Ловим и говорим честно.
+  const doRegister = () =>
+    run(async () => {
+      const res = await auth.signUpEmail(email, password)
+      if (!res.error && res.data?.user && res.data.user.identities?.length === 0) {
+        return { error: { message: 'User already registered' } }
+      }
+      if (!res.error) onRegistered?.()
+      return res
+    }, 'Готово. Подтвердите почту по ссылке из письма — и можно пользоваться приложением.')
 
   const emailOk = /\S+@\S+\.\S+/.test(email)
 
@@ -39,8 +61,15 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth }) {
   const { disconnect } = useDisconnect()
   const [awaitingWeb3, setAwaitingWeb3] = useState(false)
 
-  const openWeb3 = () => {
+  const openWeb3 = async () => {
     setMsg(null)
+    // Кошелёк мог остаться подключённым с прошлой сессии — тогда вход молча
+    // ушёл бы в старый аккаунт. Сначала отключаем, чтобы показать выбор заново.
+    if (isConnected) {
+      try {
+        await disconnect()
+      } catch {}
+    }
     setAwaitingWeb3(true)
     open() // модалка AppKit со списком кошельков
   }
@@ -77,7 +106,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth }) {
         </p>
 
         <div className="stack">
-          <button className="btn ghost" disabled={busy} onClick={() => run(() => auth.signInOAuth('google'))}>
+          <button className="btn ghost" disabled={busy} onClick={() => run(() => auth.signInOAuth('google'), null, { beforeAuth: true })}>
             <span style={{ fontWeight: 700 }}>G</span> Продолжить с Google
           </button>
           {web3Enabled && (
@@ -93,23 +122,32 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth }) {
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
         </div>
 
-        <div className="field">
-          <label>Email</label>
-          <input className="input" type="email" inputMode="email" autoComplete="email" placeholder="name@mail.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Пароль</label>
-          <input className="input" type="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (busy || !emailOk || password.length < 6) return
+            if (isRegister) doRegister()
+            else doLogin()
+          }}
+        >
+          <div className="field">
+            <label>Email</label>
+            <input className="input" type="email" inputMode="email" autoComplete="email" placeholder="name@mail.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Пароль</label>
+            <input className="input" type="password" autoComplete={isRegister ? 'new-password' : 'current-password'} placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </div>
 
-        <div className="row gap8">
-          <button className={isRegister ? 'btn ghost' : 'btn'} style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={() => run(() => auth.signInEmail(email, password))}>
-            Войти
-          </button>
-          <button className={isRegister ? 'btn' : 'btn ghost'} style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={() => run(() => auth.signUpEmail(email, password), 'Готово. Подтвердите почту по ссылке из письма.')}>
-            Регистрация
-          </button>
-        </div>
+          <div className="row gap8">
+            <button type={isRegister ? 'button' : 'submit'} className={isRegister ? 'btn ghost' : 'btn'} style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={isRegister ? doLogin : undefined}>
+              Войти
+            </button>
+            <button type={isRegister ? 'submit' : 'button'} className={isRegister ? 'btn' : 'btn ghost'} style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={isRegister ? undefined : doRegister}>
+              Регистрация
+            </button>
+          </div>
+        </form>
 
         <div className="row between" style={{ marginTop: 12 }}>
           <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} disabled={busy || !emailOk} onClick={() => run(() => auth.signInMagic(email), 'Отправили ссылку для входа на почту.')}>
@@ -125,7 +163,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth }) {
         )}
 
         <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 18, textAlign: 'center' }}>
-          Google и вход по кошельку работают после настройки провайдеров в Supabase.
+          Продолжая, вы соглашаетесь с обработкой данных (см. Datenschutz в профиле).
         </p>
       </div>
     </div>
