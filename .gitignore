@@ -7,3 +7,4 @@ dist
 .DS_Store
 *.log
 brand/logo-animated.mp4
+.env*
