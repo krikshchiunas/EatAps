@@ -2,15 +2,32 @@ import { useState } from 'react'
 import { useStore } from '../store.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
 
-// Мой профиль: фото, имя/никнейм, ID с копированием.
 export default function MyProfileSheet({ onClose }) {
   const { user, profile, setProfile } = useStore()
   const myId = user?.id || ''
   const [copied, setCopied] = useState(false)
 
-  const patch = (p) => setProfile({ ...(profile || {}), ...p })
-  const setName = (name) => patch({ name })
-  const setAvatar = (avatar) => patch({ avatar: avatar || undefined })
+  const [draft, setDraft] = useState({
+    name: profile?.name || '',
+    avatar: profile?.avatar || null,
+    bio: profile?.bio || '',
+    favRestaurant: profile?.favRestaurant || '',
+    favDish: profile?.favDish || '',
+  })
+
+  const set = (p) => setDraft((d) => ({ ...d, ...p }))
+
+  const save = () => {
+    setProfile({
+      ...(profile || {}),
+      name: draft.name.trim() || undefined,
+      avatar: draft.avatar || undefined,
+      bio: draft.bio.trim() || undefined,
+      favRestaurant: draft.favRestaurant.trim() || undefined,
+      favDish: draft.favDish.trim() || undefined,
+    })
+    onClose()
+  }
 
   const copy = async () => {
     try {
@@ -32,12 +49,12 @@ export default function MyProfileSheet({ onClose }) {
         </div>
 
         <div style={{ marginBottom: 20 }}>
-          <AvatarPicker value={profile?.avatar || null} onChange={setAvatar} size={110} />
+          <AvatarPicker value={draft.avatar} onChange={(a) => set({ avatar: a })} size={110} />
         </div>
 
         <div className="field">
           <label>Имя / никнейм</label>
-          <input className="input" placeholder="Напр. Денис" value={profile?.name || ''} onChange={(e) => setName(e.target.value)} maxLength={40} />
+          <input className="input" placeholder="Напр. Денис" value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
         </div>
 
         <div className="field">
@@ -45,8 +62,8 @@ export default function MyProfileSheet({ onClose }) {
           <textarea
             className="input"
             placeholder="Пара слов о себе — увидят друзья"
-            value={profile?.bio || ''}
-            onChange={(e) => patch({ bio: e.target.value })}
+            value={draft.bio}
+            onChange={(e) => set({ bio: e.target.value })}
             maxLength={200}
             rows={3}
             style={{ resize: 'none', minHeight: 76, paddingTop: 12, lineHeight: 1.4 }}
@@ -55,12 +72,12 @@ export default function MyProfileSheet({ onClose }) {
 
         <div className="field">
           <label>Любимый ресторан</label>
-          <input className="input" placeholder="Напр. Dodo Pizza" value={profile?.favRestaurant || ''} onChange={(e) => patch({ favRestaurant: e.target.value })} maxLength={60} />
+          <input className="input" placeholder="Напр. Dodo Pizza" value={draft.favRestaurant} onChange={(e) => set({ favRestaurant: e.target.value })} maxLength={60} />
         </div>
 
         <div className="field">
           <label>Любимое блюдо</label>
-          <input className="input" placeholder="Напр. Паста карбонара" value={profile?.favDish || ''} onChange={(e) => patch({ favDish: e.target.value })} maxLength={60} />
+          <input className="input" placeholder="Напр. Паста карбонара" value={draft.favDish} onChange={(e) => set({ favDish: e.target.value })} maxLength={60} />
         </div>
 
         <div className="field">
@@ -77,6 +94,8 @@ export default function MyProfileSheet({ onClose }) {
             </button>
           </div>
         </div>
+
+        <button className="btn" style={{ marginTop: 10 }} onClick={save}>Сохранить</button>
       </div>
     </div>
   )
