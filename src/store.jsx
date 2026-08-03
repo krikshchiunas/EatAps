@@ -3,9 +3,32 @@ import { supabase, supabaseEnabled, pullState, pushState } from './lib/supabase.
 
 const KEY = 'eataps:v1'
 const META = 'eataps:sync'
+const LASTUID = 'eataps:lastUid' // чьи данные лежат локально (uid последней синхронизации)
 const StoreCtx = createContext(null)
 
 const empty = { profile: null, theme: 'system', days: {}, customFoods: [], customIngredients: [], recents: [], prefs: {} }
+
+// Слияние при входе в СУЩЕСТВУЮЩИЙ аккаунт, когда локальные данные — не его
+// (гость, другой аккаунт, свежий опросник). Облако — источник истины для
+// профиля (ник, фото, цели); локальные дни/еда/недавние ДОЛИВАЮТСЯ, но никогда
+// не перетирают облачные. Это защита от «вошёл — и облако затёрлось дефолтом».
+export function mergeCloudOverLocal(cloud, local) {
+  const uniqByName = (primary = [], extra = []) => {
+    const seen = new Set(primary.map((x) => (x.name || '').toLowerCase()))
+    return [...primary, ...extra.filter((x) => !seen.has((x.name || '').toLowerCase()))]
+  }
+  return {
+    ...local,
+    ...cloud,
+    profile: cloud.profile || local.profile,
+    theme: cloud.theme || local.theme,
+    days: { ...local.days, ...cloud.days },
+    customFoods: uniqByName(cloud.customFoods, local.customFoods),
+    customIngredients: uniqByName(cloud.customIngredients, local.customIngredients),
+    recents: uniqByName(cloud.recents, local.recents).slice(0, 40),
+    prefs: { ...local.prefs, ...cloud.prefs },
+  }
+}
 
 function load() {
   try {
@@ -31,7 +54,12 @@ const authApi = supabaseEnabled
       // некоторые кошельки (Phantom) отклоняют кириллицу в сообщении подписи.
       signInWeb3: (chain, wallet) => supabase.auth.signInWithWeb3({ chain, statement: 'Sign in to EatAps', wallet }),
       resetPassword: (email) => supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
-      signOut: () => supabase.auth.signOut(),
+      // После выхода локальные данные считаются «ничейными»: следующий вход
+      // в любой аккаунт возьмёт профиль из облака, а не затрёт его локальным.
+      signOut: () => {
+        localStorage.removeItem(LASTUID)
+        return supabase.auth.signOut()
+      },
     }
   : null
 
@@ -78,7 +106,13 @@ export function StoreProvider({ children }) {
     return () => data.subscription.unsubscribe()
   }, [])
 
-  // on login → reconcile cloud vs local (last-write-wins)
+  // on login → reconcile cloud vs local.
+  // Три случая:
+  // 1. Локальные данные — от ЭТОГО же аккаунта (lastUid совпал) → честный
+  //    last-write-wins по метке времени, как раньше.
+  // 2. Локальные данные — чужие/гостевые, а в облаке есть профиль → облако
+  //    главнее (ник, фото, цели восстанавливаются), локальные дни доливаются.
+  // 3. Облако пустое (новый аккаунт) → заливаем локальное состояние.
   const uid = session?.user?.id
   useEffect(() => {
     if (!supabaseEnabled || !uid) return
@@ -88,13 +122,24 @@ export function StoreProvider({ children }) {
       try {
         const cloud = await pullState(uid)
         const localTs = Number(localStorage.getItem(META) || 0)
-        if (cloud && Date.parse(cloud.updatedAt) > localTs) {
+        const sameUser = localStorage.getItem(LASTUID) === uid
+
+        if (cloud && cloud.state?.profile && !sameUser) {
+          // Вход в существующий аккаунт с «не его» локальными данными.
+          const merged = mergeCloudOverLocal({ ...empty, ...cloud.state }, stateRef.current)
+          suppressPush.current = true
+          setState(merged)
+          const ts = await pushState(uid, merged) // долитые локальные дни — в облако
+          localStorage.setItem(META, String(Date.parse(ts)))
+        } else if (cloud && sameUser && Date.parse(cloud.updatedAt) > localTs) {
           suppressPush.current = true
           setState({ ...empty, ...cloud.state })
+          localStorage.setItem(META, String(Date.parse(cloud.updatedAt)))
         } else {
           const ts = await pushState(uid, stateRef.current)
           localStorage.setItem(META, String(Date.parse(ts)))
         }
+        localStorage.setItem(LASTUID, uid)
         if (!cancelled) setSyncStatus('synced')
       } catch {
         if (!cancelled) setSyncStatus('error')
@@ -202,7 +247,13 @@ export function StoreProvider({ children }) {
     setState((s) => ({ ...s, prefs: { ...s.prefs, [key]: val } }))
   }, [])
 
-  const resetAll = useCallback(() => setState(empty), [])
+  const resetAll = useCallback(() => {
+    // Сброс обнуляет и метки синхронизации: пустое локальное состояние не
+    // должно считаться «новее облака» при следующем входе.
+    localStorage.removeItem(LASTUID)
+    localStorage.removeItem(META)
+    setState(empty)
+  }, [])
 
   const value = {
     ...state,
