@@ -3,14 +3,19 @@ import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from '@
 import { useStore } from '../store.jsx'
 import { web3Enabled } from '../lib/appkit.js'
 
-export default function AuthSheet({ onClose }) {
+export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth }) {
   const { auth } = useStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null) // {type:'err'|'ok', text}
 
+  const isRegister = mode === 'register'
+
   const run = async (fn, okText) => {
+    // В режиме регистрации сохраняем профиль из опросника ДО запуска входа —
+    // иначе при OAuth-редиректе данные опросника потерялись бы.
+    onBeforeAuth?.()
     setBusy(true)
     setMsg(null)
     try {
@@ -62,11 +67,13 @@ export default function AuthSheet({ onClose }) {
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
-          <h2 className="h2">Вход в EatAps</h2>
+          <h2 className="h2">{isRegister ? 'Регистрация в EatAps' : 'Вход в EatAps'}</h2>
           <button className="iconbtn" onClick={onClose} aria-label="Закрыть">✕</button>
         </div>
         <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>
-          Войдите, чтобы данные сохранялись в облаке и синхронизировались между устройствами.
+          {isRegister
+            ? 'Создайте аккаунт — профиль и история сохранятся в облаке и будут доступны на любом устройстве.'
+            : 'Войдите, чтобы данные сохранялись в облаке и синхронизировались между устройствами.'}
         </p>
 
         <div className="stack">
@@ -96,10 +103,10 @@ export default function AuthSheet({ onClose }) {
         </div>
 
         <div className="row gap8">
-          <button className="btn" style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={() => run(() => auth.signInEmail(email, password))}>
+          <button className={isRegister ? 'btn ghost' : 'btn'} style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={() => run(() => auth.signInEmail(email, password))}>
             Войти
           </button>
-          <button className="btn ghost" style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={() => run(() => auth.signUpEmail(email, password), 'Готово. Подтвердите почту по ссылке из письма.')}>
+          <button className={isRegister ? 'btn' : 'btn ghost'} style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={() => run(() => auth.signUpEmail(email, password), 'Готово. Подтвердите почту по ссылке из письма.')}>
             Регистрация
           </button>
         </div>

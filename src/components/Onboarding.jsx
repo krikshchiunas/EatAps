@@ -1,20 +1,33 @@
-import { useState } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS, computeTargets } from '../lib/nutrition.js'
+import { lazyWithReload } from '../lib/lazyWithReload.js'
+import LazyBoundary from './LazyBoundary.jsx'
 import Ring from './Ring.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
 
-const STEPS = ['intro', 'name', 'sex', 'body', 'activity', 'goal', 'result']
+// Вход/регистрация тянут тяжёлый Web3-стек (AppKit) — грузим лениво,
+// только когда пользователь открывает окно входа.
+const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
+
+// Экран опросника (интро вынесено в отдельный welcome-гейт над опросником).
+const STEPS = ['name', 'sex', 'body', 'activity', 'goal', 'result']
 
 export default function Onboarding() {
-  const { setProfile } = useStore()
+  const { setProfile, supabaseEnabled, session, syncStatus } = useStore()
+  const [phase, setPhase] = useState('welcome') // welcome | survey
   const [step, setStep] = useState(0)
+  const [intent, setIntent] = useState('guest') // guest | account
+  const [auth, setAuth] = useState(null) // null | { mode: 'login' | 'register' }
   const [data, setData] = useState({ name: '', avatar: null, sex: 'male', age: '', height: '', weight: '', activity: 'moderate', goal: 'maintain' })
 
   const set = (patch) => setData((d) => ({ ...d, ...patch }))
   const name = STEPS[step]
   const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1))
-  const back = () => setStep((s) => Math.max(s - 1, 0))
+  const back = () => {
+    if (step === 0) setPhase('welcome')
+    else setStep((s) => Math.max(s - 1, 0))
+  }
 
   const bodyOk = data.age >= 10 && data.age <= 100 && data.height >= 120 && data.height <= 230 && data.weight >= 30 && data.weight <= 250
 
@@ -37,32 +50,87 @@ export default function Onboarding() {
     })
   }
 
+  // Пользователь выбрал «Войти» и вошёл в существующий аккаунт. Если в облаке
+  // уже есть профиль — App сам переключится на приложение (profile != null,
+  // этот компонент размонтируется). Если облако пустое (аккаунт есть, а анкету
+  // не заполняли) — синхронизация завершится, а мы всё ещё здесь → ведём в опросник.
+  useEffect(() => {
+    if (phase !== 'welcome' || !session) return
+    if (syncStatus === 'idle' || syncStatus === 'syncing') return // ждём завершения синка
+    setAuth(null)
+    setIntent('account')
+    setStep(0)
+    setPhase('survey')
+  }, [phase, session, syncStatus])
+
+  const startSurvey = (chosen) => {
+    setIntent(chosen)
+    setStep(0)
+    setPhase('survey')
+  }
+
+  // После опросника при регистрации нужно завести аккаунт.
+  const needsRegister = intent === 'account' && supabaseEnabled && !session
+
+  if (phase === 'welcome') {
+    return (
+      <>
+        <div className="screen" style={{ paddingBottom: 40 }}>
+          <div style={{ paddingTop: 40, textAlign: 'center' }}>
+            <img src="/icon-192.png" width="80" height="80" style={{ borderRadius: 25, margin: '0 auto 24px', display: 'block', boxShadow: 'var(--shadow-card)' }} alt="" />
+            <div className="eyebrow">EatAps</div>
+            <h1 className="h1" style={{ margin: '8px 0 12px' }}>Больше здоровья<br />за меньше денег</h1>
+            <p className="muted" style={{ fontSize: 16, maxWidth: 320, margin: '0 auto 36px' }}>
+              Умный дневник питания: персональная норма калорий и белка, история и друзья.
+            </p>
+
+            <div className="stack" style={{ maxWidth: 340, margin: '0 auto' }}>
+              {supabaseEnabled ? (
+                <>
+                  <button className="btn" onClick={() => startSurvey('account')}>Зарегистрироваться</button>
+                  <button className="btn ghost" onClick={() => setAuth({ mode: 'login' })}>Войти</button>
+                  <button
+                    style={{ marginTop: 4, fontSize: 15, color: 'var(--ink-3)', fontWeight: 550 }}
+                    onClick={() => startSurvey('guest')}
+                  >
+                    Войти как гость
+                  </button>
+                </>
+              ) : (
+                <button className="btn" onClick={() => startSurvey('guest')}>Начать</button>
+              )}
+            </div>
+
+            <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 20 }}>
+              {supabaseEnabled
+                ? 'Гостевой режим хранит данные только на этом устройстве'
+                : 'Займёт меньше минуты'}
+            </p>
+          </div>
+        </div>
+
+        {auth && (
+          <LazyBoundary onClose={() => setAuth(null)}>
+            <Suspense fallback={null}>
+              <AuthSheet mode={auth.mode} onClose={() => setAuth(null)} />
+            </Suspense>
+          </LazyBoundary>
+        )}
+      </>
+    )
+  }
+
   return (
     <div className="screen" style={{ paddingBottom: 40 }}>
-      {step > 0 && (
-        <div className="row between" style={{ marginBottom: 22 }}>
-          <button className="iconbtn" onClick={back} aria-label="Назад">‹</button>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {STEPS.slice(1).map((_, i) => (
-              <div key={i} style={{ width: i + 1 <= step ? 22 : 8, height: 8, borderRadius: 4, background: i + 1 <= step ? 'var(--primary)' : 'var(--track)', transition: 'all 0.3s ease' }} />
-            ))}
-          </div>
-          <div style={{ width: 40 }} />
+      <div className="row between" style={{ marginBottom: 22 }}>
+        <button className="iconbtn" onClick={back} aria-label="Назад">‹</button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {STEPS.map((_, i) => (
+            <div key={i} style={{ width: i <= step ? 22 : 8, height: 8, borderRadius: 4, background: i <= step ? 'var(--primary)' : 'var(--track)', transition: 'all 0.3s ease' }} />
+          ))}
         </div>
-      )}
-
-      {name === 'intro' && (
-        <div style={{ paddingTop: 40, textAlign: 'center' }}>
-          <img src="/icon-192.png" width="80" height="80" style={{ borderRadius: 25, margin: '0 auto 24px', display: 'block', boxShadow: 'var(--shadow-card)' }} alt="" />
-          <div className="eyebrow">EatAps</div>
-          <h1 className="h1" style={{ margin: '8px 0 12px' }}>Больше здоровья<br />за меньше денег</h1>
-          <p className="muted" style={{ fontSize: 16, maxWidth: 320, margin: '0 auto 40px' }}>
-            Ответьте на несколько вопросов — и мы рассчитаем вашу персональную дневную норму калорий и белка.
-          </p>
-          <button className="btn" onClick={next}>Начать</button>
-          <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 16 }}>Займёт меньше минуты</p>
-        </div>
-      )}
+        <div style={{ width: 40 }} />
+      </div>
 
       {name === 'name' && (
         <StepShell title="Как вас зовут?" hint="Имя увидят друзья. Фото — по желанию.">
@@ -149,8 +217,31 @@ export default function Onboarding() {
             <div style={{ width: 1, background: 'var(--border)' }} />
             <SmallKV k="С активностью" v={`${targets.tdee} ккал`} />
           </div>
-          <button className="btn" style={{ marginTop: 22 }} onClick={finish}>Открыть приложение</button>
+          {needsRegister ? (
+            <>
+              <button className="btn" style={{ marginTop: 22 }} onClick={() => setAuth({ mode: 'register' })}>
+                Зарегистрироваться и сохранить
+              </button>
+              <button
+                style={{ display: 'block', margin: '14px auto 0', fontSize: 15, color: 'var(--ink-3)', fontWeight: 550 }}
+                onClick={finish}
+              >
+                Продолжить без аккаунта
+              </button>
+            </>
+          ) : (
+            <button className="btn" style={{ marginTop: 22 }} onClick={finish}>Открыть приложение</button>
+          )}
         </div>
+      )}
+
+      {auth && (
+        <LazyBoundary onClose={() => setAuth(null)}>
+          <Suspense fallback={null}>
+            {/* onBeforeAuth сохраняет профиль из опросника до входа/редиректа */}
+            <AuthSheet mode={auth.mode} onBeforeAuth={finish} onClose={() => setAuth(null)} />
+          </Suspense>
+        </LazyBoundary>
       )}
     </div>
   )
