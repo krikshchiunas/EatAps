@@ -2,7 +2,9 @@ import { useState, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
+import { deleteAccount } from '../lib/supabase.js'
 import LazyBoundary from './LazyBoundary.jsx'
+import LegalSheet from './LegalSheet.jsx'
 // Ленивая загрузка: AuthSheet тянет тяжёлый Web3-стек (AppKit). Грузим его
 // только когда пользователь открывает вход — ядро приложения остаётся лёгким
 // и надёжно работает офлайн. lazyWithReload самолечит сбой загрузки чанка.
@@ -18,13 +20,54 @@ const THEMES = [
 const SYNC_LABEL = { idle: '', syncing: 'Синхронизация…', synced: 'Синхронизировано', error: 'Ошибка синхронизации' }
 
 export default function ProfileScreen() {
-  const { profile, theme, setTheme, resetAll, supabaseEnabled, user, syncStatus, auth } = useStore()
+  const store = useStore()
+  const { profile, theme, setTheme, resetAll, supabaseEnabled, user, syncStatus, auth } = store
   const t = profile.targets
   const [authOpen, setAuthOpen] = useState(false)
   const [myProfileOpen, setMyProfileOpen] = useState(false)
+  const [legal, setLegal] = useState(null) // null | 'impressum' | 'privacy'
+  const [busy, setBusy] = useState(false)
 
   const reset = () => {
     if (confirm('Сбросить профиль и все данные? Это действие нельзя отменить.')) resetAll()
+  }
+
+  // DSGVO: право на переносимость — выгрузка всех своих данных в JSON.
+  const exportData = () => {
+    const dump = {
+      profile: store.profile,
+      theme: store.theme,
+      days: store.days,
+      customFoods: store.customFoods,
+      customIngredients: store.customIngredients,
+      recents: store.recents,
+      prefs: store.prefs,
+      exportedAt: new Date().toISOString(),
+    }
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'eataps-data.json'
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  // DSGVO: право на удаление — стираем данные из облака, аккаунт и локально.
+  const delAccount = async () => {
+    if (!confirm('Удалить аккаунт и все данные из облака? Это необратимо.')) return
+    setBusy(true)
+    const res = await deleteAccount()
+    try {
+      await auth.signOut()
+    } catch {}
+    setBusy(false)
+    if (res?.error && !res.partial) {
+      alert('Локальные данные удалены. Онлайн-часть удалить не удалось: ' + res.error)
+    } else if (res?.partial) {
+      alert('Данные из облака удалены. Сам вход (аккаунт) удалите в поддержке, если требуется.')
+    }
+    resetAll()
   }
 
   return (
@@ -99,14 +142,31 @@ export default function ProfileScreen() {
         </div>
       </div>
 
+      <div className="card" style={{ marginTop: 14 }}>
+        <div className="h2" style={{ fontSize: 17, marginBottom: 6 }}>Приватность и данные</div>
+        <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>Вы можете выгрузить все свои данные или удалить их (DSGVO).</p>
+        <button className="btn ghost" onClick={exportData}>Скачать мои данные (JSON)</button>
+        {supabaseEnabled && user && (
+          <button className="btn ghost" style={{ marginTop: 10, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} disabled={busy} onClick={delAccount}>
+            {busy ? 'Удаление…' : 'Удалить аккаунт и данные из облака'}
+          </button>
+        )}
+      </div>
+
       {supabaseEnabled && user && (
-        <button className="btn ghost" style={{ marginTop: 20 }} onClick={() => auth.signOut()}>Выйти из аккаунта</button>
+        <button className="btn ghost" style={{ marginTop: 14 }} onClick={() => auth.signOut()}>Выйти из аккаунта</button>
       )}
 
       <button className="btn ghost" style={{ marginTop: 12, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} onClick={reset}>
         Сбросить профиль и данные
       </button>
-      <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', marginTop: 16 }}>
+
+      <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13 }}>
+        <button style={{ color: 'var(--ink-3)' }} onClick={() => setLegal('impressum')}>Impressum</button>
+        <span style={{ color: 'var(--ink-3)', margin: '0 8px' }}>·</span>
+        <button style={{ color: 'var(--ink-3)' }} onClick={() => setLegal('privacy')}>Datenschutz</button>
+      </div>
+      <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', marginTop: 10 }}>
         EatAps{supabaseEnabled && user ? ' · данные в облаке' : ' · данные на этом устройстве'}
       </p>
 
@@ -124,6 +184,7 @@ export default function ProfileScreen() {
           </Suspense>
         </LazyBoundary>
       )}
+      {legal && <LegalSheet initial={legal} onClose={() => setLegal(null)} />}
     </div>
   )
 }

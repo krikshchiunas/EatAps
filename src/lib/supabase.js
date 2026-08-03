@@ -135,3 +135,19 @@ export async function removeFriendship(rowId) {
 export async function pullFriendState(friendId) {
   return pullState(friendId)
 }
+
+// DSGVO «право на удаление»: стираем данные из облака и удаляем сам аккаунт.
+// Данные удаляем всегда (RLS: свои); аккаунт — через RPC delete_current_user
+// (SECURITY DEFINER, см. schema.sql). Если RPC нет — возвращаем partial.
+export async function deleteAccount() {
+  if (!supabase) return { error: 'Нет подключения к серверу' }
+  const { data: { user } = {} } = await supabase.auth.getUser()
+  const uid = user?.id
+  if (uid) {
+    await supabase.from('friendships').delete().or(`requester.eq.${uid},addressee.eq.${uid}`)
+    await supabase.from('app_state').delete().eq('user_id', uid)
+  }
+  const { error } = await supabase.rpc('delete_current_user')
+  if (error) return { error: error.message, partial: true } // данные стёрты, аккаунт остался
+  return { ok: true }
+}

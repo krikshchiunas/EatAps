@@ -77,3 +77,18 @@ create policy "friendship update" on public.friendships
 drop policy if exists "friendship delete" on public.friendships;
 create policy "friendship delete" on public.friendships
   for delete using (auth.uid() = requester or auth.uid() = addressee);
+
+-- ---------------- Удаление аккаунта (DSGVO Art. 17) ----------------
+-- Пользователь удаляет сам себя. Удаление auth.users каскадно стирает
+-- app_state и friendships (ON DELETE CASCADE выше).
+create or replace function public.delete_current_user()
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  delete from auth.users where id = auth.uid();
+$$;
+
+revoke all on function public.delete_current_user() from public, anon;
+grant execute on function public.delete_current_user() to authenticated;
