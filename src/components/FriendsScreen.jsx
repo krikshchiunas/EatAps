@@ -56,15 +56,9 @@ function FriendMenu({ friend, isPinned, isMuted, onPin, onMute, onRemove, onClos
 
   return (
     <div ref={ref} className="friend-menu" onClick={e => e.stopPropagation()}>
-      <button onClick={onPin}>
-        <span>📌</span> {isPinned ? 'Открепить' : 'Закрепить'}
-      </button>
-      <button onClick={onMute}>
-        <span>{isMuted ? '🔔' : '🔕'}</span> {isMuted ? 'Включить' : 'Заглушить'}
-      </button>
-      <button onClick={onRemove} style={{ color: 'var(--danger)' }}>
-        <span>🗑</span> Удалить из друзей
-      </button>
+      <button onClick={onPin}>{isPinned ? 'Открепить' : 'Закрепить'}</button>
+      <button onClick={onMute}>{isMuted ? 'Включить уведомления' : 'Заглушить'}</button>
+      <button onClick={onRemove} style={{ color: 'var(--danger)' }}>Удалить из друзей</button>
       {menuErr && <div style={{ fontSize: 12, color: 'var(--danger)', padding: '4px 12px 8px' }}>{menuErr}</div>}
     </div>
   )
@@ -212,11 +206,19 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
                 <Avatar src={f.avatar} name={f.name} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="row gap8" style={{ alignItems: 'center' }}>
-                    {isPinned && <span style={{ fontSize: 11, opacity: 0.7 }}>📌</span>}
+                    {isPinned && (
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="var(--primary)" style={{ flex: '0 0 auto', opacity: 0.8 }}>
+                        <path d="M17 4v7l2 3H5l2-3V4h10zm-5 16a2 2 0 0 0 2-2H10a2 2 0 0 0 2 2zm0-18h1V1h-2v1h1z"/>
+                      </svg>
+                    )}
                     <span style={{ fontWeight: 600, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {f.name || 'Друг'}
                     </span>
-                    {isMuted && <span style={{ fontSize: 13, opacity: 0.6 }}>🔕</span>}
+                    {isMuted && (
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="var(--ink-3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flex: '0 0 auto' }}>
+                        <path d="M11 5 6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/>
+                      </svg>
+                    )}
                   </div>
                 </div>
                 {unread > 0 && (
