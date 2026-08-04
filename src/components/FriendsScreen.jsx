@@ -18,7 +18,7 @@ export function Avatar({ src, name, size = 44 }) {
   )
 }
 
-export default function FriendsScreen() {
+export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
   const { user, supabaseEnabled } = useStore()
   const myId = user?.id || ''
 
@@ -147,9 +147,22 @@ export default function FriendsScreen() {
             style={{ marginBottom: 8, padding: '12px 14px', width: '100%', textAlign: 'left' }}
             onClick={() => setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId })}
           >
-            <div className="row gap12" style={{ alignItems: 'center' }}>
-              <Avatar src={f.avatar} name={f.name} />
-              <div style={{ fontWeight: 600, fontSize: 16 }}>{f.name || 'Друг'}</div>
+            <div className="row between" style={{ alignItems: 'center' }}>
+              <div className="row gap12" style={{ alignItems: 'center', minWidth: 0 }}>
+                <Avatar src={f.avatar} name={f.name} />
+                <div style={{ fontWeight: 600, fontSize: 16 }}>{f.name || 'Друг'}</div>
+              </div>
+              {(unreadCounts[f.id] || 0) > 0 && (
+                <span style={{
+                  minWidth: 22, height: 22, borderRadius: 999,
+                  background: 'var(--danger)', color: '#fff',
+                  fontSize: 12, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0 5px', flex: '0 0 auto',
+                }}>
+                  {unreadCounts[f.id] > 99 ? '99+' : unreadCounts[f.id]}
+                </span>
+              )}
             </div>
           </button>
         ))
@@ -160,7 +173,7 @@ export default function FriendsScreen() {
       {chatFriend && (
         <ChatView
           friend={chatFriend}
-          onClose={() => setChatFriend(null)}
+          onClose={() => { setChatFriend(null); onChatClosed?.() }}
         />
       )}
     </div>

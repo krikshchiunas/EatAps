@@ -25,14 +25,18 @@ const ICONS = {
   ),
 }
 
-export default function BottomNav({ tab, setTab, onAdd }) {
+export default function BottomNav({ tab, setTab, onAdd, totalUnread = 0 }) {
   return (
     <nav className="bottomnav">
       <button className={tab === 'day' ? 'on' : ''} onClick={() => setTab('day')}>
         {ICONS.day}<span>День</span>
       </button>
-      <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')}>
-        {ICONS.friends}<span>Друзья</span>
+      <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')} style={{ position: 'relative' }}>
+        {ICONS.friends}
+        {totalUnread > 0 && (
+          <span className="nav-badge">{totalUnread > 99 ? '99+' : totalUnread}</span>
+        )}
+        <span>Друзья</span>
       </button>
       <div className="fab-slot">
         <button className="fab" onClick={onAdd} aria-label="Добавить приём пищи">

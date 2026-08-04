@@ -201,6 +201,54 @@ export async function uploadChatImage(userId, file) {
   return supabase.storage.from('chat-images').getPublicUrl(path).data.publicUrl
 }
 
+// ---------------- Непрочитанные сообщения ----------------
+// Время последнего прочтения чата с каждым другом — localStorage.
+const CHAT_READ_KEY = 'eataps:chat:read'
+
+function getChatReadMap() {
+  try { return JSON.parse(localStorage.getItem(CHAT_READ_KEY) || '{}') } catch { return {} }
+}
+
+export function markChatRead(friendId) {
+  const map = getChatReadMap()
+  map[friendId] = new Date().toISOString()
+  localStorage.setItem(CHAT_READ_KEY, JSON.stringify(map))
+}
+
+// Возвращает { [senderId]: count } — только сообщения моложе 30 дней.
+export async function fetchUnreadCounts(myId) {
+  if (!supabase || !myId) return {}
+  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString()
+  const { data } = await supabase
+    .from('messages')
+    .select('id, sender, created_at')
+    .eq('recipient', myId)
+    .gt('created_at', cutoff)
+  if (!data) return {}
+  const readMap = getChatReadMap()
+  const counts = {}
+  for (const m of data) {
+    const lastRead = readMap[m.sender] || null
+    if (!lastRead || m.created_at > lastRead) {
+      counts[m.sender] = (counts[m.sender] || 0) + 1
+    }
+  }
+  return counts
+}
+
+// Realtime-подписка на ВСЕ входящие сообщения (для бейджа в BottomNav).
+export function subscribeToIncoming(myId, onNew) {
+  if (!supabase || !myId) return () => {}
+  const channel = supabase
+    .channel(`incoming:${myId}:${Date.now()}`)
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages', filter: `recipient=eq.${myId}` },
+      onNew,
+    )
+    .subscribe()
+  return () => supabase.removeChannel(channel)
+}
+
 export async function sendChatMessage({ sender, recipient, text, imageUrl }) {
   if (!supabase) return { error: 'Нет подключения' }
   const payload = {

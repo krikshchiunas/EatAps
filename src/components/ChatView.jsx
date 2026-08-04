@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store.jsx'
-import { listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage } from '../lib/supabase.js'
+import { listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage, markChatRead } from '../lib/supabase.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 
@@ -51,6 +51,7 @@ export default function ChatView({ friend, onClose }) {
   }
 
   useEffect(() => {
+    markChatRead(friend.id)
     let cancelled = false
     ;(async () => {
       try {
@@ -64,6 +65,7 @@ export default function ChatView({ friend, onClose }) {
       }
     })()
     const unsub = subscribeToChat(myId, friend.id, (m) => {
+      markChatRead(friend.id)
       setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]))
       scrollToBottom(true)
     })
