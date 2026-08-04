@@ -255,6 +255,10 @@ export function StoreProvider({ children }) {
     editDay(date, (d) => ({ ...d, meals: d.meals.filter((m) => m.id !== id) }))
   }, [editDay])
 
+  const editMeal = useCallback((date, updatedMeal) => {
+    editDay(date, (d) => ({ ...d, meals: d.meals.map((m) => m.id === updatedMeal.id ? updatedMeal : m) }))
+  }, [editDay])
+
   const setMood = useCallback((date, mood) => {
     editDay(date, (d) => ({ ...d, mood }))
   }, [editDay])
@@ -315,6 +319,7 @@ export function StoreProvider({ children }) {
     setTheme,
     addMeal,
     removeMeal,
+    editMeal,
     setMood,
     toggleWellbeing,
     addCustomFood,

@@ -123,16 +123,6 @@ export default function ProfileScreen() {
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Дневная норма</div>
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <KV k="Калории" v={`${t.calories}`} />
-          <KV k="Белки" v={`${t.protein} г`} />
-          <KV k="Углеводы" v={`${t.carbs} г`} />
-          <KV k="Жиры" v={`${t.fat} г`} />
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 14 }}>
         <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Оформление</div>
         <div className="seg">
           {THEMES.map((th) => (

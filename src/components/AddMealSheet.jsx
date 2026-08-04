@@ -55,7 +55,9 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
   const [grams, setGrams] = useState('150')
   const [sugar, setSugar] = useState(0)
   const [query, setQuery] = useState('')
-  const [manual, setManual] = useState({ name: '', kcal: '', protein: '', carbs: '', fat: '' })
+  const [manual, setManual] = useState({ name: '', kcal: '', protein: '', carbs: '', fat: '', sugar: '' })
+  const [manualKind, setManualKind] = useState('food')
+  const [manualDrink, setManualDrink] = useState({ name: '', ml: '250', kcal100: '', sugar100: '', protein100: '' })
   const [mode, setMode] = useState('search')
 
   const [remote, setRemote] = useState([])
@@ -197,22 +199,50 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
   }
 
   const addManual = () => {
-    if (!manual.name.trim()) return
-    const entry = {
-      name: manual.name.trim(),
-      emoji: '🍽️',
-      cat: 'dish',
-      unit: 'порция',
-      kind: 'composite',
-      kcal: Math.round(num(manual.kcal)),
-      protein: round1(num(manual.protein)),
-      carbs: round1(num(manual.carbs)),
-      fat: round1(num(manual.fat)),
-      source: 'custom',
+    if (manualKind === 'food') {
+      if (!manual.name.trim()) return
+      const entry = {
+        name: manual.name.trim(),
+        emoji: '🍽️',
+        cat: 'dish',
+        unit: 'порция',
+        kind: 'composite',
+        kcal: Math.round(num(manual.kcal)),
+        protein: round1(num(manual.protein)),
+        carbs: round1(num(manual.carbs)),
+        fat: round1(num(manual.fat)),
+        sugar: round1(num(manual.sugar)),
+        source: 'custom',
+      }
+      addCustomFood(entry)
+      onAdd({ type, name: entry.name, emoji: '🍽️', grams: 1, unit: 'порция', kcal: entry.kcal, protein: entry.protein, carbs: entry.carbs, fat: entry.fat })
+      onClose()
+    } else {
+      if (!manualDrink.name.trim()) return
+      const mlN = Math.max(0, num(manualDrink.ml))
+      if (mlN <= 0) return
+      const f = mlN / 100
+      const res = {
+        kcal: Math.round(num(manualDrink.kcal100) * f),
+        protein: round1(num(manualDrink.protein100) * f),
+        carbs: round1(num(manualDrink.sugar100) * f),
+        fat: 0,
+      }
+      addCustomFood({
+        name: manualDrink.name.trim(),
+        emoji: '🥤',
+        cat: 'drink',
+        unit: 'мл',
+        kcal: num(manualDrink.kcal100),
+        protein: num(manualDrink.protein100),
+        carbs: num(manualDrink.sugar100),
+        fat: 0,
+        sugar: num(manualDrink.sugar100),
+        source: 'custom',
+      })
+      onAdd({ type, name: manualDrink.name.trim(), emoji: '🥤', grams: mlN, unit: 'мл', ...res })
+      onClose()
     }
-    addCustomFood(entry)
-    onAdd({ type, name: entry.name, emoji: '🍽️', grams: 1, unit: 'порция', kcal: entry.kcal, protein: entry.protein, carbs: entry.carbs, fat: entry.fat })
-    onClose()
   }
 
   return (
@@ -448,30 +478,72 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
 
         {mode === 'manual' && (
           <div>
-            <div className="field">
-              <label>Название</label>
-              <input className="input" placeholder="Напр. Домашний борщ" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} />
+            <div className="seg" style={{ marginBottom: 18 }}>
+              <button className={manualKind === 'food' ? 'on' : ''} onClick={() => setManualKind('food')}>🍽️ Еда</button>
+              <button className={manualKind === 'drink' ? 'on' : ''} onClick={() => setManualKind('drink')}>🥤 Напиток</button>
             </div>
-            <div className="field">
-              <label>Калории, ккал</label>
-              <input className="input" type="number" inputMode="numeric" placeholder="350" value={manual.kcal} onChange={(e) => setManual({ ...manual, kcal: e.target.value })} />
-            </div>
-            <div className="row gap8">
-              <div className="field" style={{ flex: 1 }}>
-                <label>Белки</label>
-                <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} />
-              </div>
-              <div className="field" style={{ flex: 1 }}>
-                <label>Углеводы</label>
-                <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} />
-              </div>
-              <div className="field" style={{ flex: 1 }}>
-                <label>Жиры</label>
-                <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.fat} onChange={(e) => setManual({ ...manual, fat: e.target.value })} />
-              </div>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 14px' }}>Сохранится в разделе «Моё» для повторного использования.</p>
-            <button className="btn" style={{ marginTop: 0 }} onClick={addManual} disabled={!manual.name.trim()}>Добавить</button>
+
+            {manualKind === 'food' && (
+              <>
+                <div className="field">
+                  <label>Название</label>
+                  <input className="input" placeholder="Напр. Домашний борщ" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label>Калории, ккал</label>
+                  <input className="input" type="number" inputMode="numeric" placeholder="350" value={manual.kcal} onChange={(e) => setManual({ ...manual, kcal: e.target.value })} />
+                </div>
+                <div className="row gap8">
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>Белки, г</label>
+                    <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} />
+                  </div>
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>Углеводы, г</label>
+                    <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} />
+                  </div>
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>Жиры, г</label>
+                    <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.fat} onChange={(e) => setManual({ ...manual, fat: e.target.value })} />
+                  </div>
+                </div>
+                <div className="field">
+                  <label>Сахар, г <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(необязательно)</span></label>
+                  <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.sugar} onChange={(e) => setManual({ ...manual, sugar: e.target.value })} />
+                </div>
+                <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 14px' }}>Сохранится в разделе «Моё» для повторного использования.</p>
+                <button className="btn" style={{ marginTop: 0 }} onClick={addManual} disabled={!manual.name.trim()}>Добавить</button>
+              </>
+            )}
+
+            {manualKind === 'drink' && (
+              <>
+                <div className="field">
+                  <label>Название</label>
+                  <input className="input" placeholder="Напр. Домашний лимонад" value={manualDrink.name} onChange={(e) => setManualDrink({ ...manualDrink, name: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label>Сколько выпили, мл</label>
+                  <input className="input" type="number" inputMode="numeric" placeholder="250" value={manualDrink.ml} onChange={(e) => setManualDrink({ ...manualDrink, ml: e.target.value })} />
+                </div>
+                <div className="row gap8">
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>Ккал / 100 мл</label>
+                    <input className="input" type="number" inputMode="numeric" placeholder="42" value={manualDrink.kcal100} onChange={(e) => setManualDrink({ ...manualDrink, kcal100: e.target.value })} />
+                  </div>
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>Сахар / 100 мл</label>
+                    <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.sugar100} onChange={(e) => setManualDrink({ ...manualDrink, sugar100: e.target.value })} />
+                  </div>
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>Белки / 100 мл</label>
+                    <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.protein100} onChange={(e) => setManualDrink({ ...manualDrink, protein100: e.target.value })} />
+                  </div>
+                </div>
+                <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 14px' }}>Сохранится в разделе «Моё» — в следующий раз достаточно указать только объём.</p>
+                <button className="btn" style={{ marginTop: 0 }} onClick={addManual} disabled={!manualDrink.name.trim() || !num(manualDrink.ml)}>Добавить</button>
+              </>
+            )}
           </div>
         )}
       </div>

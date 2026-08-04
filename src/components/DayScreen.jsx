@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
@@ -9,7 +9,8 @@ import MacroBar from './MacroBar.jsx'
 const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
 
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar }) {
-  const { profile, dayOf, removeMeal, toggleWellbeing, addMeal } = useStore()
+  const { profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal } = useStore()
+  const [editingMeal, setEditingMeal] = useState(null)
   const today = keyOf()
   const day = dayOf(date)
   const totals = sumDay(day.meals)
@@ -53,19 +54,15 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar }) 
         day.meals.map((m) => {
           const meta = mealMeta(m.type)
           return (
-            <div key={m.id} className="meal-item">
-              <span className="meal-emoji">{m.emoji || meta.emoji}</span>
-              <div style={{ flex: 1 }}>
-                <div className="meal-name">{m.name}</div>
-                <div className="meal-meta">
-                  {meta.label}{m.grams ? ` · ${m.grams} ${m.unit || 'г'}` : ''} · Б{m.protein} У{m.carbs} Ж{m.fat}
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div className="tabular" style={{ fontWeight: 650 }}>{m.kcal}</div>
-                <button style={{ fontSize: 12, color: 'var(--danger)', marginTop: 2 }} onClick={() => removeMeal(date, m.id)}>удалить</button>
-              </div>
-            </div>
+            <SwipeableMealItem
+              key={m.id}
+              m={m}
+              meta={meta}
+              date={date}
+              removeMeal={removeMeal}
+              addMeal={addMeal}
+              onEdit={setEditingMeal}
+            />
           )
         })
       )}
@@ -128,6 +125,14 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar }) 
         </div>
       </div>
 
+      {editingMeal && (
+        <EditMealSheet
+          meal={editingMeal}
+          onSave={(updated) => { editMeal(date, updated); setEditingMeal(null) }}
+          onClose={() => setEditingMeal(null)}
+        />
+      )}
+
       <div className="card" style={{ marginTop: 14 }}>
         <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Самочувствие</div>
         <div className="row wrap gap8">
@@ -170,7 +175,7 @@ function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal
         <span className="h2" style={{ fontSize: 17 }}>Качество углеводов</span>
         <span className="row gap8" style={{ alignItems: 'center', flex: '0 0 auto' }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: g.color, background: g.bg, padding: '4px 12px', borderRadius: 999, whiteSpace: 'nowrap' }}>{g.emoji} {g.title}</span>
-          <span style={{ color: 'var(--ink-3)', fontSize: 13, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }}>▾</span>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}><polyline points="6 9 12 15 18 9" /></svg>
         </span>
       </button>
 
@@ -235,6 +240,138 @@ function ChipStat({ label, value, accent }) {
     <div style={{ textAlign: 'center' }}>
       <div className="tabular" style={{ fontSize: 18, fontWeight: 680, color: accent || 'var(--ink)' }}>{value}</div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{label}</div>
+    </div>
+  )
+}
+
+const ACTION_W = 80
+const SNAP = 55
+
+function SwipeableMealItem({ m, meta, date, removeMeal, addMeal, onEdit }) {
+  const [offsetX, setOffsetX] = useState(0)
+  const startRef = useRef(null)
+  const isDraggingRef = useRef(false)
+  const timerRef = useRef(null)
+  const contentRef = useRef(null)
+
+  const handlePointerDown = (e) => {
+    if (e.button !== 0) return
+    startRef.current = { x: e.clientX, y: e.clientY }
+    isDraggingRef.current = false
+    try { contentRef.current?.setPointerCapture(e.pointerId) } catch {}
+    timerRef.current = setTimeout(() => {
+      navigator.vibrate?.(40)
+      addMeal(date, { type: m.type, name: m.name, emoji: m.emoji, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat })
+      startRef.current = null
+    }, 600)
+  }
+
+  const handlePointerMove = (e) => {
+    if (!startRef.current) return
+    const dx = e.clientX - startRef.current.x
+    const dy = Math.abs(e.clientY - startRef.current.y)
+    if (!isDraggingRef.current) {
+      if (dy > Math.abs(dx) + 3) { clearTimeout(timerRef.current); startRef.current = null; return }
+      if (Math.abs(dx) < 6) return
+      isDraggingRef.current = true
+      clearTimeout(timerRef.current)
+    }
+    setOffsetX(Math.max(-ACTION_W, Math.min(ACTION_W, dx)))
+  }
+
+  const handlePointerUp = (e) => {
+    clearTimeout(timerRef.current)
+    if (!isDraggingRef.current) { startRef.current = null; return }
+    isDraggingRef.current = false
+    const dx = startRef.current ? e.clientX - startRef.current.x : 0
+    startRef.current = null
+    if (dx <= -SNAP) setOffsetX(-ACTION_W)
+    else if (dx >= SNAP) setOffsetX(ACTION_W)
+    else setOffsetX(0)
+  }
+
+  const handlePointerCancel = () => {
+    clearTimeout(timerRef.current)
+    isDraggingRef.current = false
+    startRef.current = null
+    setOffsetX(0)
+  }
+
+  const reset = () => setOffsetX(0)
+
+  return (
+    <div style={{ position: 'relative', overflow: 'hidden' }}>
+      {/* Swipe-right action: edit (appears on left) */}
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 3 }}>
+        <button style={{ color: '#fff', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { onEdit(m); reset() }}>
+          <span style={{ fontSize: 20 }}>✏️</span>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Изменить</span>
+        </button>
+      </div>
+      {/* Swipe-left action: delete (appears on right) */}
+      <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 3 }}>
+        <button style={{ color: '#fff', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { removeMeal(date, m.id); reset() }}>
+          <span style={{ fontSize: 20 }}>🗑️</span>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Удалить</span>
+        </button>
+      </div>
+      {/* Content */}
+      <div
+        ref={contentRef}
+        style={{ transform: `translateX(${offsetX}px)`, transition: isDraggingRef.current ? 'none' : 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)', touchAction: 'pan-y', userSelect: 'none', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+      >
+        <div className="meal-item" style={{ borderBottom: 'none' }}>
+          <span className="meal-emoji">{m.emoji || meta.emoji}</span>
+          <div style={{ flex: 1 }}>
+            <div className="meal-name">{m.name}</div>
+            <div className="meal-meta">{meta.label}{m.grams ? ` · ${m.grams} ${m.unit || 'г'}` : ''} · Б{m.protein} У{m.carbs} Ж{m.fat}</div>
+          </div>
+          <div className="tabular" style={{ fontWeight: 650 }}>{m.kcal}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditMealSheet({ meal, onSave, onClose }) {
+  const [grams, setGrams] = useState(String(meal.grams || ''))
+  const g = Math.max(0, parseFloat(grams) || 0)
+  const scale = meal.grams && g > 0 ? g / meal.grams : 1
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
+        <div className="row between" style={{ marginBottom: 18 }}>
+          <div className="h2" style={{ fontSize: 17 }}>{meal.name}</div>
+          <button className="iconbtn" onClick={onClose}>✕</button>
+        </div>
+        {meal.grams ? (
+          <>
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label className="label">{meal.unit === 'мл' ? 'Объём, мл' : 'Порция, г'}</label>
+              <input className="input" type="number" inputMode="decimal" value={grams} onChange={(e) => setGrams(e.target.value)} style={{ marginTop: 6 }} />
+            </div>
+            <div className="row" style={{ justifyContent: 'space-between', marginBottom: 22 }}>
+              {[['ккал', Math.round(meal.kcal * scale)], ['белки', +(meal.protein * scale).toFixed(1)], ['угл.', +(meal.carbs * scale).toFixed(1)], ['жиры', +(meal.fat * scale).toFixed(1)]].map(([l, v]) => (
+                <div key={l} style={{ textAlign: 'center' }}>
+                  <div className="tabular" style={{ fontSize: 20, fontWeight: 680 }}>{v}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>Порция не задана — редактирование недоступно.</p>
+        )}
+        <button className="btn" onClick={() => onSave(meal.grams ? { ...meal, grams: g, kcal: Math.round(meal.kcal * scale), protein: +(meal.protein * scale).toFixed(1), carbs: +(meal.carbs * scale).toFixed(1), fat: +(meal.fat * scale).toFixed(1) } : meal)}>
+          Сохранить
+        </button>
+      </div>
     </div>
   )
 }

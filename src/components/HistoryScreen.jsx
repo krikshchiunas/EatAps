@@ -34,14 +34,6 @@ export default function HistoryScreen({ onPickDay, onClose }) {
   const logged = monthKeys.filter((k) => days[k].meals.length > 0)
   const avgKcal = logged.length ? Math.round(logged.reduce((a, k) => a + sumDay(days[k].meals).kcal, 0) / logged.length) : 0
 
-  const dotColor = (kcal) => {
-    if (kcal === 0) return 'transparent'
-    const ratio = kcal / target
-    if (ratio > 1.1) return 'var(--warn)'
-    if (ratio >= 0.85) return 'var(--good)'
-    return 'var(--accent)'
-  }
-
   const isFuture = (d) => {
     const k = keyOf(new Date(ym.y, ym.m, d))
     return k > today
@@ -78,12 +70,12 @@ export default function HistoryScreen({ onPickDay, onClose }) {
               <button
                 key={i}
                 className={`cal-cell ${k === today ? 'today' : ''}`}
-                style={{ opacity: future ? 0.4 : 1, color: k === today ? 'var(--primary)' : 'var(--ink-2)', fontWeight: k === today ? 700 : 500 }}
+                style={{ opacity: future ? 0.4 : 1, color: k === today ? 'var(--primary)' : 'var(--ink-2)', fontWeight: k === today ? 700 : 500, position: 'relative' }}
                 onClick={() => !future && onPickDay(k)}
                 disabled={future}
               >
-                {d}
-                <span className="dot" style={{ background: dotColor(kcal) }} />
+                <MiniRing kcal={kcal} target={target} />
+                <span style={{ position: 'relative', zIndex: 1 }}>{d}</span>
               </button>
             )
           })}
@@ -120,5 +112,21 @@ function Legend({ color, text }) {
     <span className="row gap8">
       <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} /> {text}
     </span>
+  )
+}
+
+function MiniRing({ kcal, target }) {
+  if (kcal <= 0) return null
+  const r = 15
+  const circ = 2 * Math.PI * r
+  const pct = Math.min(kcal / target, 1)
+  const dash = pct * circ
+  const ratio = kcal / target
+  const color = ratio > 1.1 ? 'var(--warn)' : ratio >= 0.85 ? 'var(--good)' : 'var(--accent)'
+  return (
+    <svg viewBox="0 0 36 36" aria-hidden="true" style={{ position: 'absolute', inset: 2, width: 'calc(100% - 4px)', height: 'calc(100% - 4px)' }}>
+      <circle cx="18" cy="18" r={r} fill="none" stroke="var(--border)" strokeWidth="2" />
+      <circle cx="18" cy="18" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${dash} ${circ}`} transform="rotate(-90 18 18)" />
+    </svg>
   )
 }
