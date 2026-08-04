@@ -10,6 +10,7 @@ import FriendsScreen from './components/FriendsScreen.jsx'
 import BottomNav from './components/BottomNav.jsx'
 import AddMealSheet from './components/AddMealSheet.jsx'
 import ResetPasswordSheet from './components/ResetPasswordSheet.jsx'
+import PushScreen from './components/PushScreen.jsx'
 
 export default function App() {
   const { profile, addMeal, recovery, clearRecovery, user } = useStore()
@@ -60,9 +61,9 @@ export default function App() {
       <BottomNav tab={tab} setTab={setTab} onAdd={() => { setTab('day'); setSheet(true) }} totalUnread={totalUnread} />
 
       {calendarOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 200, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          <HistoryScreen onPickDay={pickDay} onClose={() => setCalendarOpen(false)} />
-        </div>
+        <PushScreen onClose={() => setCalendarOpen(false)}>
+          {(close) => <HistoryScreen onPickDay={pickDay} onClose={close} />}
+        </PushScreen>
       )}
 
       {sheet && (

@@ -304,23 +304,35 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .divider { height: 1px; background: var(--border); margin: 18px 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-/* ── Chat / FriendAccount full-screen overlays ── */
-@keyframes push-in  { from { transform: translateX(100%); } to { transform: translateX(0); } }
-@keyframes push-out { from { transform: translateX(0); }   to { transform: translateX(100%); } }
+/* ── Push-screen оверлеи (Chat / FriendAccount / Календарь) ── */
 
 /* Скрываем BottomNav, пока открыт любой оверлей */
 .has-overlay .bottomnav { display: none !important; }
+
+/* Затемнение предыдущего экрана под панелью (глубина, как в iOS).
+   opacity задаёт движок жеста напрямую. */
+.nav-scrim {
+  position: fixed; inset: 0; z-index: 60;
+  background: #000; opacity: 0;
+  pointer-events: none;
+}
 
 .chat-overlay {
   position: fixed; inset: 0; z-index: 60;
   background: var(--bg);
   max-width: 460px; margin: 0 auto;
   display: flex; flex-direction: column;
-  animation: push-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* трансформ появления/жеста ставит движок (useSwipeBack) — без CSS-анимации */
   will-change: transform;
 }
-.chat-overlay.closing {
-  animation: push-out 0.26s cubic-bezier(0.4, 0, 0.8, 0.6) both;
+
+/* Универсальная push-панель (календарь и прочие вложенные экраны) */
+.push-screen {
+  position: fixed; inset: 0; z-index: 60;
+  background: var(--bg);
+  max-width: 460px; margin: 0 auto;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  will-change: transform;
 }
 
 /* Header */

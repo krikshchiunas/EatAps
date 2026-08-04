@@ -140,7 +140,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const [busy, setBusy] = useState(false)
   const menuRef = useRef(null)
 
-  const { bind, style: swipeStyle, close: handleClose } = useSwipeBack(onClose)
+  const { panelProps, scrimProps, close: handleClose } = useSwipeBack(onClose)
 
   useEffect(() => {
     const el = document.documentElement
@@ -200,7 +200,8 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
 
   return (
     <>
-    <div className="chat-overlay" style={swipeStyle} {...bind}>
+    <div className="nav-scrim" {...scrimProps} />
+    <div className="chat-overlay" {...panelProps}>
       {/* Header */}
       <header className="chat-header">
         <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }}>‹</button>

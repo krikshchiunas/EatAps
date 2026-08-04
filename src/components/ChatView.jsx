@@ -35,7 +35,7 @@ export default function ChatView({ friend, onClose }) {
   const listRef = useRef(null)
   const fileRef = useRef(null)
 
-  const { bind, style: swipeStyle, close: handleClose } = useSwipeBack(onClose)
+  const { panelProps, scrimProps, close: handleClose } = useSwipeBack(onClose)
 
   // Скрыть BottomNav пока чат открыт (счётчик — FriendAccount тоже добавляет)
   useEffect(() => {
@@ -123,7 +123,8 @@ export default function ChatView({ friend, onClose }) {
 
   return (
     <>
-      <div className="chat-overlay" style={swipeStyle} {...bind}>
+      <div className="nav-scrim" {...scrimProps} />
+      <div className="chat-overlay" {...panelProps}>
         <header className="chat-header">
           <button className="iconbtn" onClick={handleClose} aria-label="Назад">‹</button>
           <button
