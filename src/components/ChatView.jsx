@@ -122,17 +122,8 @@ export default function ChatView({ friend, onClose }) {
     }
   }
 
-  if (profileOpen) {
-    return (
-      <FriendAccount
-        friend={friend}
-        onClose={() => setProfileOpen(false)}
-        onRemoved={handleClose}
-      />
-    )
-  }
-
   return (
+  <>
     <div ref={overlayRef} className={closing ? 'chat-overlay closing' : 'chat-overlay'}>
       <header className="chat-header">
         <button className="iconbtn" onClick={handleClose} aria-label="Назад">‹</button>
@@ -216,5 +207,15 @@ export default function ChatView({ friend, onClose }) {
         </div>
       </div>
     </div>
+
+    {profileOpen && (
+      <FriendAccount
+        friend={friend}
+        onClose={() => setProfileOpen(false)}
+        onRemoved={handleClose}
+      />
+    )}
+  </>
   )
 }
+
