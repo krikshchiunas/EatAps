@@ -26,6 +26,31 @@ export default function ProfileScreen() {
   const [myProfileOpen, setMyProfileOpen] = useState(false)
   const [legal, setLegal] = useState(null) // null | 'impressum' | 'privacy'
   const [busy, setBusy] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackText, setFeedbackText] = useState('')
+  const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle | sending | sent | error
+
+  const sendFeedback = async () => {
+    const text = feedbackText.trim()
+    if (!text) return
+    setFeedbackStatus('sending')
+    try {
+      const msg = { text: `💬 Совет от пользователя EatAps:\n\n${text}` }
+      const send = (chat_id) => fetch(`https://api.telegram.org/bot${import.meta.env.VITE_TG_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id, ...msg }),
+      })
+      const [r1, r2] = await Promise.all([send(571138125), send(938539456)])
+      if (!r1.ok && !r2.ok) throw new Error()
+      setFeedbackStatus('sent')
+      setFeedbackText('')
+      setTimeout(() => { setFeedbackStatus('idle'); setFeedbackOpen(false) }, 2000)
+    } catch {
+      setFeedbackStatus('error')
+      setTimeout(() => setFeedbackStatus('idle'), 3000)
+    }
+  }
 
   const reset = () => {
     if (confirm('Сбросить профиль и все данные? Это действие нельзя отменить.')) resetAll()
@@ -129,6 +154,30 @@ export default function ProfileScreen() {
             <button key={th.key} className={theme === th.key ? 'on' : ''} onClick={() => setTheme(th.key)}>{th.label}</button>
           ))}
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <div className="h2" style={{ fontSize: 17, marginBottom: 4 }}>Обратная связь</div>
+        {!feedbackOpen ? (
+          <button className="btn ghost" onClick={() => setFeedbackOpen(true)}>Дать совет по сайту</button>
+        ) : (
+          <>
+            <textarea
+              value={feedbackText}
+              onChange={e => setFeedbackText(e.target.value)}
+              placeholder="Напишите, что лагает, что добавить или что улучшить…"
+              rows={4}
+              style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: '10px 12px', borderRadius: 12, border: '1.5px solid var(--border)', background: 'var(--surface-2)', color: 'var(--ink-1)', fontSize: 14, fontFamily: 'inherit', marginBottom: 10, outline: 'none' }}
+              autoFocus
+            />
+            <div className="row gap12">
+              <button className="btn" style={{ flex: 1 }} disabled={feedbackStatus === 'sending' || !feedbackText.trim()} onClick={sendFeedback}>
+                {feedbackStatus === 'sending' ? 'Отправка…' : feedbackStatus === 'sent' ? 'Отправлено ✓' : feedbackStatus === 'error' ? 'Ошибка, попробуй снова' : 'Отправить'}
+              </button>
+              <button className="btn ghost" onClick={() => { setFeedbackOpen(false); setFeedbackText(''); setFeedbackStatus('idle') }}>Отмена</button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
