@@ -30,6 +30,7 @@ const SECTIONS = [
   { key: 'dairy', label: 'Молочное' },
   { key: 'cheese', label: 'Сыры' },
   { key: 'nut', label: 'Орехи' },
+  { key: 'pastry', label: 'Выпечка' },
   { key: 'sweet', label: 'Сладкое' },
   { key: 'dish', label: 'Блюда' },
   { key: 'dessert', label: 'Десерты' },
