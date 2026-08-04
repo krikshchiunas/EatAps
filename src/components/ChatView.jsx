@@ -32,8 +32,15 @@ export default function ChatView({ friend, onClose }) {
   const [err, setErr] = useState(null)
   const [preview, setPreview] = useState(null) // { url, file }
   const [profileOpen, setProfileOpen] = useState(false)
+  const [closing, setClosing] = useState(false)
   const listRef = useRef(null)
   const fileRef = useRef(null)
+  const overlayRef = useRef(null)
+
+  const handleClose = () => {
+    setClosing(true)
+    setTimeout(onClose, 240)
+  }
 
   const scrollToBottom = (smooth = false) => {
     const el = listRef.current
@@ -118,15 +125,15 @@ export default function ChatView({ friend, onClose }) {
       <FriendAccount
         friend={friend}
         onClose={() => setProfileOpen(false)}
-        onRemoved={onClose}
+        onRemoved={handleClose}
       />
     )
   }
 
   return (
-    <div className="chat-overlay">
+    <div ref={overlayRef} className={closing ? 'chat-overlay closing' : 'chat-overlay'}>
       <header className="chat-header">
-        <button className="iconbtn" onClick={onClose} aria-label="Назад">‹</button>
+        <button className="iconbtn" onClick={handleClose} aria-label="Назад">‹</button>
         <button
           className="row gap12"
           style={{ alignItems: 'center', minWidth: 0, flex: 1, textAlign: 'left' }}

@@ -44,7 +44,13 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [expandedMeal, setExpandedMeal] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [closing, setClosing] = useState(false)
   const menuRef = useRef(null)
+
+  const handleClose = () => {
+    setClosing(true)
+    setTimeout(onClose, 240)
+  }
   const today = keyOf()
 
   useEffect(() => {
@@ -74,7 +80,8 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
     setBusy(true)
     await removeFriendship(friend.rowId)
     setBusy(false)
-    onRemoved()
+    setClosing(true)
+    setTimeout(onRemoved, 240)
   }
 
   const handleMute = () => {
@@ -90,10 +97,10 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const target = p.targets?.calories
 
   return (
-    <div className="chat-overlay">
+    <div className={closing ? 'chat-overlay closing' : 'chat-overlay'}>
       {/* Header */}
       <header className="chat-header">
-        <button className="iconbtn" onClick={onClose} style={{ fontSize: 22 }}>‹</button>
+        <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }}>‹</button>
 
         <div className="row gap10" style={{ alignItems: 'center', minWidth: 0, flex: 1 }}>
           <Avatar src={avatar} name={name} size={36} />
