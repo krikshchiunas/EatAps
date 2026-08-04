@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
@@ -11,7 +11,44 @@ const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжест
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, clipboard, setClipboard }) {
   const { profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal } = useStore()
   const [editingMeal, setEditingMeal] = useState(null)
+  const screenRef = useRef(null)
   const today = keyOf()
+
+  // Horizontal swipe on the screen → navigate between days.
+  // Uses native non-passive listeners so we can preventDefault on confirmed horizontal swipes.
+  useEffect(() => {
+    const el = screenRef.current
+    if (!el) return
+    let sx = null, sy = null, decided = false, horiz = false
+    const onTS = (e) => {
+      if (e.target.closest('[data-swipeable]')) return
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY
+      decided = false; horiz = false
+    }
+    const onTM = (e) => {
+      if (sx === null) return
+      const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy
+      if (!decided && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) {
+        decided = true; horiz = Math.abs(dx) > Math.abs(dy) * 1.3
+      }
+      if (horiz) e.preventDefault()
+    }
+    const onTE = (e) => {
+      if (sx === null || !horiz) { sx = null; return }
+      const dx = e.changedTouches[0].clientX - sx
+      sx = null; horiz = false; decided = false
+      if (dx < -100) setDate((d) => addDays(d, 1))
+      else if (dx > 100) setDate((d) => addDays(d, -1))
+    }
+    el.addEventListener('touchstart', onTS, { passive: true })
+    el.addEventListener('touchmove', onTM, { passive: false })
+    el.addEventListener('touchend', onTE, { passive: true })
+    return () => {
+      el.removeEventListener('touchstart', onTS)
+      el.removeEventListener('touchmove', onTM)
+      el.removeEventListener('touchend', onTE)
+    }
+  }, [setDate])
   const day = dayOf(date)
   const totals = sumDay(day.meals)
   const t = profile.targets
@@ -80,7 +117,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, cl
   )
 
   return (
-    <div className="screen">
+    <div className="screen" ref={screenRef}>
       <div className="row between" style={{ marginBottom: 20 }}>
         <button className="iconbtn" onClick={() => setDate(addDays(date, -1))} aria-label="Предыдущий день">‹</button>
         {/* Тап по дате открывает календарь (иконка-подсказка справа от даты). */}
@@ -266,9 +303,8 @@ function SwipeableMealItem({ m, meta, date, removeMeal, setClipboard, onEdit }) 
 
   const handlePointerDown = (e) => {
     if (e.button !== 0) return
-    startRef.current = { x: e.clientX, y: e.clientY }
+    startRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId }
     isDraggingRef.current = false
-    try { contentRef.current?.setPointerCapture(e.pointerId) } catch {}
     timerRef.current = setTimeout(() => {
       navigator.vibrate?.(40)
       setClipboard({ type: m.type, name: m.name, emoji: m.emoji, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat })
@@ -281,10 +317,12 @@ function SwipeableMealItem({ m, meta, date, removeMeal, setClipboard, onEdit }) 
     const dx = e.clientX - startRef.current.x
     const dy = Math.abs(e.clientY - startRef.current.y)
     if (!isDraggingRef.current) {
-      if (dy > Math.abs(dx) + 3) { clearTimeout(timerRef.current); startRef.current = null; return }
-      if (Math.abs(dx) < 6) return
+      if (dy > Math.abs(dx) + 4) { clearTimeout(timerRef.current); startRef.current = null; return }
+      if (Math.abs(dx) < 8) return
       isDraggingRef.current = true
       clearTimeout(timerRef.current)
+      // Capture only once we're sure it's horizontal
+      try { contentRef.current?.setPointerCapture(startRef.current.id) } catch {}
     }
     setOffsetX(Math.max(-ACTION_W, Math.min(ACTION_W, dx)))
   }
@@ -328,6 +366,7 @@ function SwipeableMealItem({ m, meta, date, removeMeal, setClipboard, onEdit }) 
       {/* Content */}
       <div
         ref={contentRef}
+        data-swipeable="true"
         style={{ transform: `translateX(${offsetX}px)`, transition: isDraggingRef.current ? 'none' : 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)', touchAction: 'pan-y', userSelect: 'none', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -349,13 +388,21 @@ function SwipeableMealItem({ m, meta, date, removeMeal, setClipboard, onEdit }) 
 
 function EditMealSheet({ meal, onSave, onClose }) {
   const [grams, setGrams] = useState(String(meal.grams || ''))
+  const [dragY, setDragY] = useState(0)
+  const grabY = useRef(null)
   const g = Math.max(0, parseFloat(grams) || 0)
   const scale = meal.grams && g > 0 ? g / meal.grams : 1
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="grabber" />
+      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ transform: `translateY(${dragY}px)`, transition: dragY > 0 ? 'none' : 'transform 0.3s ease' }}>
+        <div
+          className="grabber"
+          style={{ touchAction: 'none', padding: '6px 0', cursor: 'grab' }}
+          onTouchStart={(e) => { grabY.current = e.touches[0].clientY }}
+          onTouchMove={(e) => { if (grabY.current === null) return; setDragY(Math.max(0, e.touches[0].clientY - grabY.current)) }}
+          onTouchEnd={() => { if (grabY.current === null) return; grabY.current = null; if (dragY > 80) onClose(); else setDragY(0) }}
+        />
         <div className="row between" style={{ marginBottom: 18 }}>
           <div className="h2" style={{ fontSize: 17 }}>{meal.name}</div>
           <button className="iconbtn" onClick={onClose}>✕</button>

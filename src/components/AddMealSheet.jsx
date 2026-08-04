@@ -260,10 +260,19 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
     }
   }
 
+  const [dragY, setDragY] = useState(0)
+  const grabY = useRef(null)
+
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="grabber" />
+      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ transform: `translateY(${dragY}px)`, transition: dragY > 0 ? 'none' : 'transform 0.3s ease' }}>
+        <div
+          className="grabber"
+          style={{ touchAction: 'none', padding: '6px 0', cursor: 'grab' }}
+          onTouchStart={(e) => { grabY.current = e.touches[0].clientY }}
+          onTouchMove={(e) => { if (grabY.current === null) return; setDragY(Math.max(0, e.touches[0].clientY - grabY.current)) }}
+          onTouchEnd={() => { if (grabY.current === null) return; grabY.current = null; if (dragY > 80) onClose(); else setDragY(0) }}
+        />
         <div className="row between" style={{ marginBottom: 18 }}>
           <h2 className="h2">Добавить приём пищи</h2>
           <button className="iconbtn" onClick={onClose} aria-label="Закрыть">✕</button>
