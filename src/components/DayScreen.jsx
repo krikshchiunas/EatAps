@@ -11,16 +11,39 @@ const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжест
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, clipboard, setClipboard }) {
   const { profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal } = useStore()
   const [editingMeal, setEditingMeal] = useState(null)
+  const [dragX, setDragX] = useState(0)
+  const transEnabledRef = useRef(false)
+  const navigatingRef = useRef(false)
   const screenRef = useRef(null)
   const today = keyOf()
 
-  // Horizontal swipe on the screen → navigate between days.
-  // Uses native non-passive listeners so we can preventDefault on confirmed horizontal swipes.
   useEffect(() => {
     const el = screenRef.current
     if (!el) return
     let sx = null, sy = null, decided = false, horiz = false
+
+    const navigate = (direction) => {
+      if (navigatingRef.current) return
+      navigatingRef.current = true
+      const W = window.innerWidth
+      transEnabledRef.current = true
+      setDragX(direction > 0 ? -W : W)
+      setTimeout(() => {
+        transEnabledRef.current = false
+        setDate((d) => addDays(d, direction))
+        setDragX(direction > 0 ? W : -W)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            transEnabledRef.current = true
+            setDragX(0)
+            setTimeout(() => { transEnabledRef.current = false; navigatingRef.current = false }, 280)
+          })
+        })
+      }, 230)
+    }
+
     const onTS = (e) => {
+      if (navigatingRef.current) return
       if (e.target.closest('[data-swipeable]')) return
       sx = e.touches[0].clientX; sy = e.touches[0].clientY
       decided = false; horiz = false
@@ -31,14 +54,15 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, cl
       if (!decided && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) {
         decided = true; horiz = Math.abs(dx) > Math.abs(dy) * 1.3
       }
-      if (horiz) e.preventDefault()
+      if (horiz) { e.preventDefault(); setDragX(e.touches[0].clientX - sx) }
     }
     const onTE = (e) => {
       if (sx === null || !horiz) { sx = null; return }
       const dx = e.changedTouches[0].clientX - sx
       sx = null; horiz = false; decided = false
-      if (dx < -100) setDate((d) => addDays(d, 1))
-      else if (dx > 100) setDate((d) => addDays(d, -1))
+      if (dx < -100) navigate(1)
+      else if (dx > 100) navigate(-1)
+      else { transEnabledRef.current = true; setDragX(0); setTimeout(() => { transEnabledRef.current = false }, 280) }
     }
     el.addEventListener('touchstart', onTS, { passive: true })
     el.addEventListener('touchmove', onTM, { passive: false })
@@ -117,7 +141,15 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, cl
   )
 
   return (
-    <div className="screen" ref={screenRef}>
+    <div
+      className="screen"
+      ref={screenRef}
+      style={{
+        transform: `translateX(${dragX}px)`,
+        transition: transEnabledRef.current ? 'transform 0.25s cubic-bezier(0.4,0,0.2,1)' : 'none',
+        willChange: 'transform',
+      }}
+    >
       <div className="row between" style={{ marginBottom: 20 }}>
         <button className="iconbtn" onClick={() => setDate(addDays(date, -1))} aria-label="Предыдущий день">‹</button>
         {/* Тап по дате открывает календарь (иконка-подсказка справа от даты). */}

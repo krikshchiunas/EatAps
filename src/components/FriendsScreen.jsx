@@ -65,7 +65,7 @@ function FriendMenu({ friend, isPinned, isMuted, onPin, onMute, onRemove, onClos
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
-export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
+export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab }) {
   const { user, supabaseEnabled } = useStore()
   const myId = user?.id || ''
 
@@ -80,6 +80,63 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
   const [menuErr, setMenuErr] = useState(null)
   const [pinned, setPinned] = useState(getPinned)
   const [muted, setMuted] = useState(getMuted)
+  const [dragX, setDragX] = useState(0)
+  const transEnabledRef = useRef(false)
+  const navigatingRef = useRef(false)
+  const screenRef = useRef(null)
+  const chatFriendRef = useRef(chatFriend)
+  useEffect(() => { chatFriendRef.current = chatFriend }, [chatFriend])
+
+  useEffect(() => {
+    const el = screenRef.current
+    if (!el || !setTab) return
+    let sx = null, sy = null, decided = false, horiz = false
+
+    const navigate = (toTab) => {
+      if (navigatingRef.current) return
+      navigatingRef.current = true
+      const W = window.innerWidth
+      const dir = toTab === 'day' ? 1 : -1
+      transEnabledRef.current = true
+      setDragX(dir > 0 ? W : -W)
+      setTimeout(() => {
+        transEnabledRef.current = false
+        setDragX(0)
+        setTab(toTab)
+        navigatingRef.current = false
+      }, 230)
+    }
+
+    const onTS = (e) => {
+      if (navigatingRef.current || chatFriendRef.current) return
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY
+      decided = false; horiz = false
+    }
+    const onTM = (e) => {
+      if (sx === null) return
+      const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy
+      if (!decided && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) {
+        decided = true; horiz = Math.abs(dx) > Math.abs(dy) * 1.3
+      }
+      if (horiz) { e.preventDefault(); setDragX(e.touches[0].clientX - sx) }
+    }
+    const onTE = (e) => {
+      if (sx === null || !horiz) { sx = null; return }
+      const dx = e.changedTouches[0].clientX - sx
+      sx = null; horiz = false; decided = false
+      if (dx > 100) navigate('day')
+      else if (dx < -100) navigate('profile')
+      else { transEnabledRef.current = true; setDragX(0); setTimeout(() => { transEnabledRef.current = false }, 280) }
+    }
+    el.addEventListener('touchstart', onTS, { passive: true })
+    el.addEventListener('touchmove', onTM, { passive: false })
+    el.addEventListener('touchend', onTE, { passive: true })
+    return () => {
+      el.removeEventListener('touchstart', onTS)
+      el.removeEventListener('touchmove', onTM)
+      el.removeEventListener('touchend', onTE)
+    }
+  }, [setTab])
 
   const reload = async () => {
     try {
@@ -126,9 +183,15 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
     setBusy(false); reload()
   }
 
+  const swipeStyle = {
+    transform: `translateX(${dragX}px)`,
+    transition: transEnabledRef.current ? 'transform 0.25s cubic-bezier(0.4,0,0.2,1)' : 'none',
+    willChange: 'transform',
+  }
+
   if (!supabaseEnabled || !user) {
     return (
-      <div className="screen">
+      <div className="screen" ref={screenRef} style={swipeStyle}>
         <h1 className="h1" style={{ margin: '4px 0 20px' }}>Друзья</h1>
         <div className="card">
           <p className="muted" style={{ fontSize: 15 }}>Войдите в аккаунт (вкладка «Профиль»), чтобы добавлять друзей.</p>
@@ -138,7 +201,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
   }
 
   return (
-    <div className="screen" onClick={() => openMenu && setOpenMenu(null)}>
+    <div className="screen" ref={screenRef} style={swipeStyle} onClick={() => openMenu && setOpenMenu(null)}>
       <div className="row between" style={{ alignItems: 'center', margin: '0 0 16px' }}>
         <h1 className="h1" style={{ margin: '4px 0 0' }}>Друзья</h1>
         <button className="btn" style={{ width: 'auto', height: 40, padding: '0 16px', fontSize: 14 }} onClick={() => setAddOpen(true)}>

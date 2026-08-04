@@ -54,7 +54,7 @@ export default function App() {
   return (
     <div className="app">
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} onOpenCalendar={() => setCalendarOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
-      {tab === 'friends' && <FriendsScreen unreadCounts={unreadCounts} onChatClosed={refreshUnread} />}
+      {tab === 'friends' && <FriendsScreen unreadCounts={unreadCounts} onChatClosed={refreshUnread} setTab={setTab} />}
       {tab === 'profile' && <ProfileScreen />}
 
       <BottomNav tab={tab} setTab={setTab} onAdd={() => { setTab('day'); setSheet(true) }} totalUnread={totalUnread} />
