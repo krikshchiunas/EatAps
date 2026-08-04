@@ -182,6 +182,20 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
     const s = scale(effective, g)
     const name = selected.hasVariants && method ? `${selected.name}, ${method.label.toLowerCase()}` : selected.name
     onAdd({ type, name, emoji: selected.emoji, grams: g, unit, ...s })
+    if (selected.name === 'Яйцо' && method?.label === 'Глазунья на сл. масле') {
+      const bg = g <= 55 ? 5 : 7.5
+      onAdd({
+        type,
+        name: `Сливочное масло (жарка)`,
+        emoji: '🧈',
+        grams: bg,
+        unit: 'г',
+        kcal: Math.round(bg * 7.17),
+        protein: +(bg * 0.009).toFixed(1),
+        carbs: +(bg * 0.001).toFixed(1),
+        fat: +(bg * 0.81).toFixed(1),
+      })
+    }
     if (isHotDrink(selected) && sugar > 0) {
       onAdd({
         type,
