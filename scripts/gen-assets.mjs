@@ -4,10 +4,9 @@ import sharp from 'sharp'
 import { mkdirSync } from 'node:fs'
 
 const SRC = 'brand/logo-source.png'
-// Фон берём из угла исходника — работает для любого лого (тёмного/светлого).
-const { data: corner } = await sharp(SRC).extract({ left: 6, top: 6, width: 1, height: 1 }).raw().toBuffer({ resolveWithObject: true })
-const BG = { r: corner[0], g: corner[1], b: corner[2], alpha: 1 }
-console.log('background', '#' + [corner[0], corner[1], corner[2]].map((v) => v.toString(16).padStart(2, '0')).join(''))
+// Фон — белый (лого с прозрачным фоном).
+const BG = { r: 252, g: 255, b: 255, alpha: 1 }
+console.log('background #fcffff')
 
 mkdirSync('public/splash', { recursive: true })
 
