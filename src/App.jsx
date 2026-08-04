@@ -16,6 +16,7 @@ export default function App() {
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(false)
   const [calendarOpen, setCalendarOpen] = useState(false)
+  const [clipboard, setClipboard] = useState(null)
 
   // Ссылка «сброс пароля» из письма — форма нового пароля поверх всего.
   const recoverySheet = recovery ? <ResetPasswordSheet onClose={clearRecovery} /> : null
@@ -37,7 +38,7 @@ export default function App() {
 
   return (
     <div className="app">
-      {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} onOpenCalendar={() => setCalendarOpen(true)} />}
+      {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} onOpenCalendar={() => setCalendarOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
       {tab === 'friends' && <FriendsScreen />}
       {tab === 'profile' && <ProfileScreen />}
 

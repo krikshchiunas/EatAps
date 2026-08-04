@@ -8,7 +8,7 @@ import MacroBar from './MacroBar.jsx'
 
 const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
 
-export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar }) {
+export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, clipboard, setClipboard }) {
   const { profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal } = useStore()
   const [editingMeal, setEditingMeal] = useState(null)
   const today = keyOf()
@@ -27,10 +27,20 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar }) 
   // Карточка приёмов пищи — вынесена в переменную, чтобы стоять ВЫШЕ макросов.
   const mealsCard = (
     <div className="card" style={{ marginTop: 14 }}>
-      <div className="row between" style={{ marginBottom: 6 }}>
+      <div className="row between" style={{ marginBottom: clipboard ? 8 : 6 }}>
         <div className="h2" style={{ fontSize: 17 }}>Приёмы пищи</div>
         <button style={{ color: 'var(--primary)', fontWeight: 600, fontSize: 15 }} onClick={onOpenAdd}>＋ Добавить</button>
       </div>
+      {clipboard && (
+        <button
+          className="btn soft"
+          style={{ height: 40, fontSize: 14, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}
+          onClick={() => addMeal(date, clipboard)}
+        >
+          <span>📋</span>
+          <span>Вставить «{clipboard.name}»</span>
+        </button>
+      )}
       {day.meals.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '26px 0 12px' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>🍽️</div>
@@ -60,7 +70,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar }) 
               meta={meta}
               date={date}
               removeMeal={removeMeal}
-              addMeal={addMeal}
+              setClipboard={setClipboard}
               onEdit={setEditingMeal}
             />
           )
@@ -247,7 +257,7 @@ function ChipStat({ label, value, accent }) {
 const ACTION_W = 80
 const SNAP = 55
 
-function SwipeableMealItem({ m, meta, date, removeMeal, addMeal, onEdit }) {
+function SwipeableMealItem({ m, meta, date, removeMeal, setClipboard, onEdit }) {
   const [offsetX, setOffsetX] = useState(0)
   const startRef = useRef(null)
   const isDraggingRef = useRef(false)
@@ -261,7 +271,7 @@ function SwipeableMealItem({ m, meta, date, removeMeal, addMeal, onEdit }) {
     try { contentRef.current?.setPointerCapture(e.pointerId) } catch {}
     timerRef.current = setTimeout(() => {
       navigator.vibrate?.(40)
-      addMeal(date, { type: m.type, name: m.name, emoji: m.emoji, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat })
+      setClipboard({ type: m.type, name: m.name, emoji: m.emoji, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat })
       startRef.current = null
     }, 600)
   }
