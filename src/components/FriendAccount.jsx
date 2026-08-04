@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { pullFriendState, removeFriendship } from '../lib/supabase.js'
+import { pullFriendState, removeFriendship, sendChatMessage } from '../lib/supabase.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { sumDay } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { Avatar } from './FriendsScreen.jsx'
+import { useStore } from '../store.jsx'
 
 function Stat({ label, v }) {
   return (
@@ -38,12 +39,104 @@ function DotsMenu({ onMute, onRemove, onClose }) {
   )
 }
 
+const QUICK_REACTIONS = ['👍', '❤️', '🔥', '😂', '😮', '💪']
+
+function MealReactSheet({ meal, friend, myId, onClose }) {
+  const [picked, setPicked] = useState(null)
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const send = async () => {
+    const emoji = picked || ''
+    const message = [emoji, text.trim()].filter(Boolean).join(' ')
+    if (!message) return
+    setSending(true)
+    setErr(null)
+    const res = await sendChatMessage({
+      sender: myId,
+      recipient: friend.id,
+      text: message,
+      mealRef: { emoji: meal.emoji || '🍽️', name: meal.name, kcal: meal.kcal },
+    })
+    setSending(false)
+    if (res.error) { setErr(res.error); return }
+    onClose()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: 'var(--surface)', borderRadius: '20px 20px 0 0', padding: '20px 20px 32px', maxHeight: '80vh', overflowY: 'auto' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Meal preview card */}
+        <div style={{ background: 'var(--surface-2)', borderRadius: 14, padding: '12px 14px', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 28 }}>{meal.emoji || '🍽️'}</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meal.name}</div>
+            <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>{meal.kcal} ккал{meal.grams ? ` · ${meal.grams} ${meal.unit || 'г'}` : ''}</div>
+          </div>
+        </div>
+
+        {/* Quick emoji reactions */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+          {QUICK_REACTIONS.map((e) => (
+            <button
+              key={e}
+              onClick={() => setPicked(picked === e ? null : e)}
+              style={{
+                fontSize: 28, width: 50, height: 50, borderRadius: '50%',
+                background: picked === e ? 'var(--primary-weak)' : 'var(--surface-2)',
+                border: picked === e ? '2px solid var(--primary)' : '2px solid transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.15s',
+              }}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+
+        {/* Text input */}
+        <div style={{ marginBottom: 14 }}>
+          <input
+            className="input"
+            placeholder="Написать комментарий…"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') send() }}
+            style={{ height: 46, fontSize: 15 }}
+            autoFocus
+          />
+        </div>
+
+        {err && <div style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 10 }}>{err}</div>}
+
+        <button
+          className="btn"
+          disabled={sending || (!picked && !text.trim())}
+          onClick={send}
+        >
+          {sending ? 'Отправляю…' : 'Отправить в чат'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function FriendAccount({ friend, onClose, onRemoved }) {
+  const { user } = useStore()
+  const myId = user?.id || ''
   const [state, setState] = useState(null)
   const [err, setErr] = useState(null)
   const [date, setDate] = useState(keyOf())
   const [menuOpen, setMenuOpen] = useState(false)
   const [expandedMeal, setExpandedMeal] = useState(null)
+  const [reactingMeal, setReactingMeal] = useState(null)
   const [busy, setBusy] = useState(false)
   const menuRef = useRef(null)
 
@@ -106,6 +199,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const target = p.targets?.calories
 
   return (
+    <>
     <div className="chat-overlay" style={swipeStyle} {...bind}>
       {/* Header */}
       <header className="chat-header">
@@ -229,7 +323,18 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
                           </div>
                         </div>
                       </div>
-                      <span className="tabular" style={{ fontWeight: 600, flex: '0 0 auto' }}>{m.kcal} ккал</span>
+                      <div className="row gap10" style={{ alignItems: 'center', flex: '0 0 auto' }}>
+                        <span className="tabular" style={{ fontWeight: 600 }}>{m.kcal} ккал</span>
+                        <button
+                          onClick={() => setReactingMeal(m)}
+                          style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}
+                          aria-label="Отреагировать"
+                        >
+                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                     {isExpanded && customFood && (
                       <div style={{ padding: '6px 8px 10px 36px', background: 'var(--surface-2)', borderRadius: 10, marginBottom: 6 }}>
@@ -248,5 +353,15 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
         )}
       </div>
     </div>
+
+    {reactingMeal && (
+      <MealReactSheet
+        meal={reactingMeal}
+        friend={friend}
+        myId={myId}
+        onClose={() => setReactingMeal(null)}
+      />
+    )}
+    </>
   )
 }

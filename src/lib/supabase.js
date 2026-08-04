@@ -249,15 +249,16 @@ export function subscribeToIncoming(myId, onNew) {
   return () => supabase.removeChannel(channel)
 }
 
-export async function sendChatMessage({ sender, recipient, text, imageUrl }) {
+export async function sendChatMessage({ sender, recipient, text, imageUrl, mealRef }) {
   if (!supabase) return { error: 'Нет подключения' }
   const payload = {
     sender,
     recipient,
     text: text?.trim() ? text.trim() : null,
     image_url: imageUrl || null,
+    meal_ref: mealRef || null,
   }
-  if (!payload.text && !payload.image_url) return { error: 'Пустое сообщение' }
+  if (!payload.text && !payload.image_url && !payload.meal_ref) return { error: 'Пустое сообщение' }
   const { data, error } = await supabase.from('messages').insert(payload).select('*').single()
   if (error) return { error: error.message }
   return { ok: data }
@@ -267,7 +268,7 @@ export async function listMessagesWith(myId, friendId, limit = 200) {
   if (!supabase) return []
   const { data, error } = await supabase
     .from('messages')
-    .select('id, sender, recipient, text, image_url, created_at')
+    .select('id, sender, recipient, text, image_url, meal_ref, created_at')
     .or(`and(sender.eq.${myId},recipient.eq.${friendId}),and(sender.eq.${friendId},recipient.eq.${myId})`)
     .order('created_at', { ascending: true })
     .limit(limit)

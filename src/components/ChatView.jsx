@@ -174,6 +174,25 @@ export default function ChatView({ friend, onClose }) {
                 {showDay && <div className="chat-day">{dayLabel(m.created_at)}</div>}
                 <div className={rowClass}>
                   <div className={bubbleClass}>
+                    {m.meal_ref && (
+                      <div style={{
+                        background: mine ? 'rgba(255,255,255,0.15)' : 'var(--surface-2)',
+                        borderRadius: 10, padding: '8px 10px',
+                        marginBottom: m.text ? 6 : 0,
+                        borderLeft: '3px solid var(--primary)',
+                      }}>
+                        <div style={{ fontSize: 10, color: mine ? 'rgba(255,255,255,0.7)' : 'var(--ink-3)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          Реакция на блюдо
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 20 }}>{m.meal_ref.emoji}</span>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{m.meal_ref.name}</div>
+                            <div style={{ fontSize: 11, opacity: 0.7 }}>{m.meal_ref.kcal} ккал</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     {m.image_url && (
                       <a href={m.image_url} target="_blank" rel="noreferrer" className="chat-img-wrap">
                         <img src={m.image_url} alt="" className="chat-img" />

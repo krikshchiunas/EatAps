@@ -163,8 +163,9 @@ create table if not exists public.messages (
   recipient uuid not null references auth.users(id) on delete cascade,
   text text,
   image_url text,
+  meal_ref jsonb,
   created_at timestamptz not null default now(),
-  check (text is not null or image_url is not null)
+  check (text is not null or image_url is not null or meal_ref is not null)
 );
 
 create index if not exists messages_pair_idx
