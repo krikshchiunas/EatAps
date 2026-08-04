@@ -48,8 +48,11 @@ const DEVICES = [
 
 const links = []
 for (const d of DEVICES) {
+  const logoSize = Math.round(Math.min(d.w, d.h) * 0.55)
+  const logo = await sharp(markBuf).resize(logoSize, logoSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer()
   const file = `public/splash/apple-splash-${d.w}x${d.h}.png`
   await sharp({ create: { width: d.w, height: d.h, channels: 4, background: BG } })
+    .composite([{ input: logo, gravity: 'center' }])
     .png()
     .toFile(file)
   links.push(
