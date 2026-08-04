@@ -47,6 +47,18 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const [closing, setClosing] = useState(false)
   const menuRef = useRef(null)
 
+  useEffect(() => {
+    const el = document.documentElement
+    const n = Number(el.dataset.overlayCount || 0) + 1
+    el.dataset.overlayCount = n
+    el.classList.add('has-overlay')
+    return () => {
+      const next = Number(el.dataset.overlayCount || 1) - 1
+      el.dataset.overlayCount = next
+      if (next <= 0) el.classList.remove('has-overlay')
+    }
+  }, [])
+
   const handleClose = () => {
     setClosing(true)
     setTimeout(onClose, 240)
