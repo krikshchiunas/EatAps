@@ -8,7 +8,7 @@ export default function MyProfileSheet({ onClose }) {
   const { user, profile, setProfile } = useStore()
   const [publicId, setPublicId] = useState(null)
   const [copied, setCopied] = useState(false)
-  const { sheetStyle, grabberBind, close } = useSheetDrag(onClose)
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
   useEffect(() => {
     if (user?.id) getMyPublicId(user.id).then((id) => setPublicId(id))
@@ -48,9 +48,9 @@ export default function MyProfileSheet({ onClose }) {
   }
 
   return (
-    <div className="sheet-backdrop" onClick={close}>
-      <div className="sheet" style={sheetStyle} onClick={(e) => e.stopPropagation()}>
-        <div className="grabber" {...grabberBind} />
+    <div className="sheet-backdrop" {...backdropProps} onClick={close}>
+      <div className="sheet sheet-tall" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
           <h2 className="h2">Мой профиль</h2>
           <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>

@@ -1,11 +1,13 @@
 import { useEffect } from 'react'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
+import { useScrollLock } from '../lib/useScrollLock.js'
 
 // Универсальная «push-панель»: заезжает справа, свайп-назад приклеен к пальцу,
 // под ней — scrim (глубина). Дети могут быть функцией (close) => node, чтобы
 // закрывать с той же анимацией из своих кнопок.
 export default function PushScreen({ onClose, children, className = '', style }) {
   const { panelProps, scrimProps, close } = useSwipeBack(onClose)
+  useScrollLock() // фон полностью заморожен
 
   // Прячем BottomNav, пока панель открыта (счётчик — оверлеи вкладываются).
   useEffect(() => {

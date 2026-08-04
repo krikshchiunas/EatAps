@@ -50,7 +50,7 @@ function autoMealType(dayMeals) {
 
 export default function AddMealSheet({ date, onClose, onAdd }) {
   const { customFoods, customIngredients, recents, prefs, addCustomFood, removeCustomFood, addCustomIngredient, setPref, dayOf } = useStore()
-  const { sheetStyle, grabberBind, close } = useSheetDrag(onClose)
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
   const [type, setType] = useState(() => autoMealType(date ? dayOf(date).meals : []))
   const [selected, setSelected] = useState(null)
@@ -282,7 +282,7 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
   }
 
   return (
-    <div className="sheet-backdrop" onClick={close}>
+    <div className="sheet-backdrop" {...backdropProps} onClick={close}>
       {toast && (
         <div style={{
           position: 'fixed', top: 'calc(env(safe-area-inset-top) + 16px)', left: '50%',
@@ -297,8 +297,8 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
           {toast}
         </div>
       )}
-      <div className="sheet" onClick={(e) => e.stopPropagation()} style={sheetStyle}>
-        <div className="grabber" {...grabberBind} />
+      <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
           <h2 className="h2">Добавить приём пищи</h2>
           <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>

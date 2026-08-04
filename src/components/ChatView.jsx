@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store.jsx'
 import { listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage, markChatRead } from '../lib/supabase.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
+import { useScrollLock } from '../lib/useScrollLock.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 
@@ -36,6 +37,7 @@ export default function ChatView({ friend, onClose }) {
   const fileRef = useRef(null)
 
   const { panelProps, scrimProps, close: handleClose } = useSwipeBack(onClose)
+  useScrollLock()
 
   // Скрыть BottomNav пока чат открыт (счётчик — FriendAccount тоже добавляет)
   useEffect(() => {

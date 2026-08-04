@@ -11,7 +11,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null) // {type:'err'|'ok', text}
-  const { sheetStyle, grabberBind, close } = useSheetDrag(onClose)
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
   const isRegister = mode === 'register'
 
@@ -94,9 +94,9 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
   }, [awaitingWeb3, isConnected, caipAddress, ethProvider, solProvider]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="sheet-backdrop" onClick={close}>
-      <div className="sheet" style={sheetStyle} onClick={(e) => e.stopPropagation()}>
-        <div className="grabber" {...grabberBind} />
+    <div className="sheet-backdrop" {...backdropProps} onClick={close}>
+      <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
           <h2 className="h2">{isRegister ? 'Регистрация в EatAps' : 'Вход в EatAps'}</h2>
           <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>

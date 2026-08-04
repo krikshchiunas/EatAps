@@ -1,158 +1,162 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { mealMeta } from '../lib/foods.js'
+import { useSheetDrag } from '../lib/useSheetDrag.js'
 import Ring from './Ring.jsx'
 import MacroBar from './MacroBar.jsx'
 
 const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
+const EASING = 'cubic-bezier(0.32, 0.72, 0, 1)'
 
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, clipboard, setClipboard }) {
-  const { profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal } = useStore()
+  const store = useStore()
+  const { profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal } = store
   const [editingMeal, setEditingMeal] = useState(null)
-  const [dragX, setDragX] = useState(0)
-  const transEnabledRef = useRef(false)
-  const navigatingRef = useRef(false)
-  const screenRef = useRef(null)
   const today = keyOf()
 
+  const prevDate = addDays(date, -1)
+  const nextDate = addDays(date, 1)
+  const canNext = date <= today // вперёд не дальше завтрашнего дня
+
+  // ── Интерактивный пейджер: трек из 3 страниц, центр = текущий день ──────────
+  const viewportRef = useRef(null)
+  const trackRef = useRef(null)
+  const gesture = useRef(null)
+  const animRef = useRef(null)
+  const animating = useRef(false)
+  const dateRef = useRef(date)
+  dateRef.current = date
+
+  const vw = () => viewportRef.current?.offsetWidth || window.innerWidth
+  const base = () => -vw() // сдвиг трека, чтобы показать центральную страницу
+
+  // Ставим трек в центр без анимации — на маунте и после каждой смены даты
+  // (бесшовный recenter: новая центральная страница = та, что доехала).
+  useLayoutEffect(() => {
+    const tr = trackRef.current
+    if (tr) tr.style.transform = `translate3d(${base()}px,0,0)`
+  }, [date])
+
+  const cancelAnim = () => { try { animRef.current?.cancel() } catch {} animRef.current = null }
+
+  const settle = (from, to, vel, onDone) => {
+    const tr = trackRef.current
+    if (!tr) { onDone?.(); return }
+    cancelAnim()
+    const dist = Math.abs(to - from)
+    if (dist < 0.5) { tr.style.transform = `translate3d(${to}px,0,0)`; onDone?.(); return }
+    const speed = Math.min(4, Math.max(0.9, Math.abs(vel)))
+    const dur = Math.max(190, Math.min(430, dist / speed))
+    animRef.current = tr.animate(
+      [{ transform: `translate3d(${from}px,0,0)` }, { transform: `translate3d(${to}px,0,0)` }],
+      { duration: dur, easing: EASING, fill: 'forwards' },
+    )
+    animRef.current.onfinish = () => {
+      tr.style.transform = `translate3d(${to}px,0,0)`
+      cancelAnim()
+      onDone?.()
+    }
+  }
+
+  // Перейти на соседний день с анимацией (жест или стрелки).
+  const go = (dir, vel = 1.2) => {
+    if (animating.current) return
+    if (dir === 1 && !canNext) { settle(currentX(), base(), 1); return }
+    if (dir === 0) { settle(currentX(), base(), Math.max(Math.abs(vel), 1)); return }
+    animating.current = true
+    const target = base() + (dir === 1 ? -vw() : vw())
+    settle(currentX(), target, vel, () => {
+      // Меняем дату ПОСЛЕ доводки. useLayoutEffect вернёт трек в центр
+      // до перерисовки — новая страница совпадает со старой соседней → без прыжка.
+      setDate((d) => addDays(d, dir))
+      animating.current = false
+    })
+  }
+
+  const currentX = () => {
+    const tr = trackRef.current
+    if (!tr) return base()
+    try { return new DOMMatrixReadOnly(getComputedStyle(tr).transform).m41 || base() } catch { return base() }
+  }
+
+  // Жест (touch, non-passive для preventDefault при горизонтали).
   useEffect(() => {
-    const el = screenRef.current
+    const el = viewportRef.current
     if (!el) return
-    let sx = null, sy = null, decided = false, horiz = false
 
-    const navigate = (direction) => {
-      if (navigatingRef.current) return
-      navigatingRef.current = true
-      const W = window.innerWidth
-      transEnabledRef.current = true
-      setDragX(direction > 0 ? -W : W)
-      setTimeout(() => {
-        transEnabledRef.current = false
-        setDate((d) => addDays(d, direction))
-        setDragX(direction > 0 ? W : -W)
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            transEnabledRef.current = true
-            setDragX(0)
-            setTimeout(() => { transEnabledRef.current = false; navigatingRef.current = false }, 280)
-          })
-        })
-      }, 230)
-    }
-
-    const onTS = (e) => {
-      if (navigatingRef.current) return
-      if (e.target.closest('[data-swipeable]')) return
-      sx = e.touches[0].clientX; sy = e.touches[0].clientY
-      decided = false; horiz = false
-    }
-    const onTM = (e) => {
-      if (sx === null) return
-      const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy
-      if (!decided && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) {
-        decided = true; horiz = Math.abs(dx) > Math.abs(dy) * 1.3
+    const onStart = (e) => {
+      if (animating.current) return
+      // Свайп строки приёма пищи имеет приоритет — не перехватываем.
+      if (e.target.closest?.('[data-swipeable]')) return
+      const t = e.touches[0]
+      cancelAnim()
+      gesture.current = {
+        x: t.clientX, y: t.clientY, base: currentX(),
+        decided: false, horiz: false,
+        lastX: t.clientX, lastT: e.timeStamp, vel: 0,
       }
-      if (horiz) { e.preventDefault(); setDragX(e.touches[0].clientX - sx) }
     }
-    const onTE = (e) => {
-      if (sx === null || !horiz) { sx = null; return }
-      const dx = e.changedTouches[0].clientX - sx
-      sx = null; horiz = false; decided = false
-      if (dx < -100) navigate(1)
-      else if (dx > 100) navigate(-1)
-      else { transEnabledRef.current = true; setDragX(0); setTimeout(() => { transEnabledRef.current = false }, 280) }
+    const onMove = (e) => {
+      const g = gesture.current
+      if (!g) return
+      const t = e.touches[0]
+      const dx = t.clientX - g.x
+      const dy = t.clientY - g.y
+      if (!g.decided) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+        g.horiz = Math.abs(dx) > Math.abs(dy) * 1.3
+        g.decided = true
+        if (!g.horiz) { gesture.current = null; return } // вертикаль → скролл
+      }
+      if (g.horiz) {
+        e.preventDefault()
+        const dt = e.timeStamp - g.lastT
+        if (dt > 0) g.vel = (t.clientX - g.lastX) / dt
+        g.lastX = t.clientX; g.lastT = e.timeStamp
+        // Сопротивление на «запретной» границе (будущее).
+        let x = g.base + dx
+        if (!canNext && x < base()) x = base() + (x - base()) * 0.28
+        trackRef.current.style.transform = `translate3d(${x}px,0,0)`
+      }
     }
-    el.addEventListener('touchstart', onTS, { passive: true })
-    el.addEventListener('touchmove', onTM, { passive: false })
-    el.addEventListener('touchend', onTE, { passive: true })
+    const onEnd = () => {
+      const g = gesture.current
+      gesture.current = null
+      if (!g || !g.horiz) return
+      const v = g.vel
+      const moved = currentX() - g.base
+      const w = vw()
+      // Решение по расстоянию ИЛИ скорости (уверенный флик).
+      let dir = 0
+      if (v < -0.35 || moved < -w * 0.32) dir = 1       // ушли влево → следующий
+      else if (v > 0.35 || moved > w * 0.32) dir = -1   // ушли вправо → предыдущий
+      go(dir, Math.max(Math.abs(v), 1))
+    }
+
+    el.addEventListener('touchstart', onStart, { passive: true })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd, { passive: true })
+    el.addEventListener('touchcancel', onEnd, { passive: true })
     return () => {
-      el.removeEventListener('touchstart', onTS)
-      el.removeEventListener('touchmove', onTM)
-      el.removeEventListener('touchend', onTE)
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
     }
-  }, [setDate])
-  const day = dayOf(date)
-  const totals = sumDay(day.meals)
-  const t = profile.targets
-  const remaining = t.calories - totals.kcal
-  const isFuture = date > today
+  }, [canNext])
 
-  const quality = sumQuality(day.meals)
-  const sugarMax = sugarLimit(t.calories)
-  const fiberMax = fiberGoal()
-  const grade = carbGrade({ freeSugar: quality.freeSugar, sugarLimit: sugarMax, fiber: quality.fiber, fiberGoal: fiberMax, carbs: totals.carbs })
-  const carbsLeft = t.carbs - totals.carbs
-
-  // Карточка приёмов пищи — вынесена в переменную, чтобы стоять ВЫШЕ макросов.
-  const mealsCard = (
-    <div className="card" style={{ marginTop: 14 }}>
-      <div className="row between" style={{ marginBottom: clipboard ? 8 : 6 }}>
-        <div className="h2" style={{ fontSize: 17 }}>Приёмы пищи</div>
-        <button style={{ color: 'var(--primary)', fontWeight: 600, fontSize: 15 }} onClick={onOpenAdd}>＋ Добавить</button>
-      </div>
-      {clipboard && (
-        <button
-          className="btn soft"
-          style={{ height: 40, fontSize: 14, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}
-          onClick={() => addMeal(date, clipboard)}
-        >
-          <span>📋</span>
-          <span>Вставить «{clipboard.name}»</span>
-        </button>
-      )}
-      {day.meals.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '26px 0 12px' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🍽️</div>
-          <p className="muted" style={{ fontSize: 15 }}>Пока ничего не добавлено</p>
-          <button className="btn soft" style={{ width: 'auto', marginTop: 14, height: 44, display: 'inline-flex' }} onClick={onOpenAdd}>Добавить первый приём</button>
-          {(() => {
-            const yesterday = dayOf(addDays(date, -1))
-            if (yesterday.meals.length === 0) return null
-            return (
-              <button
-                className="btn ghost"
-                style={{ width: 'auto', marginTop: 10, marginLeft: 8, height: 44, display: 'inline-flex' }}
-                onClick={() => yesterday.meals.forEach((m) => addMeal(date, { type: m.type, name: m.name, emoji: m.emoji, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat }))}
-              >
-                ↺ Повторить вчера ({yesterday.meals.length})
-              </button>
-            )
-          })()}
-        </div>
-      ) : (
-        day.meals.map((m) => {
-          const meta = mealMeta(m.type)
-          return (
-            <SwipeableMealItem
-              key={m.id}
-              m={m}
-              meta={meta}
-              date={date}
-              removeMeal={removeMeal}
-              setClipboard={setClipboard}
-              onEdit={setEditingMeal}
-            />
-          )
-        })
-      )}
-    </div>
-  )
+  const bodyProps = {
+    profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal,
+    clipboard, setClipboard, onOpenAdd, onEditMeal: setEditingMeal, today,
+  }
 
   return (
-    <div
-      className="screen"
-      ref={screenRef}
-      style={{
-        transform: `translateX(${dragX}px)`,
-        transition: transEnabledRef.current ? 'transform 0.25s cubic-bezier(0.4,0,0.2,1)' : 'none',
-        willChange: 'transform',
-      }}
-    >
+    <div className="screen">
+      {/* Шапка с датой — статична, не свайпается */}
       <div className="row between" style={{ marginBottom: 20 }}>
-        <button className="iconbtn" onClick={() => setDate(addDays(date, -1))} aria-label="Предыдущий день">‹</button>
-        {/* Тап по дате открывает календарь (иконка-подсказка справа от даты). */}
+        <button className="iconbtn" onClick={() => go(-1)} aria-label="Предыдущий день">‹</button>
         <button onClick={onOpenCalendar} aria-label="Открыть календарь" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
           <span className="row gap8" style={{ alignItems: 'center' }}>
             <span style={{ fontSize: 18, fontWeight: 650, letterSpacing: '-0.3px' }}>{humanDay(date, today)}</span>
@@ -162,9 +166,44 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, cl
           </span>
           <span style={{ fontSize: 12, color: 'var(--ink-3)', textTransform: 'capitalize' }}>{humanDow(date)}</span>
         </button>
-        <button className="iconbtn" onClick={() => setDate(addDays(date, 1))} aria-label="Следующий день" style={{ opacity: isFuture ? 0.4 : 1 }} disabled={isFuture && date >= addDays(today, 2)}>›</button>
+        <button className="iconbtn" onClick={() => go(1)} aria-label="Следующий день" style={{ opacity: canNext ? 1 : 0.4 }} disabled={!canNext}>›</button>
       </div>
 
+      {/* Пейджер: 3 страницы, центр — текущий день */}
+      <div className="day-pager" ref={viewportRef}>
+        <div className="day-track" ref={trackRef}>
+          <div className="day-page" aria-hidden="true"><DayBody date={prevDate} interactive={false} {...bodyProps} /></div>
+          <div className="day-page"><DayBody date={date} interactive {...bodyProps} /></div>
+          <div className="day-page" aria-hidden="true"><DayBody date={nextDate} interactive={false} {...bodyProps} /></div>
+        </div>
+      </div>
+
+      {editingMeal && (
+        <EditMealSheet
+          meal={editingMeal}
+          onSave={(updated) => { editMeal(date, updated); setEditingMeal(null) }}
+          onClose={() => setEditingMeal(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Контент одного дня (переиспользуется тремя страницами пейджера) ────────────
+function DayBody({ date, interactive, profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal, clipboard, setClipboard, onOpenAdd, onEditMeal, today }) {
+  const day = dayOf(date)
+  const totals = sumDay(day.meals)
+  const t = profile.targets
+  const remaining = t.calories - totals.kcal
+
+  const quality = sumQuality(day.meals)
+  const sugarMax = sugarLimit(t.calories)
+  const fiberMax = fiberGoal()
+  const grade = carbGrade({ freeSugar: quality.freeSugar, sugarLimit: sugarMax, fiber: quality.fiber, fiberGoal: fiberMax, carbs: totals.carbs })
+  const carbsLeft = t.carbs - totals.carbs
+
+  return (
+    <div className="day-body" style={interactive ? undefined : { pointerEvents: 'none' }}>
       <div className="card" style={{ textAlign: 'center' }}>
         <Ring value={totals.kcal} max={t.calories} size={196} stroke={16}>
           <div>
@@ -181,20 +220,42 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, cl
         </div>
       </div>
 
-      {/* Качество углеводов — над приёмами пищи, свёрнуто по умолчанию. */}
       {grade.level !== 'none' && (
-        <QualityCard
-          quality={quality}
-          grade={grade}
-          sugarMax={sugarMax}
-          fiberMax={fiberMax}
-          carbsLeft={carbsLeft}
-          carbsTotal={totals.carbs}
-        />
+        <QualityCard quality={quality} grade={grade} sugarMax={sugarMax} fiberMax={fiberMax} carbsLeft={carbsLeft} carbsTotal={totals.carbs} />
       )}
 
-      {/* Приёмы пищи — подняты выше белков/углеводов/жиров. */}
-      {mealsCard}
+      <div className="card" style={{ marginTop: 14 }}>
+        <div className="row between" style={{ marginBottom: clipboard ? 8 : 6 }}>
+          <div className="h2" style={{ fontSize: 17 }}>Приёмы пищи</div>
+          <button style={{ color: 'var(--primary)', fontWeight: 600, fontSize: 15 }} onClick={onOpenAdd}>＋ Добавить</button>
+        </div>
+        {clipboard && (
+          <button className="btn soft" style={{ height: 40, fontSize: 14, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }} onClick={() => addMeal(date, clipboard)}>
+            <span>📋</span><span>Вставить «{clipboard.name}»</span>
+          </button>
+        )}
+        {day.meals.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '26px 0 12px' }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🍽️</div>
+            <p className="muted" style={{ fontSize: 15 }}>Пока ничего не добавлено</p>
+            <button className="btn soft" style={{ width: 'auto', marginTop: 14, height: 44, display: 'inline-flex' }} onClick={onOpenAdd}>Добавить первый приём</button>
+            {(() => {
+              const yesterday = dayOf(addDays(date, -1))
+              if (yesterday.meals.length === 0) return null
+              return (
+                <button className="btn ghost" style={{ width: 'auto', marginTop: 10, marginLeft: 8, height: 44, display: 'inline-flex' }}
+                  onClick={() => yesterday.meals.forEach((m) => addMeal(date, { type: m.type, name: m.name, emoji: m.emoji, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat }))}>
+                  ↺ Повторить вчера ({yesterday.meals.length})
+                </button>
+              )
+            })()}
+          </div>
+        ) : (
+          day.meals.map((m) => (
+            <SwipeableMealItem key={m.id} m={m} meta={mealMeta(m.type)} date={date} removeMeal={removeMeal} setClipboard={setClipboard} onEdit={onEditMeal} />
+          ))
+        )}
+      </div>
 
       <div className="card" style={{ marginTop: 14 }}>
         <div className="row gap16" style={{ alignItems: 'flex-start' }}>
@@ -203,14 +264,6 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, cl
           <MacroBar label="Жиры" value={totals.fat} max={t.fat} color="var(--warn)" />
         </div>
       </div>
-
-      {editingMeal && (
-        <EditMealSheet
-          meal={editingMeal}
-          onSave={(updated) => { editMeal(date, updated); setEditingMeal(null) }}
-          onClose={() => setEditingMeal(null)}
-        />
-      )}
 
       <div className="card" style={{ marginTop: 14 }}>
         <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Самочувствие</div>
@@ -235,9 +288,7 @@ const GRADE = {
 function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal }) {
   const [open, setOpen] = useState(false)
   const g = GRADE[grade.level] || GRADE.ok
-  const buckets = Object.entries(quality.buckets)
-    .filter(([, v]) => v > 0)
-    .sort((a, b) => b[1] - a[1])
+  const buckets = Object.entries(quality.buckets).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
   const totalB = buckets.reduce((s, [, v]) => s + v, 0) || 1
 
   let hint
@@ -249,7 +300,6 @@ function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal
 
   return (
     <div className="card" style={{ marginTop: 14 }}>
-      {/* Свёрнутая шапка: заголовок + оценка + шеврон. Тап — раскрыть/свернуть. */}
       <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, textAlign: 'left' }}>
         <span className="h2" style={{ fontSize: 17 }}>Качество углеводов</span>
         <span className="row gap8" style={{ alignItems: 'center', flex: '0 0 auto' }}>
@@ -302,9 +352,7 @@ function QualityBar({ label, value, max, invert, hint }) {
     <div>
       <div className="row between" style={{ marginBottom: 6 }}>
         <span style={{ fontSize: 14, fontWeight: 550 }}>{label}</span>
-        <span className="tabular" style={{ fontSize: 14, color: over ? 'var(--warn)' : 'var(--ink-3)' }}>
-          {value} / {max} г {over ? '⚠️' : '✓'}
-        </span>
+        <span className="tabular" style={{ fontSize: 14, color: over ? 'var(--warn)' : 'var(--ink-3)' }}>{value} / {max} г {over ? '⚠️' : '✓'}</span>
       </div>
       <div style={{ height: 8, borderRadius: 5, background: 'var(--track)', overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 5, transition: 'width 0.5s ease' }} />
@@ -353,7 +401,6 @@ function SwipeableMealItem({ m, meta, date, removeMeal, setClipboard, onEdit }) 
       if (Math.abs(dx) < 8) return
       isDraggingRef.current = true
       clearTimeout(timerRef.current)
-      // Capture only once we're sure it's horizontal
       try { contentRef.current?.setPointerCapture(startRef.current.id) } catch {}
     }
     setOffsetX(Math.max(-ACTION_W, Math.min(ACTION_W, dx)))
@@ -381,21 +428,16 @@ function SwipeableMealItem({ m, meta, date, removeMeal, setClipboard, onEdit }) 
 
   return (
     <div style={{ position: 'relative', overflow: 'hidden' }}>
-      {/* Swipe-right action: edit (appears on left) */}
-      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 3 }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <button style={{ color: '#fff', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { onEdit(m); reset() }}>
-          <span style={{ fontSize: 20 }}>✏️</span>
-          <span style={{ fontSize: 12, fontWeight: 600 }}>Изменить</span>
+          <span style={{ fontSize: 20 }}>✏️</span><span style={{ fontSize: 12, fontWeight: 600 }}>Изменить</span>
         </button>
       </div>
-      {/* Swipe-left action: delete (appears on right) */}
-      <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 3 }}>
+      <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <button style={{ color: '#fff', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { removeMeal(date, m.id); reset() }}>
-          <span style={{ fontSize: 20 }}>🗑️</span>
-          <span style={{ fontSize: 12, fontWeight: 600 }}>Удалить</span>
+          <span style={{ fontSize: 20 }}>🗑️</span><span style={{ fontSize: 12, fontWeight: 600 }}>Удалить</span>
         </button>
       </div>
-      {/* Content */}
       <div
         ref={contentRef}
         data-swipeable="true"
@@ -420,24 +462,17 @@ function SwipeableMealItem({ m, meta, date, removeMeal, setClipboard, onEdit }) 
 
 function EditMealSheet({ meal, onSave, onClose }) {
   const [grams, setGrams] = useState(String(meal.grams || ''))
-  const [dragY, setDragY] = useState(0)
-  const grabY = useRef(null)
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
   const g = Math.max(0, parseFloat(grams) || 0)
   const scale = meal.grams && g > 0 ? g / meal.grams : 1
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ transform: `translateY(${dragY}px)`, transition: dragY > 0 ? 'none' : 'transform 0.3s ease' }}>
-        <div
-          className="grabber"
-          style={{ touchAction: 'none', padding: '6px 0', cursor: 'grab' }}
-          onTouchStart={(e) => { grabY.current = e.touches[0].clientY }}
-          onTouchMove={(e) => { if (grabY.current === null) return; setDragY(Math.max(0, e.touches[0].clientY - grabY.current)) }}
-          onTouchEnd={() => { if (grabY.current === null) return; grabY.current = null; if (dragY > 80) onClose(); else setDragY(0) }}
-        />
+    <div className="sheet-backdrop" {...backdropProps} onClick={close}>
+      <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
           <div className="h2" style={{ fontSize: 17 }}>{meal.name}</div>
-          <button className="iconbtn" onClick={onClose}>✕</button>
+          <button className="iconbtn" onClick={close}>✕</button>
         </div>
         {meal.grams ? (
           <>

@@ -78,7 +78,11 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .screen {
   flex: 1;
   padding: calc(env(safe-area-inset-top) + 14px) 20px 120px;
-  animation: screen-enter 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* fill: backwards — применяем стартовый кадр до анимации, но НЕ оставляем
+     остаточный transform после (иначе .screen становится containing-block для
+     position:fixed оверлеев внутри — ChatView, EditMealSheet — и они якорятся
+     к экрану, а не к вьюпорту). */
+  animation: screen-enter 0.26s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 @keyframes screen-enter {
   from { opacity: 0; transform: scale(0.97) translateY(6px); }
@@ -232,28 +236,26 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   background: rgba(15, 24, 20, 0.42);
   backdrop-filter: blur(2px);
   display: flex; align-items: flex-end; justify-content: center;
-  animation: backdrop-in 0.28s ease both;
+  /* opacity задаёт движок useSheetDrag напрямую (появление/жест/закрытие) */
 }
-.sheet-backdrop.closing {
-  animation: backdrop-out 0.24s ease both;
-}
-@keyframes backdrop-in  { from { opacity: 0; } to { opacity: 1; } }
-@keyframes backdrop-out { from { opacity: 1; } to { opacity: 0; } }
 
 .sheet {
   width: 100%; max-width: 460px;
   background: var(--surface);
   border-radius: 26px 26px 0 0;
   padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
-  max-height: 90vh; overflow-y: auto;
-  animation: sheet-up 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+  max-height: 92vh; overflow-y: auto;
+  overscroll-behavior: contain; /* не «пробиваем» скролл на фон */
+  /* трансформ появления/жеста ставит движок — без CSS-анимации */
+  will-change: transform;
 }
-.sheet-backdrop.closing .sheet {
-  animation: sheet-down 0.24s cubic-bezier(0.4, 0, 1, 1) both;
+/* Высокий детент: экран открывается сразу большим (профиль и т.п.) */
+.sheet.sheet-tall { height: 92vh; }
+.sheet .grabber {
+  width: 40px; height: 5px; border-radius: 3px;
+  background: var(--border-strong);
+  margin: 6px auto 18px; flex: 0 0 auto;
 }
-@keyframes sheet-up   { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes sheet-down { from { transform: translateY(0); }   to { transform: translateY(100%); } }
-.sheet .grabber { width: 40px; height: 5px; border-radius: 3px; background: var(--border-strong); margin: 6px auto 18px; }
 
 .row { display: flex; align-items: center; }
 .between { justify-content: space-between; }
@@ -303,6 +305,27 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 
 .divider { height: 1px; background: var(--border); margin: 18px 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Пейджер дней: горизонтальный трек из 3 страниц.
+   overflow-x: clip прячет соседние страницы, НЕ создавая вертикальный
+   скролл-контейнер (в отличие от overflow: hidden) — вертикаль остаётся
+   на документе. */
+.day-pager {
+  overflow-x: clip;
+  overflow-y: visible;
+  margin: 0 -20px; /* компенсируем padding .screen — страницы во всю ширину */
+}
+.day-track {
+  display: flex;
+  align-items: flex-start;
+  will-change: transform;
+}
+.day-page {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+  padding: 0 20px; /* возвращаем внутренние отступы контенту дня */
+}
 
 /* ── Push-screen оверлеи (Chat / FriendAccount / Календарь) ── */
 

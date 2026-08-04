@@ -9,7 +9,7 @@ export default function AddFriendSheet({ onClose, onSent }) {
   const [targetId, setTargetId] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  const { sheetStyle, grabberBind, close } = useSheetDrag(onClose)
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
   const send = async () => {
     setBusy(true)
@@ -25,9 +25,9 @@ export default function AddFriendSheet({ onClose, onSent }) {
   }
 
   return (
-    <div className="sheet-backdrop" onClick={close}>
-      <div className="sheet" style={sheetStyle} onClick={(e) => e.stopPropagation()}>
-        <div className="grabber" {...grabberBind} />
+    <div className="sheet-backdrop" {...backdropProps} onClick={close}>
+      <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
           <h2 className="h2">Добавить друга</h2>
           <button className="iconbtn" onClick={onClose} aria-label="Закрыть">✕</button>

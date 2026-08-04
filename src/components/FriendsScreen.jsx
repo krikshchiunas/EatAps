@@ -80,61 +80,83 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const [menuErr, setMenuErr] = useState(null)
   const [pinned, setPinned] = useState(getPinned)
   const [muted, setMuted] = useState(getMuted)
-  const [dragX, setDragX] = useState(0)
-  const transEnabledRef = useRef(false)
-  const navigatingRef = useRef(false)
   const screenRef = useRef(null)
+  const gestureRef = useRef(null)
+  const navigatingRef = useRef(false)
   const chatFriendRef = useRef(chatFriend)
   useEffect(() => { chatFriendRef.current = chatFriend }, [chatFriend])
 
+  // Свайп между вкладками: экран приклеен к пальцу (прямой DOM, без re-render),
+  // directional lock (после захвата — только по X), переключение вкладки только
+  // ПОСЛЕ доводки. Свайп вправо → День, влево → Профиль.
   useEffect(() => {
     const el = screenRef.current
     if (!el || !setTab) return
-    let sx = null, sy = null, decided = false, horiz = false
+    const EASING = 'cubic-bezier(0.32,0.72,0,1)'
+    let anim = null
+    const cancel = () => { try { anim?.cancel() } catch {} anim = null }
+    const paint = (x) => { el.style.transform = `translate3d(${x}px,0,0)` }
 
-    const navigate = (toTab) => {
-      if (navigatingRef.current) return
+    const commit = (toTab, from) => {
       navigatingRef.current = true
       const W = window.innerWidth
-      const dir = toTab === 'day' ? 1 : -1
-      transEnabledRef.current = true
-      setDragX(dir > 0 ? W : -W)
-      setTimeout(() => {
-        transEnabledRef.current = false
-        setDragX(0)
-        setTab(toTab)
-        navigatingRef.current = false
-      }, 230)
+      const target = (toTab === 'day' ? 1 : -1) * W
+      cancel()
+      anim = el.animate([{ transform: `translate3d(${from}px,0,0)` }, { transform: `translate3d(${target}px,0,0)` }], { duration: 240, easing: EASING, fill: 'forwards' })
+      anim.onfinish = () => setTab(toTab) // размонтирует экран → новая вкладка
+    }
+    const springBack = (from, vel) => {
+      cancel()
+      const dur = Math.max(180, Math.min(360, Math.abs(from) / Math.max(0.9, Math.abs(vel))))
+      anim = el.animate([{ transform: `translate3d(${from}px,0,0)` }, { transform: 'translate3d(0,0,0)' }], { duration: dur, easing: EASING, fill: 'forwards' })
+      anim.onfinish = () => { el.style.transform = 'translate3d(0,0,0)'; cancel() }
     }
 
     const onTS = (e) => {
       if (navigatingRef.current || chatFriendRef.current) return
-      sx = e.touches[0].clientX; sy = e.touches[0].clientY
-      decided = false; horiz = false
+      const t = e.touches[0]
+      cancel()
+      gestureRef.current = { x: t.clientX, y: t.clientY, decided: false, horiz: false, lastX: t.clientX, lastT: e.timeStamp, vel: 0, cur: 0 }
     }
     const onTM = (e) => {
-      if (sx === null) return
-      const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy
-      if (!decided && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) {
-        decided = true; horiz = Math.abs(dx) > Math.abs(dy) * 1.3
+      const g = gestureRef.current
+      if (!g) return
+      const t = e.touches[0]
+      const dx = t.clientX - g.x, dy = t.clientY - g.y
+      if (!g.decided) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+        g.horiz = Math.abs(dx) > Math.abs(dy) * 1.3
+        g.decided = true
+        if (!g.horiz) { gestureRef.current = null; return } // вертикаль → скролл
       }
-      if (horiz) { e.preventDefault(); setDragX(e.touches[0].clientX - sx) }
+      // Захвачено как горизонталь: дальше только X, вертикаль игнорируем.
+      e.preventDefault()
+      const dt = e.timeStamp - g.lastT
+      if (dt > 0) g.vel = (t.clientX - g.lastX) / dt
+      g.lastX = t.clientX; g.lastT = e.timeStamp
+      g.cur = dx
+      paint(dx)
     }
-    const onTE = (e) => {
-      if (sx === null || !horiz) { sx = null; return }
-      const dx = e.changedTouches[0].clientX - sx
-      sx = null; horiz = false; decided = false
-      if (dx > 100) navigate('day')
-      else if (dx < -100) navigate('profile')
-      else { transEnabledRef.current = true; setDragX(0); setTimeout(() => { transEnabledRef.current = false }, 280) }
+    const onTE = () => {
+      const g = gestureRef.current
+      gestureRef.current = null
+      if (!g || !g.horiz) return
+      const dx = g.cur, v = g.vel
+      if (v > 0.35 || dx > 90) commit('day', dx)
+      else if (v < -0.35 || dx < -90) commit('profile', dx)
+      else springBack(dx, v)
     }
+
     el.addEventListener('touchstart', onTS, { passive: true })
     el.addEventListener('touchmove', onTM, { passive: false })
     el.addEventListener('touchend', onTE, { passive: true })
+    el.addEventListener('touchcancel', onTE, { passive: true })
     return () => {
+      cancel()
       el.removeEventListener('touchstart', onTS)
       el.removeEventListener('touchmove', onTM)
       el.removeEventListener('touchend', onTE)
+      el.removeEventListener('touchcancel', onTE)
     }
   }, [setTab])
 
@@ -183,11 +205,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
     setBusy(false); reload()
   }
 
-  const swipeStyle = {
-    transform: `translateX(${dragX}px)`,
-    transition: transEnabledRef.current ? 'transform 0.25s cubic-bezier(0.4,0,0.2,1)' : 'none',
-    willChange: 'transform',
-  }
+  const swipeStyle = { willChange: 'transform', touchAction: 'pan-y' }
 
   if (!supabaseEnabled || !user) {
     return (

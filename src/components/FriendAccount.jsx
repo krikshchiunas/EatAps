@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { pullFriendState, removeFriendship, sendChatMessage } from '../lib/supabase.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
+import { useScrollLock } from '../lib/useScrollLock.js'
 import { sumDay } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { Avatar } from './FriendsScreen.jsx'
@@ -141,6 +142,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const menuRef = useRef(null)
 
   const { panelProps, scrimProps, close: handleClose } = useSwipeBack(onClose)
+  useScrollLock()
 
   useEffect(() => {
     const el = document.documentElement
