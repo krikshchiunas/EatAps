@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { listFriendships, acceptFriend, removeFriendship } from '../lib/supabase.js'
 import AddFriendSheet from './AddFriendSheet.jsx'
-import FriendAccount from './FriendAccount.jsx'
+import ChatView from './ChatView.jsx'
 
 export function Avatar({ src, name, size = 44 }) {
   if (src) return <img src={src} alt="" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flex: '0 0 auto' }} />
@@ -27,7 +27,7 @@ export default function FriendsScreen() {
   const [busy, setBusy] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [viewing, setViewing] = useState(null) // { id, name, avatar }
+  const [chatFriend, setChatFriend] = useState(null) // { id, name, avatar, rowId }
 
   const reload = async () => {
     try {
@@ -145,7 +145,7 @@ export default function FriendsScreen() {
             key={f.rowId}
             className="card"
             style={{ marginBottom: 8, padding: '12px 14px', width: '100%', textAlign: 'left' }}
-            onClick={() => setViewing({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId })}
+            onClick={() => setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId })}
           >
             <div className="row gap12" style={{ alignItems: 'center' }}>
               <Avatar src={f.avatar} name={f.name} />
@@ -157,11 +157,10 @@ export default function FriendsScreen() {
 
       {addOpen && <AddFriendSheet onClose={() => setAddOpen(false)} onSent={reload} />}
 
-      {viewing && (
-        <FriendAccount
-          friend={viewing}
-          onClose={() => setViewing(null)}
-          onRemoved={() => { setViewing(null); reload() }}
+      {chatFriend && (
+        <ChatView
+          friend={chatFriend}
+          onClose={() => setChatFriend(null)}
         />
       )}
     </div>

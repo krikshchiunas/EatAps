@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store.jsx'
 import { listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage } from '../lib/supabase.js'
 import { Avatar } from './FriendsScreen.jsx'
+import FriendAccount from './FriendAccount.jsx'
 
 function timeShort(iso) {
   if (!iso) return ''
@@ -30,6 +31,7 @@ export default function ChatView({ friend, onClose }) {
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState(null)
   const [preview, setPreview] = useState(null) // { url, file }
+  const [profileOpen, setProfileOpen] = useState(false)
   const listRef = useRef(null)
   const fileRef = useRef(null)
 
@@ -111,16 +113,31 @@ export default function ChatView({ friend, onClose }) {
     }
   }
 
+  if (profileOpen) {
+    return (
+      <FriendAccount
+        friend={friend}
+        onClose={() => setProfileOpen(false)}
+        onRemoved={onClose}
+      />
+    )
+  }
+
   return (
     <div className="chat-overlay">
       <header className="chat-header">
         <button className="iconbtn" onClick={onClose} aria-label="Назад">‹</button>
-        <div className="row gap12" style={{ alignItems: 'center', minWidth: 0, flex: 1 }}>
+        <button
+          className="row gap12"
+          style={{ alignItems: 'center', minWidth: 0, flex: 1, textAlign: 'left' }}
+          onClick={() => setProfileOpen(true)}
+        >
           <Avatar src={friend.avatar} name={friend.name} size={36} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{friend.name || 'Друг'}</div>
+            <div className="muted" style={{ fontSize: 11 }}>нажмите, чтобы открыть профиль</div>
           </div>
-        </div>
+        </button>
       </header>
 
       <div className="chat-list" ref={listRef}>

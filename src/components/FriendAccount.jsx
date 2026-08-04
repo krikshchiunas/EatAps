@@ -3,7 +3,6 @@ import { pullFriendState, removeFriendship } from '../lib/supabase.js'
 import { sumDay } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { Avatar } from './FriendsScreen.jsx'
-import ChatView from './ChatView.jsx'
 
 function Stat({ label, v }) {
   return (
@@ -43,7 +42,6 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const [err, setErr] = useState(null)
   const [date, setDate] = useState(keyOf())
   const [menuOpen, setMenuOpen] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
   const [expandedMeal, setExpandedMeal] = useState(null)
   const [busy, setBusy] = useState(false)
   const menuRef = useRef(null)
@@ -91,10 +89,6 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const totals = sumDay(day.meals || [])
   const target = p.targets?.calories
 
-  if (chatOpen) {
-    return <ChatView friend={{ id: friend.id, name, avatar }} onClose={() => setChatOpen(false)} />
-  }
-
   return (
     <div className="chat-overlay">
       {/* Header */}
@@ -107,18 +101,6 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
             {name}
           </div>
         </div>
-
-        {/* Кнопка чата */}
-        <button
-          className="iconbtn"
-          aria-label="Написать"
-          onClick={() => setChatOpen(true)}
-          style={{ flex: '0 0 auto' }}
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 6.5a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H9l-4 3.5v-3.5H7a3 3 0 0 1-3-3v-7z" />
-          </svg>
-        </button>
 
         {/* ⋯ меню */}
         <div ref={menuRef} style={{ position: 'relative', flex: '0 0 auto' }}>
