@@ -186,6 +186,24 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 }
 .bottomnav button.on { color: var(--primary); }
 .bottomnav .navicon { width: 24px; height: 24px; }
+.friend-menu {
+  position: absolute; right: 8px; top: calc(100% - 4px);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: var(--shadow-float);
+  min-width: 190px; z-index: 20; overflow: hidden;
+  animation: screen-enter 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.friend-menu button {
+  width: 100%; text-align: left;
+  padding: 13px 16px; font-size: 15px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+  transition: background 0.12s ease;
+}
+.friend-menu button:last-of-type { border-bottom: none; }
+.friend-menu button:active { background: var(--surface-2); }
+
 .nav-badge {
   position: absolute; top: 6px; right: calc(50% - 18px);
   min-width: 18px; height: 18px; border-radius: 999px;

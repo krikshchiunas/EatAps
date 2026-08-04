@@ -1,9 +1,36 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useStore } from '../store.jsx'
-import { listFriendships, acceptFriend, removeFriendship } from '../lib/supabase.js'
+import { listFriendships, listConversations, acceptFriend, removeFriendship } from '../lib/supabase.js'
 import AddFriendSheet from './AddFriendSheet.jsx'
 import ChatView from './ChatView.jsx'
 
+// ── localStorage helpers ──────────────────────────────────────────────────────
+const PINNED_KEY = 'eataps:friends:pinned'
+const MUTED_KEY  = 'eataps:friends:muted'
+
+const getArr = (key) => { try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } }
+const setArr = (key, arr) => localStorage.setItem(key, JSON.stringify(arr))
+
+function getPinned() { return getArr(PINNED_KEY) }
+function getMuted()  { return getArr(MUTED_KEY) }
+
+function togglePin(id) {
+  let arr = getPinned()
+  if (arr.includes(id)) {
+    setArr(PINNED_KEY, arr.filter(x => x !== id))
+    return { ok: true }
+  }
+  if (arr.length >= 10) return { error: 'Максимум 10 закреплённых' }
+  setArr(PINNED_KEY, [id, ...arr])
+  return { ok: true }
+}
+
+function toggleMute(id) {
+  const arr = getMuted()
+  setArr(MUTED_KEY, arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id])
+}
+
+// ── Avatar ────────────────────────────────────────────────────────────────────
 export function Avatar({ src, name, size = 44 }) {
   if (src) return <img src={src} alt="" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flex: '0 0 auto' }} />
   return (
@@ -18,45 +45,92 @@ export function Avatar({ src, name, size = 44 }) {
   )
 }
 
+// ── Friend card dropdown menu ─────────────────────────────────────────────────
+function FriendMenu({ friend, isPinned, isMuted, onPin, onMute, onRemove, onClose, menuErr }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const handle = (e) => { if (!ref.current?.contains(e.target)) onClose() }
+    document.addEventListener('pointerdown', handle)
+    return () => document.removeEventListener('pointerdown', handle)
+  }, [])
+
+  return (
+    <div ref={ref} className="friend-menu" onClick={e => e.stopPropagation()}>
+      <button onClick={onPin}>
+        <span>📌</span> {isPinned ? 'Открепить' : 'Закрепить'}
+      </button>
+      <button onClick={onMute}>
+        <span>{isMuted ? '🔔' : '🔕'}</span> {isMuted ? 'Включить' : 'Заглушить'}
+      </button>
+      <button onClick={onRemove} style={{ color: 'var(--danger)' }}>
+        <span>🗑</span> Удалить из друзей
+      </button>
+      {menuErr && <div style={{ fontSize: 12, color: 'var(--danger)', padding: '4px 12px 8px' }}>{menuErr}</div>}
+    </div>
+  )
+}
+
+// ── Main screen ───────────────────────────────────────────────────────────────
 export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
   const { user, supabaseEnabled } = useStore()
   const myId = user?.id || ''
 
   const [lists, setLists] = useState({ friends: [], incoming: [], outgoing: [] })
+  const [convs, setConvs] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [chatFriend, setChatFriend] = useState(null) // { id, name, avatar, rowId }
+  const [chatFriend, setChatFriend] = useState(null)
+  const [openMenu, setOpenMenu] = useState(null) // friend.id with open menu
+  const [menuErr, setMenuErr] = useState(null)
+  const [pinned, setPinned] = useState(getPinned)
+  const [muted, setMuted] = useState(getMuted)
 
   const reload = async () => {
     try {
       setLoading(true)
-      setLists(await listFriendships(myId))
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false)
-    }
+      const [l, c] = await Promise.all([listFriendships(myId), listConversations(myId)])
+      setLists(l)
+      setConvs(c)
+    } catch { /* ignore */ } finally { setLoading(false) }
   }
 
-  useEffect(() => {
-    if (myId) reload()
-    else setLoading(false)
-  }, [myId])
+  useEffect(() => { if (myId) reload(); else setLoading(false) }, [myId])
 
-  const act = async (fn) => {
-    setBusy(true)
-    await fn()
-    setBusy(false)
-    reload()
-  }
+  const act = async (fn) => { setBusy(true); await fn(); setBusy(false); reload() }
 
-  const filtered = useMemo(() => {
+  const lastById = useMemo(() => new Map(convs.map(c => [c.id, c.last])), [convs])
+
+  const sorted = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return lists.friends
-    return lists.friends.filter((f) => (f.name || '').toLowerCase().includes(q))
-  }, [lists.friends, query])
+    let arr = q ? lists.friends.filter(f => (f.name || '').toLowerCase().includes(q)) : lists.friends
+    return [...arr].sort((a, b) => {
+      const aPin = pinned.indexOf(a.id), bPin = pinned.indexOf(b.id)
+      if (aPin !== -1 && bPin !== -1) return aPin - bPin
+      if (aPin !== -1) return -1
+      if (bPin !== -1) return 1
+      const ta = lastById.has(a.id) ? Date.parse(lastById.get(a.id).created_at) : 0
+      const tb = lastById.has(b.id) ? Date.parse(lastById.get(b.id).created_at) : 0
+      return tb - ta
+    })
+  }, [lists.friends, query, pinned, lastById])
+
+  const handlePin = (id) => {
+    const res = togglePin(id)
+    if (res.error) { setMenuErr(res.error); return }
+    setPinned(getPinned()); setOpenMenu(null); setMenuErr(null)
+  }
+
+  const handleMute = (id) => {
+    toggleMute(id); setMuted(getMuted()); setOpenMenu(null)
+  }
+
+  const handleRemove = async (rowId) => {
+    setOpenMenu(null); setBusy(true)
+    await removeFriendship(rowId)
+    setBusy(false); reload()
+  }
 
   if (!supabaseEnabled || !user) {
     return (
@@ -70,14 +144,10 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
   }
 
   return (
-    <div className="screen">
+    <div className="screen" onClick={() => openMenu && setOpenMenu(null)}>
       <div className="row between" style={{ alignItems: 'center', margin: '0 0 16px' }}>
         <h1 className="h1" style={{ margin: '4px 0 0' }}>Друзья</h1>
-        <button
-          className="btn"
-          style={{ width: 'auto', height: 40, padding: '0 16px', fontSize: 14 }}
-          onClick={() => setAddOpen(true)}
-        >
+        <button className="btn" style={{ width: 'auto', height: 40, padding: '0 16px', fontSize: 14 }} onClick={() => setAddOpen(true)}>
           ＋ Добавить
         </button>
       </div>
@@ -107,22 +177,8 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
                   <div style={{ fontWeight: 600 }}>{r.name || 'Пользователь'}</div>
                 </div>
                 <div className="row gap8" style={{ flex: '0 0 auto' }}>
-                  <button
-                    className="btn"
-                    style={{ width: 'auto', height: 36, padding: '0 14px', fontSize: 13 }}
-                    disabled={busy}
-                    onClick={() => act(() => acceptFriend(r.rowId))}
-                  >
-                    Принять
-                  </button>
-                  <button
-                    className="btn ghost"
-                    style={{ width: 'auto', height: 36, padding: '0 14px', fontSize: 13 }}
-                    disabled={busy}
-                    onClick={() => act(() => removeFriendship(r.rowId))}
-                  >
-                    ✕
-                  </button>
+                  <button className="btn" style={{ width: 'auto', height: 36, padding: '0 14px', fontSize: 13 }} disabled={busy} onClick={() => act(() => acceptFriend(r.rowId))}>Принять</button>
+                  <button className="btn ghost" style={{ width: 'auto', height: 36, padding: '0 14px', fontSize: 13 }} disabled={busy} onClick={() => act(() => removeFriendship(r.rowId))}>✕</button>
                 </div>
               </div>
             </div>
@@ -133,40 +189,81 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed }) {
       {/* Список друзей */}
       {loading ? (
         <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
-      ) : filtered.length === 0 ? (
+      ) : sorted.length === 0 ? (
         <div className="card">
           <p className="muted" style={{ fontSize: 15 }}>
             {query ? 'Никого не нашли.' : 'Пока никого нет. Нажмите «＋ Добавить» и вставьте ID друга.'}
           </p>
         </div>
-      ) : (
-        filtered.map((f) => (
-          <button
-            key={f.rowId}
-            className="card"
-            style={{ marginBottom: 8, padding: '12px 14px', width: '100%', textAlign: 'left' }}
-            onClick={() => setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId })}
-          >
-            <div className="row between" style={{ alignItems: 'center' }}>
-              <div className="row gap12" style={{ alignItems: 'center', minWidth: 0 }}>
+      ) : sorted.map((f) => {
+        const isPinned = pinned.includes(f.id)
+        const isMuted  = muted.includes(f.id)
+        const unread   = unreadCounts[f.id] || 0
+        const isMenuOpen = openMenu === f.id
+
+        return (
+          <div key={f.rowId} style={{ position: 'relative', marginBottom: 8 }}>
+            <button
+              className="card"
+              style={{ padding: '12px 48px 12px 14px', width: '100%', textAlign: 'left' }}
+              onClick={() => setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId })}
+            >
+              <div className="row gap12" style={{ alignItems: 'center' }}>
                 <Avatar src={f.avatar} name={f.name} />
-                <div style={{ fontWeight: 600, fontSize: 16 }}>{f.name || 'Друг'}</div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="row gap8" style={{ alignItems: 'center' }}>
+                    {isPinned && <span style={{ fontSize: 11, opacity: 0.7 }}>📌</span>}
+                    <span style={{ fontWeight: 600, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {f.name || 'Друг'}
+                    </span>
+                    {isMuted && <span style={{ fontSize: 13, opacity: 0.6 }}>🔕</span>}
+                  </div>
+                </div>
+                {unread > 0 && (
+                  <span style={{
+                    minWidth: 22, height: 22, borderRadius: 999,
+                    background: 'var(--danger)', color: '#fff',
+                    fontSize: 12, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '0 5px', flex: '0 0 auto',
+                  }}>
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                )}
               </div>
-              {(unreadCounts[f.id] || 0) > 0 && (
-                <span style={{
-                  minWidth: 22, height: 22, borderRadius: 999,
-                  background: 'var(--danger)', color: '#fff',
-                  fontSize: 12, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  padding: '0 5px', flex: '0 0 auto',
-                }}>
-                  {unreadCounts[f.id] > 99 ? '99+' : unreadCounts[f.id]}
-                </span>
-              )}
-            </div>
-          </button>
-        ))
-      )}
+            </button>
+
+            {/* ⋯ кнопка */}
+            <button
+              className="iconbtn"
+              style={{
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                width: 34, height: 34, background: 'transparent', border: 'none',
+              }}
+              onClick={(e) => { e.stopPropagation(); setMenuErr(null); setOpenMenu(isMenuOpen ? null : f.id) }}
+              aria-label="Действия"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+              </svg>
+            </button>
+
+            {/* Dropdown меню */}
+            {isMenuOpen && (
+              <FriendMenu
+                friend={f}
+                isPinned={isPinned}
+                isMuted={isMuted}
+                menuErr={menuErr}
+                onPin={() => handlePin(f.id)}
+                onMute={() => handleMute(f.id)}
+                onRemove={() => handleRemove(f.rowId)}
+                onClose={() => setOpenMenu(null)}
+              />
+            )}
+          </div>
+        )
+      })}
 
       {addOpen && <AddFriendSheet onClose={() => setAddOpen(false)} onSent={reload} />}
 
