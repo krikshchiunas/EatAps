@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { pullFriendState, removeFriendship } from '../lib/supabase.js'
+import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { sumDay } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { Avatar } from './FriendsScreen.jsx'
@@ -25,13 +26,13 @@ function DotsMenu({ onMute, onRemove, onClose }) {
         style={{ width: '100%', textAlign: 'left', padding: '14px 18px', fontSize: 15, borderBottom: '1px solid var(--border)' }}
         onClick={() => { onMute(); onClose() }}
       >
-        🔕 Заглушить
+        Заглушить
       </button>
       <button
         style={{ width: '100%', textAlign: 'left', padding: '14px 18px', fontSize: 15, color: 'var(--danger)' }}
         onClick={() => { onRemove(); onClose() }}
       >
-        🗑 Удалить из друзей
+        Удалить из друзей
       </button>
     </div>
   )
@@ -44,8 +45,9 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [expandedMeal, setExpandedMeal] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [closing, setClosing] = useState(false)
   const menuRef = useRef(null)
+
+  const { bind, style: swipeStyle, close: handleClose } = useSwipeBack(onClose)
 
   useEffect(() => {
     const el = document.documentElement
@@ -59,10 +61,6 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
     }
   }, [])
 
-  const handleClose = () => {
-    setClosing(true)
-    setTimeout(onClose, 240)
-  }
   const today = keyOf()
 
   useEffect(() => {
@@ -92,8 +90,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
     setBusy(true)
     await removeFriendship(friend.rowId)
     setBusy(false)
-    setClosing(true)
-    setTimeout(onRemoved, 240)
+    onRemoved()
   }
 
   const handleMute = () => {
@@ -109,7 +106,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const target = p.targets?.calories
 
   return (
-    <div className={closing ? 'chat-overlay closing' : 'chat-overlay'}>
+    <div className="chat-overlay" style={swipeStyle} {...bind}>
       {/* Header */}
       <header className="chat-header">
         <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }}>‹</button>

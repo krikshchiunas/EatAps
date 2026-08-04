@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store.jsx'
 import { listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage, markChatRead } from '../lib/supabase.js'
+import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 
@@ -31,9 +32,10 @@ export default function ChatView({ friend, onClose }) {
   const [err, setErr] = useState(null)
   const [preview, setPreview] = useState(null)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [closing, setClosing] = useState(false)
   const listRef = useRef(null)
   const fileRef = useRef(null)
+
+  const { bind, style: swipeStyle, close: handleClose } = useSwipeBack(onClose)
 
   // Скрыть BottomNav пока чат открыт (счётчик — FriendAccount тоже добавляет)
   useEffect(() => {
@@ -47,11 +49,6 @@ export default function ChatView({ friend, onClose }) {
       if (next <= 0) el.classList.remove('has-overlay')
     }
   }, [])
-
-  const handleClose = () => {
-    setClosing(true)
-    setTimeout(onClose, 240)
-  }
 
   const scrollToBottom = (smooth = false) => {
     const el = listRef.current
@@ -126,7 +123,7 @@ export default function ChatView({ friend, onClose }) {
 
   return (
     <>
-      <div className={closing ? 'chat-overlay closing' : 'chat-overlay'}>
+      <div className="chat-overlay" style={swipeStyle} {...bind}>
         <header className="chat-header">
           <button className="iconbtn" onClick={handleClose} aria-label="Назад">‹</button>
           <button

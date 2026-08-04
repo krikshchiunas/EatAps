@@ -3,6 +3,7 @@ import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from '@
 import { useStore } from '../store.jsx'
 import { web3Enabled } from '../lib/appkit.js'
 import { ruAuthError } from '../lib/authErrors.js'
+import { useSheetDrag } from '../lib/useSheetDrag.js'
 
 export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onRegistered }) {
   const { auth, user } = useStore()
@@ -10,6 +11,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null) // {type:'err'|'ok', text}
+  const { sheetStyle, grabberBind, close } = useSheetDrag(onClose)
 
   const isRegister = mode === 'register'
 
@@ -92,12 +94,12 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
   }, [awaitingWeb3, isConnected, caipAddress, ethProvider, solProvider]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="grabber" />
+    <div className="sheet-backdrop" onClick={close}>
+      <div className="sheet" style={sheetStyle} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" {...grabberBind} />
         <div className="row between" style={{ marginBottom: 18 }}>
           <h2 className="h2">{isRegister ? 'Регистрация в EatAps' : 'Вход в EatAps'}</h2>
-          <button className="iconbtn" onClick={onClose} aria-label="Закрыть">✕</button>
+          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
         </div>
         <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>
           {isRegister

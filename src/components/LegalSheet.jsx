@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSheetDrag } from '../lib/useSheetDrag.js'
 
 // ВАЖНО: это ШАБЛОНЫ. Замените все [плейсхолдеры] своими реальными данными
 // и покажите юристу перед публикацией. Это не юридическая консультация.
@@ -136,13 +137,14 @@ function AGB() {
 
 export default function LegalSheet({ onClose, initial = 'impressum' }) {
   const [tab, setTab] = useState(initial)
+  const { sheetStyle, grabberBind, close } = useSheetDrag(onClose)
   return (
-    <div className="sheet-backdrop" onClick={onClose} style={{ zIndex: 60 }}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '86vh', overflowY: 'auto' }}>
-        <div className="grabber" />
+    <div className="sheet-backdrop" onClick={close} style={{ zIndex: 60 }}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '86vh', overflowY: 'auto', ...sheetStyle }}>
+        <div className="grabber" {...grabberBind} />
         <div className="row between" style={{ marginBottom: 14 }}>
           <h2 className="h2">Правовая информация</h2>
-          <button className="iconbtn" onClick={onClose} aria-label="Закрыть">✕</button>
+          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
         </div>
         <div className="seg" style={{ marginBottom: 16 }}>
           <button className={tab === 'impressum' ? 'on' : ''} onClick={() => setTab('impressum')}>Impressum</button>
