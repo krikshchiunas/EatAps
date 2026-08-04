@@ -163,6 +163,104 @@ export async function pullFriendState(friendId) {
   return pullState(friendId)
 }
 
+// ---------------- Чат ----------------
+// Сжать фото до ~1280px по длинной стороне, JPEG q=0.8 — быстро уходит по сети.
+async function compressImageFile(file, maxSize = 1280, quality = 0.8) {
+  if (!file || !file.type?.startsWith('image/')) throw new Error('Это не изображение')
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image()
+      i.onload = () => res(i)
+      i.onerror = () => rej(new Error('Не удалось прочитать фото'))
+      i.src = url
+    })
+    const scale = Math.min(1, maxSize / Math.max(img.width, img.height))
+    const w = Math.max(1, Math.round(img.width * scale))
+    const h = Math.max(1, Math.round(img.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+    return await new Promise((res, rej) => canvas.toBlob((b) => b ? res(b) : rej(new Error('Пустой блоб')), 'image/jpeg', quality))
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+export async function uploadChatImage(userId, file) {
+  if (!supabase) throw new Error('Нет подключения')
+  const blob = await compressImageFile(file)
+  const id = crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2)
+  const path = `${userId}/${id}.jpg`
+  const { error } = await supabase.storage.from('chat-images').upload(path, blob, {
+    contentType: 'image/jpeg',
+    upsert: false,
+  })
+  if (error) throw error
+  return supabase.storage.from('chat-images').getPublicUrl(path).data.publicUrl
+}
+
+export async function sendChatMessage({ sender, recipient, text, imageUrl }) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const payload = {
+    sender,
+    recipient,
+    text: text?.trim() ? text.trim() : null,
+    image_url: imageUrl || null,
+  }
+  if (!payload.text && !payload.image_url) return { error: 'Пустое сообщение' }
+  const { data, error } = await supabase.from('messages').insert(payload).select('*').single()
+  if (error) return { error: error.message }
+  return { ok: data }
+}
+
+export async function listMessagesWith(myId, friendId, limit = 200) {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id, sender, recipient, text, image_url, created_at')
+    .or(`and(sender.eq.${myId},recipient.eq.${friendId}),and(sender.eq.${friendId},recipient.eq.${myId})`)
+    .order('created_at', { ascending: true })
+    .limit(limit)
+  if (error) throw error
+  return data || []
+}
+
+// Realtime-подписка на новые входящие сообщения от конкретного друга.
+export function subscribeToChat(myId, friendId, onMessage) {
+  if (!supabase) return () => {}
+  const channel = supabase
+    .channel(`chat:${myId}:${friendId}:${Date.now()}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages', filter: `recipient=eq.${myId}` },
+      (payload) => {
+        if (payload.new?.sender === friendId) onMessage(payload.new)
+      },
+    )
+    .subscribe()
+  return () => supabase.removeChannel(channel)
+}
+
+// Последнее сообщение в каждом диалоге — для списка чатов.
+export async function listConversations(myId, limit = 200) {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id, sender, recipient, text, image_url, created_at')
+    .or(`sender.eq.${myId},recipient.eq.${myId}`)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  const byPartner = new Map()
+  for (const m of data || []) {
+    const partner = m.sender === myId ? m.recipient : m.sender
+    if (!byPartner.has(partner)) byPartner.set(partner, m)
+  }
+  return Array.from(byPartner, ([id, last]) => ({ id, last }))
+}
+
 // DSGVO «право на удаление»: стираем данные из облака и удаляем сам аккаунт.
 // Данные удаляем всегда (RLS: свои); аккаунт — через RPC delete_current_user
 // (SECURITY DEFINER, см. schema.sql). Если RPC нет — возвращаем partial.

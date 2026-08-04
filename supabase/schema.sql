@@ -154,6 +154,81 @@ from auth.users
 where id not in (select user_id from public.profiles)
 order by created_at;
 
+-- ---------------- Чат между друзьями ----------------
+-- Сообщения хранятся в отдельной таблице; фотографии — в бакете Storage.
+
+create table if not exists public.messages (
+  id uuid primary key default gen_random_uuid(),
+  sender uuid not null references auth.users(id) on delete cascade,
+  recipient uuid not null references auth.users(id) on delete cascade,
+  text text,
+  image_url text,
+  created_at timestamptz not null default now(),
+  check (text is not null or image_url is not null)
+);
+
+create index if not exists messages_pair_idx
+  on public.messages (least(sender, recipient), greatest(sender, recipient), created_at desc);
+create index if not exists messages_recipient_idx
+  on public.messages (recipient, created_at desc);
+
+alter table public.messages enable row level security;
+
+-- Видеть сообщение может только его отправитель или получатель.
+drop policy if exists "messages select" on public.messages;
+create policy "messages select" on public.messages
+  for select using (auth.uid() = sender or auth.uid() = recipient);
+
+-- Отправить может только сам себе не самому, и только принятому другу.
+drop policy if exists "messages insert" on public.messages;
+create policy "messages insert" on public.messages
+  for insert with check (
+    auth.uid() = sender
+    and sender <> recipient
+    and exists (
+      select 1 from public.friendships f
+      where f.status = 'accepted'
+        and (
+          (f.requester = sender and f.addressee = recipient)
+          or (f.addressee = sender and f.requester = recipient)
+        )
+    )
+  );
+
+-- Удалить своё сообщение может только автор (получатель не удаляет чужие).
+drop policy if exists "messages delete" on public.messages;
+create policy "messages delete" on public.messages
+  for delete using (auth.uid() = sender);
+
+-- Realtime: включить публикацию для этой таблицы (для supabase.channel).
+alter publication supabase_realtime add table public.messages;
+
+-- ---------------- Бакет для фото из чата ----------------
+insert into storage.buckets (id, name, public)
+  values ('chat-images', 'chat-images', true)
+  on conflict (id) do nothing;
+
+-- Читать фото могут все (URL всё равно уникальный, публичный бакет).
+drop policy if exists "chat-images read" on storage.objects;
+create policy "chat-images read" on storage.objects
+  for select using (bucket_id = 'chat-images');
+
+-- Заливать может только авторизованный, и только в свою папку {uid}/…
+drop policy if exists "chat-images write own" on storage.objects;
+create policy "chat-images write own" on storage.objects
+  for insert with check (
+    bucket_id = 'chat-images'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "chat-images delete own" on storage.objects;
+create policy "chat-images delete own" on storage.objects
+  for delete using (
+    bucket_id = 'chat-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
 -- ---------------- Удаление аккаунта (DSGVO Art. 17) ----------------
 -- Пользователь удаляет сам себя. Удаление auth.users каскадно стирает
 -- app_state и friendships (ON DELETE CASCADE выше).

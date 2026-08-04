@@ -17,6 +17,12 @@ const ICONS = {
       <path d="M16 5.2a3 3 0 0 1 0 6M18 14.9c2.6.4 4.5 2 4.5 4.6" />
     </svg>
   ),
+  chats: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="navicon">
+      <path d="M4 6.5a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H9l-4 3.5v-3.5H7a3 3 0 0 1-3-3v-7z" />
+      <path d="M8.5 10h7M8.5 13h4" />
+    </svg>
+  ),
   profile: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="navicon">
       <circle cx="12" cy="8.5" r="3.5" />
@@ -31,6 +37,9 @@ export default function BottomNav({ tab, setTab, onAdd }) {
       <button className={tab === 'day' ? 'on' : ''} onClick={() => setTab('day')}>
         {ICONS.day}<span>День</span>
       </button>
+      <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')}>
+        {ICONS.friends}<span>Друзья</span>
+      </button>
       <div className="fab-slot">
         <button className="fab" onClick={onAdd} aria-label="Добавить приём пищи">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" width="26" height="26">
@@ -38,8 +47,8 @@ export default function BottomNav({ tab, setTab, onAdd }) {
           </svg>
         </button>
       </div>
-      <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')}>
-        {ICONS.friends}<span>Друзья</span>
+      <button className={tab === 'chats' ? 'on' : ''} onClick={() => setTab('chats')}>
+        {ICONS.chats}<span>Чаты</span>
       </button>
       <button className={tab === 'profile' ? 'on' : ''} onClick={() => setTab('profile')}>
         {ICONS.profile}<span>Профиль</span>
