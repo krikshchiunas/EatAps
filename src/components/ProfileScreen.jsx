@@ -35,14 +35,12 @@ export default function ProfileScreen() {
     if (!text) return
     setFeedbackStatus('sending')
     try {
-      const msg = { text: `💬 Совет от пользователя EatAps:\n\n${text}` }
-      const send = (chat_id) => fetch(`https://api.telegram.org/bot${import.meta.env.VITE_TG_TOKEN}/sendMessage`, {
+      const r = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id, ...msg }),
+        body: JSON.stringify({ text }),
       })
-      const [r1, r2] = await Promise.all([send(571138125), send(938539456)])
-      if (!r1.ok && !r2.ok) throw new Error()
+      if (!r.ok) throw new Error()
       setFeedbackStatus('sent')
       setFeedbackText('')
       setTimeout(() => { setFeedbackStatus('idle'); setFeedbackOpen(false) }, 2000)

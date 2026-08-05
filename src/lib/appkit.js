@@ -3,8 +3,7 @@ import { EthersAdapter } from '@reown/appkit-adapter-ethers'
 import { SolanaAdapter } from '@reown/appkit-adapter-solana'
 import { mainnet, solana } from '@reown/appkit/networks'
 
-// Публичный Project ID из cloud.reown.com (можно переопределить через env на Vercel).
-const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || 'eb7dd99e7a1daaa7e368cd42b91c9ba7'
+const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || ''
 
 export const web3Enabled = Boolean(projectId)
 
