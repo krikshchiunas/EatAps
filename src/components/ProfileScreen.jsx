@@ -26,6 +26,7 @@ export default function ProfileScreen() {
   const [myProfileOpen, setMyProfileOpen] = useState(false)
   const [legal, setLegal] = useState(null) // null | 'impressum' | 'privacy'
   const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(null) // null | 'reset' | 'delete'
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle | sending | sent | error
@@ -50,9 +51,7 @@ export default function ProfileScreen() {
     }
   }
 
-  const reset = () => {
-    if (confirm('Сбросить профиль и все данные? Это действие нельзя отменить.')) resetAll()
-  }
+  const reset = () => setConfirm('reset')
 
   // DSGVO: право на переносимость — выгрузка всех своих данных в JSON.
   const exportData = () => {
@@ -77,7 +76,6 @@ export default function ProfileScreen() {
 
   // DSGVO: право на удаление — стираем данные из облака, аккаунт и локально.
   const delAccount = async () => {
-    if (!confirm('Удалить аккаунт и все данные из облака? Это необратимо.')) return
     setBusy(true)
     const res = await deleteAccount()
     try {
@@ -187,9 +185,24 @@ export default function ProfileScreen() {
       </button>
 
       {supabaseEnabled && user && (
-        <button className="btn ghost" style={{ marginTop: 14, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} disabled={busy} onClick={delAccount}>
+        <button className="btn ghost" style={{ marginTop: 14, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} disabled={busy} onClick={() => setConfirm('delete')}>
           {busy ? 'Удаление…' : 'Удалить аккаунт и данные из облака'}
         </button>
+      )}
+
+      {confirm === 'reset' && (
+        <ConfirmDialog
+          text="Вы уверены, что хотите удалить вашу историю?"
+          onYes={() => { setConfirm(null); resetAll() }}
+          onNo={() => setConfirm(null)}
+        />
+      )}
+      {confirm === 'delete' && (
+        <ConfirmDialog
+          text="Вы уверены, что хотите удалить EatAps и больше не знать, что едят ваши друзья?"
+          onYes={() => { setConfirm(null); delAccount() }}
+          onNo={() => setConfirm(null)}
+        />
       )}
 
       <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13 }}>
@@ -225,6 +238,32 @@ function KV({ k, v }) {
     <div style={{ textAlign: 'center' }}>
       <div className="tabular" style={{ fontSize: 20, fontWeight: 680 }}>{v}</div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{k}</div>
+    </div>
+  )
+}
+
+function ConfirmDialog({ text, onYes, onNo }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '0 24px',
+    }} onClick={onNo}>
+      <div style={{
+        background: 'var(--surface)',
+        borderRadius: 20,
+        padding: '28px 24px 20px',
+        maxWidth: 360,
+        width: '100%',
+        boxShadow: 'var(--shadow-float)',
+      }} onClick={e => e.stopPropagation()}>
+        <p style={{ fontSize: 16, lineHeight: 1.5, color: 'var(--ink)', marginBottom: 24, textAlign: 'center' }}>{text}</p>
+        <div className="row gap12">
+          <button className="btn ghost" style={{ flex: 1 }} onClick={onNo}>Нет</button>
+          <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }} onClick={onYes}>Да</button>
+        </div>
+      </div>
     </div>
   )
 }
