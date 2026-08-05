@@ -190,6 +190,18 @@ export async function pullFriendState(friendId) {
   return pullState(friendId)
 }
 
+// Быстрый лукап имени и аватара по id — используется при пуше о новом сообщении.
+// Тянем только два поля из JSON, чтобы не грузить всё состояние собеседника.
+export async function fetchUserBrief(userId) {
+  if (!supabase || !userId) return null
+  const { data } = await supabase
+    .from('app_state')
+    .select('name:state->profile->>name, avatar:state->profile->>avatar')
+    .eq('user_id', userId)
+    .maybeSingle()
+  return data ? { name: data.name || null, avatar: data.avatar || null } : null
+}
+
 // ---------------- Чат ----------------
 // Сжать фото до ~1280px по длинной стороне, JPEG q=0.8 — быстро уходит по сети.
 async function compressImageFile(file, maxSize = 1280, quality = 0.8) {

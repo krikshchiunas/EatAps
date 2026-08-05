@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
-import { fetchUnreadCounts, subscribeToIncoming } from './lib/supabase.js'
+import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief } from './lib/supabase.js'
 import { startScheduler, notifyIncomingMessage } from './lib/notifications.js'
 import Onboarding from './components/Onboarding.jsx'
 import DayScreen from './components/DayScreen.jsx'
@@ -39,22 +39,31 @@ export default function App() {
     setUnreadCounts(await fetchUnreadCounts(user.id))
   }, [user?.id])
 
+  // Кэш имени/аватарки отправителей — один лукап на друга за сессию.
+  const senderCache = useRef(new Map())
+
   useEffect(() => {
     if (!user?.id) return
+    senderCache.current = new Map()
     refreshUnread()
-    return subscribeToIncoming(user.id, (payload) => {
+    return subscribeToIncoming(user.id, async (payload) => {
       refreshUnread()
-      // Пуш о новом сообщении. Показываем всегда, кроме случая, когда
-      // пользователь прямо сейчас в чате с этим отправителем.
       const row = payload?.new
-      if (row?.sender && row.sender !== user.id) {
-        notifyIncomingMessage({
-          senderId: row.sender,
-          senderName: 'Новое сообщение',
-          text: row.text,
-          messageId: row.id,
-        })
+      if (!row?.sender || row.sender === user.id) return
+
+      let brief = senderCache.current.get(row.sender)
+      if (!brief) {
+        brief = (await fetchUserBrief(row.sender)) || {}
+        senderCache.current.set(row.sender, brief)
       }
+
+      notifyIncomingMessage({
+        senderId: row.sender,
+        senderName: brief.name,
+        senderAvatar: brief.avatar,
+        text: row.text,
+        messageId: row.id,
+      })
     })
   }, [user?.id, refreshUnread])
 

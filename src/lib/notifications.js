@@ -65,11 +65,11 @@ export async function requestNotificationPermission() {
 }
 
 // Показываем уведомление через SW (надёжнее — работает даже когда вкладка не в фокусе).
-async function show(title, body, tag) {
+async function show(title, body, tag, icon) {
   if (!notificationsSupported() || Notification.permission !== 'granted') return
   const options = {
     body,
-    icon: '/icon-192.png',
+    icon: icon || '/icon-192.png',
     badge: '/icon-192.png',
     tag,
     renotify: false,
@@ -161,13 +161,15 @@ let activeChatUserId = null
 export function setActiveChat(userId) { activeChatUserId = userId || null }
 
 // Показать уведомление о новом сообщении. Уникальный tag на каждое сообщение —
-// чтобы новые не затирали старые в шторке уведомлений.
-export function notifyIncomingMessage({ senderId, senderName, text, messageId }) {
+// чтобы новые не затирали старые в шторке уведомлений. Заголовок — имя друга,
+// иконка — его аватарка (если есть).
+export function notifyIncomingMessage({ senderId, senderName, senderAvatar, text, messageId }) {
   if (Notification.permission !== 'granted') return
   if (senderId && senderId === activeChatUserId) return
   const body = text?.trim()
     ? text.length > 120 ? text.slice(0, 117) + '…' : text
     : '📷 Фото'
   const tag = messageId ? `eataps-chat-${messageId}` : `eataps-chat-${Date.now()}`
-  show(senderName || 'Новое сообщение', body, tag)
+  const title = (senderName && senderName.trim()) || 'Новое сообщение'
+  show(title, body, tag, senderAvatar || null)
 }
