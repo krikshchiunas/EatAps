@@ -178,17 +178,6 @@ export default function ProfileScreen() {
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 14 }}>
-        <div className="h2" style={{ fontSize: 17, marginBottom: 6 }}>Приватность и данные</div>
-        <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>Вы можете выгрузить все свои данные или удалить их (DSGVO).</p>
-        <button className="btn ghost" onClick={exportData}>Скачать мои данные (JSON)</button>
-        {supabaseEnabled && user && (
-          <button className="btn ghost" style={{ marginTop: 10, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} disabled={busy} onClick={delAccount}>
-            {busy ? 'Удаление…' : 'Удалить аккаунт и данные из облака'}
-          </button>
-        )}
-      </div>
-
       {supabaseEnabled && user && (
         <button className="btn ghost" style={{ marginTop: 14 }} onClick={() => auth.signOut()}>Выйти из аккаунта</button>
       )}
@@ -196,6 +185,12 @@ export default function ProfileScreen() {
       <button className="btn ghost" style={{ marginTop: 12, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} onClick={reset}>
         Сбросить профиль и данные
       </button>
+
+      {supabaseEnabled && user && (
+        <button className="btn ghost" style={{ marginTop: 14, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} disabled={busy} onClick={delAccount}>
+          {busy ? 'Удаление…' : 'Удалить аккаунт и данные из облака'}
+        </button>
+      )}
 
       <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13 }}>
         <button style={{ color: 'var(--ink-3)' }} onClick={() => setLegal('impressum')}>Impressum</button>
