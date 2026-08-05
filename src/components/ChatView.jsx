@@ -62,6 +62,7 @@ export default function ChatView({ friend, onClose }) {
   const [toast, setToast] = useState(null)
   const [showJump, setShowJump] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)   // меню действий чата (⋯)
 
   const listRef = useRef(null)
   const atBottomRef = useRef(true)
@@ -282,6 +283,15 @@ export default function ChatView({ friend, onClose }) {
     if (m.sender === myId) await deleteChatMessage(m.id)
   }, [myId])
 
+  // Очистить переписку у себя: прячем локально всё, что сейчас загружено.
+  // У собеседника история остаётся — как «удалить у меня» для одного сообщения.
+  const clearChatForMe = useCallback(() => {
+    const ids = messagesRef.current.map((m) => m.id).filter((id) => !String(id).startsWith('temp-'))
+    ids.forEach(hideMessageLocally)
+    setMessages([])
+    flash('Переписка очищена у вас')
+  }, [flash])
+
   // ── delegated gestures on the list: swipe-left → reply, long-press → menu ──
   useEffect(() => {
     const el = listRef.current
@@ -366,11 +376,16 @@ export default function ChatView({ friend, onClose }) {
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
           <button className="chat-peer" onClick={() => setProfileOpen(true)}>
-            <Avatar src={friend.avatar} name={friendName} size={38} />
-            <div style={{ minWidth: 0 }}>
-              <div className="chat-peer-name">{friendName}</div>
-              <div className="chat-peer-sub">профиль ›</div>
-            </div>
+            <span className="chat-peer-ava"><Avatar src={friend.avatar} name={friendName} size={40} /></span>
+            <span className="chat-peer-meta">
+              <span className="chat-peer-name">{friendName}</span>
+              <span className="chat-peer-sub">Открыть профиль</span>
+            </span>
+          </button>
+          <button className="chat-more" onClick={() => setMenuOpen(true)} aria-label="Действия">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden>
+              <circle cx="12" cy="5" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="12" cy="19" r="1.9" />
+            </svg>
           </button>
         </header>
 
@@ -408,6 +423,14 @@ export default function ChatView({ friend, onClose }) {
           onForward={() => setForwardMsg(menuMsg)}
           onDeleteForMe={() => doDeleteForMe(menuMsg)}
           onRetry={() => retry(menuMsg)}
+        />
+      )}
+
+      {menuOpen && (
+        <ChatMenuSheet
+          onClose={() => setMenuOpen(false)}
+          onProfile={() => setProfileOpen(true)}
+          onClearForMe={clearChatForMe}
         />
       )}
 
@@ -568,24 +591,30 @@ function Composer({ reply, onCancelReply, onSend }) {
           <button onClick={() => { URL.revokeObjectURL(photo.url); setPhoto(null) }} aria-label="Убрать фото">✕</button>
         </div>
       )}
+      {/* Поле-«пилюля»: кнопки вложений живут ВНУТРИ него — так добавление
+          новых (приём пищи, файл, голосовое) не ломает раскладку строки. */}
       <div className="chat-composer-row">
-        <button className="chat-attach" onClick={() => fileRef.current?.click()} aria-label="Фото">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="5" width="18" height="15" rx="3.5" /><circle cx="12" cy="12.5" r="3.4" /><path d="M8 5 9.4 3h5.2L16 5" />
-          </svg>
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
-        <textarea
-          ref={taRef}
-          className="chat-textarea"
-          placeholder="Сообщение…"
-          value={text}
-          rows={1}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKey}
-        />
+        <div className="chat-inputwrap">
+          <div className="chat-tools">
+            <button className="chat-tool" onClick={() => fileRef.current?.click()} aria-label="Отправить фото">
+              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="18" height="15" rx="3.5" /><circle cx="12" cy="12.5" r="3.4" /><path d="M8 5 9.4 3h5.2L16 5" />
+              </svg>
+            </button>
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
+          <textarea
+            ref={taRef}
+            className="chat-textarea"
+            placeholder="Сообщение…"
+            value={text}
+            rows={1}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKey}
+          />
+        </div>
         <button className={`chat-send${canSend ? ' on' : ''}`} onClick={submit} disabled={!canSend} aria-label="Отправить">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M3.4 20.4l17.6-8.4a.5.5 0 0 0 0-.9L3.4 3.6a.5.5 0 0 0-.7.6l2.3 6.9c.1.2.3.4.5.4l8.9 1.5-8.9 1.5c-.2 0-.4.2-.5.4l-2.3 6.9a.5.5 0 0 0 .7.6z" /></svg>
+          <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor"><path d="M3.4 20.4l17.6-8.4a.5.5 0 0 0 0-.9L3.4 3.6a.5.5 0 0 0-.7.6l2.3 6.9c.1.2.3.4.5.4l8.9 1.5-8.9 1.5c-.2 0-.4.2-.5.4l-2.3 6.9a.5.5 0 0 0 .7.6z" /></svg>
         </button>
       </div>
     </div>
@@ -631,6 +660,45 @@ const CTX_ACTIONS = [
     run: (h) => h.onDeleteForMe(),
   },
 ]
+
+// ── меню чата (⋯ в хедере) ────────────────────────────────────────────────────
+// Тоже декларативное — место под «Поиск», «Отключить уведомления», настройки
+// группы. Пока только то, что реально работает.
+const CHAT_ACTIONS = [
+  {
+    key: 'profile',
+    label: 'Профиль друга',
+    icon: 'M12 12a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4z M4.5 20.5a7.5 7.5 0 0 1 15 0',
+    run: (h) => h.onProfile(),
+  },
+  {
+    key: 'clear',
+    label: 'Очистить переписку у меня',
+    icon: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+    danger: true,
+    run: (h) => h.onClearForMe(),
+  },
+]
+
+function ChatMenuSheet({ onClose, ...handlers }) {
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+  return (
+    <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 80 }}>
+      <div className="sheet ctx-sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
+        {CHAT_ACTIONS.map((a) => (
+          <button
+            key={a.key}
+            className={`ctx-item${a.danger ? ' danger' : ''}`}
+            onClick={() => { a.run(handlers); close() }}
+          >
+            <Ico d={a.icon} /> {a.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function ContextSheet({ m, mine, onClose, ...handlers }) {
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
