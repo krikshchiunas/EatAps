@@ -370,6 +370,26 @@ export async function listMessagesWith(myId, friendId, limit = 300) {
   return (data || []).filter((m) => !hidden.has(String(m.id)))
 }
 
+// ── Индикатор «печатает…» ─────────────────────────────────────────────────────
+// Broadcast-канал (не postgres_changes): события эфемерные, в БД их писать
+// незачем. Имя канала одинаковое с обеих сторон — сортируем пару id, иначе
+// собеседники окажутся в разных каналах и не услышат друг друга.
+export function createTypingChannel(myId, friendId, onTyping) {
+  if (!supabase || !myId || !friendId) return { sendTyping: () => {}, unsubscribe: () => {} }
+  const pair = [myId, friendId].sort().join('_')
+  const channel = supabase
+    .channel(`typing:${pair}`, { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'typing' }, ({ payload }) => {
+      if (payload?.from === friendId) onTyping(payload.typing !== false)
+    })
+    .subscribe()
+
+  const sendTyping = (typing) => {
+    try { channel.send({ type: 'broadcast', event: 'typing', payload: { from: myId, typing } }) } catch {}
+  }
+  return { sendTyping, unsubscribe: () => supabase.removeChannel(channel) }
+}
+
 // Realtime-подписка на новые входящие сообщения от конкретного друга.
 export function subscribeToChat(myId, friendId, onMessage) {
   if (!supabase) return () => {}

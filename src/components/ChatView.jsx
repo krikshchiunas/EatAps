@@ -4,11 +4,13 @@ import {
   listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage,
   markChatRead, deleteChatMessage, listFriendships,
   markMessagesRead, subscribeToReadReceipts, hideMessageLocally,
+  createTypingChannel,
 } from '../lib/supabase.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { setActiveChat } from '../lib/notifications.js'
+import { MEAL_TYPES } from '../lib/foods.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 
@@ -34,7 +36,8 @@ function dayLabel(iso) {
 function previewOf(m) {
   if (m.text) return m.text
   if (m.image_url) return '📷 Фото'
-  if (m.meal_ref) return '🍽 ' + (m.meal_ref.name || 'Блюдо')
+  // v2 хранит название приёма в label, старый формат — в name.
+  if (m.meal_ref) return '🍽 ' + (m.meal_ref.label || m.meal_ref.name || 'Блюдо')
   return ''
 }
 // Ссылки в тексте → кликабельные, остальное — как есть.
@@ -63,6 +66,9 @@ export default function ChatView({ friend, onClose }) {
   const [showJump, setShowJump] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)   // меню действий чата (⋯)
+  const [mealPick, setMealPick] = useState(false)   // шторка выбора приёма пищи
+  const [mealCard, setMealCard] = useState(null)    // раскрытая карточка еды
+  const [peerTyping, setPeerTyping] = useState(false)
 
   const listRef = useRef(null)
   const atBottomRef = useRef(true)
@@ -164,6 +170,26 @@ export default function ChatView({ friend, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myId, friend.id])
 
+  // «Печатает…»: канал живёт весь чат. Гасим индикатор по таймауту — если
+  // собеседник свернул вкладку, события просто перестают приходить и «печатает»
+  // иначе висело бы вечно.
+  const typingRef = useRef({ sendTyping: () => {} })
+  useEffect(() => {
+    let offTimer = null
+    const ch = createTypingChannel(myId, friend.id, (typing) => {
+      clearTimeout(offTimer)
+      setPeerTyping(typing)
+      if (typing) offTimer = setTimeout(() => setPeerTyping(false), 4000)
+    })
+    typingRef.current = ch
+    return () => { clearTimeout(offTimer); ch.unsubscribe(); setPeerTyping(false) }
+  }, [myId, friend.id])
+
+  // Прокрутить к «печатает», если пользователь и так внизу.
+  useEffect(() => {
+    if (peerTyping && atBottomRef.current) requestAnimationFrame(() => pinBottom(true))
+  }, [peerTyping])
+
   // Подсветка сообщения на время контекст-меню. Раньше подсветка ставилась
   // жестом и снималась вручную в разных ветках — при некоторых путях (меню
   // открылось, палец ушёл за пределы строки) класс оставался и сообщение
@@ -244,6 +270,27 @@ export default function ChatView({ friend, onClose }) {
       setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...m, status: 'failed', _payload: { text, file } } : m)))
     }
   }, [reply, myId, friend.id])
+
+  // Отправка карточки приёма пищи — оптимистично, как обычное сообщение.
+  const sendMeal = useCallback(async (mealRef) => {
+    const tempId = 'temp-' + (crypto.randomUUID?.() || Date.now() + Math.random())
+    const temp = {
+      id: tempId, sender: myId, recipient: friend.id,
+      text: null, image_url: null, meal_ref: mealRef,
+      reply_to: null, reply_snapshot: null, forwarded_name: null,
+      created_at: new Date().toISOString(), status: 'sending',
+    }
+    setMessages((cur) => [...cur, temp])
+    atBottomRef.current = true
+    requestAnimationFrame(() => pinBottom(true))
+    try {
+      const res = await sendChatMessage({ sender: myId, recipient: friend.id, mealRef })
+      if (res.error) throw new Error(res.error)
+      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...res.ok, status: undefined } : m)))
+    } catch {
+      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)))
+    }
+  }, [myId, friend.id])
 
   const retry = useCallback(async (m) => {
     const p = m._payload || { text: m.text, file: null }
@@ -401,8 +448,10 @@ export default function ChatView({ friend, onClose }) {
             <MessageList
               messages={messages} myId={myId} friendName={friendName}
               onQuoteTap={jumpTo} onImgLoad={onImgLoad} onRetry={retry}
+              onOpenMeal={setMealCard}
             />
           )}
+          {peerTyping && <TypingBubble name={friendName} />}
         </div>
 
         {showJump && (
@@ -411,7 +460,13 @@ export default function ChatView({ friend, onClose }) {
           </button>
         )}
 
-        <Composer reply={reply} onCancelReply={() => setReply(null)} onSend={doSend} />
+        <Composer
+          reply={reply}
+          onCancelReply={() => setReply(null)}
+          onSend={doSend}
+          onPickMeal={() => setMealPick(true)}
+          onTyping={(t) => typingRef.current.sendTyping(t)}
+        />
       </div>
 
       {menuMsg && (
@@ -424,6 +479,14 @@ export default function ChatView({ friend, onClose }) {
           onDeleteForMe={() => doDeleteForMe(menuMsg)}
           onRetry={() => retry(menuMsg)}
         />
+      )}
+
+      {mealPick && (
+        <MealPickerSheet onClose={() => setMealPick(false)} onPick={sendMeal} />
+      )}
+
+      {mealCard && (
+        <MealCardSheet meal={mealCard} onClose={() => setMealCard(null)} />
       )}
 
       {menuOpen && (
@@ -453,7 +516,7 @@ export default function ChatView({ friend, onClose }) {
 }
 
 // ── message list (memoized — не перерисовывается при вводе текста) ─────────────
-const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry }) {
+const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
   return messages.map((m, i) => {
     const mine = m.sender === myId
     const prev = messages[i - 1]
@@ -466,7 +529,8 @@ const MessageList = memo(function MessageList({ messages, myId, friendName, onQu
         {showDay && <div className="chat-day">{dayLabel(m.created_at)}</div>}
         <MessageRow
           m={m} mine={mine} tail={!sameAsNext} grouped={sameAsPrev}
-          friendName={friendName} onQuoteTap={onQuoteTap} onImgLoad={onImgLoad} onRetry={onRetry}
+          friendName={friendName} onQuoteTap={onQuoteTap} onImgLoad={onImgLoad}
+          onRetry={onRetry} onOpenMeal={onOpenMeal}
         />
       </div>
     )
@@ -487,7 +551,69 @@ function ForkTick() {
   )
 }
 
-function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry }) {
+// «Печатает…» — отдельный пузырь в конце ленты, стилизован под сообщение
+// собеседника, чтобы не выбиваться из потока.
+function TypingBubble({ name }) {
+  return (
+    <div className="msg-row theirs typing-row">
+      <div className="msg theirs tail typing-bubble">
+        <span className="typing-name">{name} печатает</span>
+        <span className="typing-dots" aria-hidden><i /><i /><i /></span>
+      </div>
+    </div>
+  )
+}
+
+// Карточка приёма пищи внутри пузыря. v2 — полная (продукты + БЖУ), карточки
+// без версии остались от прежнего формата пересылки: рисуем их компактно,
+// чтобы старые сообщения не сломались.
+function MealRefCard({ meal, onOpen }) {
+  const legacy = !meal.v
+  if (legacy) {
+    return (
+      <div className="msg-meal">
+        <span style={{ fontSize: 20 }}>{meal.emoji || '🍽'}</span>
+        <div style={{ minWidth: 0 }}>
+          <div className="msg-meal-name">{meal.name}</div>
+          <div className="msg-meal-kcal">{meal.kcal} ккал</div>
+        </div>
+      </div>
+    )
+  }
+  const items = meal.items || []
+  const shown = items.slice(0, 3)
+  const rest = items.length - shown.length
+  return (
+    <button className="mealcard" onClick={() => onOpen?.(meal)}>
+      <div className="mealcard-head">
+        <span className="mealcard-emoji">{meal.emoji || '🍽'}</span>
+        <span className="mealcard-title">
+          <span className="mealcard-label">{meal.label}</span>
+          <span className="mealcard-when">{meal.date ? dayLabel(meal.date + 'T12:00:00') : ''}</span>
+        </span>
+        <span className="mealcard-kcal">{meal.kcal}<span className="mealcard-kcal-u">ккал</span></span>
+      </div>
+
+      <ul className="mealcard-items">
+        {shown.map((it, i) => (
+          <li key={i}>
+            <span className="mealcard-item-name">{it.emoji ? it.emoji + ' ' : ''}{it.name}</span>
+            {it.grams ? <span className="mealcard-item-g">{it.grams} {it.unit || 'г'}</span> : null}
+          </li>
+        ))}
+        {rest > 0 && <li className="mealcard-more">и ещё {rest}</li>}
+      </ul>
+
+      <div className="mealcard-macros">
+        <span><b>{meal.protein}</b> Б</span>
+        <span><b>{meal.fat}</b> Ж</span>
+        <span><b>{meal.carbs}</b> У</span>
+      </div>
+    </button>
+  )
+}
+
+function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
   const status = m.status // sending | failed | undefined(=sent)
   return (
     <div className={`msg-row ${mine ? 'mine' : 'theirs'}${grouped ? ' grouped' : ''}`} data-mid={m.id}>
@@ -504,15 +630,7 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry }) 
             <span className="msg-quote-text">{m.reply_snapshot.image ? '📷 ' : ''}{m.reply_snapshot.text || 'Фото'}</span>
           </button>
         )}
-        {m.meal_ref && (
-          <div className="msg-meal">
-            <span style={{ fontSize: 20 }}>{m.meal_ref.emoji || '🍽'}</span>
-            <div style={{ minWidth: 0 }}>
-              <div className="msg-meal-name">{m.meal_ref.name}</div>
-              <div className="msg-meal-kcal">{m.meal_ref.kcal} ккал</div>
-            </div>
-          </div>
-        )}
+        {m.meal_ref && <MealRefCard meal={m.meal_ref} onOpen={onOpenMeal} />}
         {m.image_url && (
           <a href={m.image_url} target="_blank" rel="noreferrer" className="msg-img-wrap" onClick={(e) => { if (status) e.preventDefault() }}>
             <img src={m.image_url} alt="" className="msg-img" onLoad={onImgLoad} draggable={false} />
@@ -537,11 +655,35 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry }) 
 }
 
 // ── composer (изолированный ввод: печать не трогает список) ────────────────────
-function Composer({ reply, onCancelReply, onSend }) {
+function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
   const [text, setText] = useState('')
   const [photo, setPhoto] = useState(null)
   const taRef = useRef(null)
   const fileRef = useRef(null)
+
+  // Троттлим «печатает»: шлём не чаще раза в 2с, гасим через 2.5с тишины.
+  // Иначе на каждый символ уходил бы бродкаст.
+  const typingRef = useRef({ lastSent: 0, stopTimer: null, active: false })
+  const pingTyping = useCallback(() => {
+    const t = typingRef.current
+    const now = Date.now()
+    if (!t.active || now - t.lastSent > 2000) {
+      t.active = true
+      t.lastSent = now
+      onTyping?.(true)
+    }
+    clearTimeout(t.stopTimer)
+    t.stopTimer = setTimeout(() => { t.active = false; onTyping?.(false) }, 2500)
+  }, [onTyping])
+
+  const stopTyping = useCallback(() => {
+    const t = typingRef.current
+    clearTimeout(t.stopTimer)
+    if (t.active) { t.active = false; onTyping?.(false) }
+  }, [onTyping])
+
+  // Уходим из чата с открытым «печатает» — гасим, чтобы не залипло у собеседника.
+  useEffect(() => stopTyping, [stopTyping])
 
   const grow = () => {
     const el = taRef.current
@@ -555,6 +697,7 @@ function Composer({ reply, onCancelReply, onSend }) {
 
   const submit = () => {
     if (!canSend) return
+    stopTyping()
     onSend({ text: text.trim(), file: photo?.file || null })
     setText('')
     if (photo?.url) URL.revokeObjectURL(photo.url)
@@ -601,6 +744,12 @@ function Composer({ reply, onCancelReply, onSend }) {
                 <rect x="3" y="5" width="18" height="15" rx="3.5" /><circle cx="12" cy="12.5" r="3.4" /><path d="M8 5 9.4 3h5.2L16 5" />
               </svg>
             </button>
+            <button className="chat-tool" onClick={onPickMeal} aria-label="Отправить приём пищи">
+              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 3v7.2a2.2 2.2 0 0 0 4.4 0V3" /><path d="M7.2 10.4V21" />
+                <path d="M16.5 3c-1.4 1.6-2 3.6-2 5.6 0 1.7.7 3 2 3.4V21" />
+              </svg>
+            </button>
           </div>
           <input ref={fileRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
           <textarea
@@ -609,8 +758,9 @@ function Composer({ reply, onCancelReply, onSend }) {
             placeholder="Сообщение…"
             value={text}
             rows={1}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); if (e.target.value.trim()) pingTyping(); else stopTyping() }}
             onKeyDown={onKey}
+            onBlur={stopTyping}
           />
         </div>
         <button className={`chat-send${canSend ? ' on' : ''}`} onClick={submit} disabled={!canSend} aria-label="Отправить">
@@ -660,6 +810,148 @@ const CTX_ACTIONS = [
     run: (h) => h.onDeleteForMe(),
   },
 ]
+
+// ── подробный просмотр карточки еды (тап по карточке в сообщении) ─────────────
+function MealCardSheet({ meal, onClose }) {
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+  const items = meal.items || []
+  const macros = [
+    { key: 'protein', label: 'Белки', v: meal.protein },
+    { key: 'fat', label: 'Жиры', v: meal.fat },
+    { key: 'carbs', label: 'Углеводы', v: meal.carbs },
+  ]
+  return (
+    <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 88 }}>
+      <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
+
+        <div className="mealsheet-head">
+          <span className="mealsheet-emoji">{meal.emoji || '🍽'}</span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="mealsheet-title">{meal.label}</div>
+            <div className="mealsheet-when">{meal.date ? dayLabel(meal.date + 'T12:00:00') : ''}</div>
+          </div>
+          <div className="mealsheet-kcal">
+            <b>{meal.kcal}</b><span>ккал</span>
+          </div>
+        </div>
+
+        <div className="mealsheet-macros">
+          {macros.map((m) => (
+            <div key={m.key} className="mealsheet-macro">
+              <div className="mealsheet-macro-v">{m.v}<span>г</span></div>
+              <div className="mealsheet-macro-l">{m.label}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mealsheet-listlabel">Состав</div>
+        <ul className="mealsheet-list">
+          {items.map((it, i) => (
+            <li key={i}>
+              <span className="mealsheet-item-name">{it.emoji ? it.emoji + ' ' : ''}{it.name}</span>
+              <span className="mealsheet-item-right">
+                {it.grams ? <span className="mealsheet-item-g">{it.grams} {it.unit || 'г'}</span> : null}
+                <span className="mealsheet-item-k">{it.kcal} ккал</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+// ── выбор приёма пищи для отправки ────────────────────────────────────────────
+// Показываем дни с записями (сегодня и назад), внутри — группы по типам приёма.
+// Отправляем группу целиком: тогда в карточке осмыслен «список продуктов».
+function MealPickerSheet({ onClose, onPick }) {
+  const { days } = useStore()
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+
+  // Дни с едой, свежие сверху, максимум неделя — дальше пролистывать неудобно.
+  const dayKeys = Object.keys(days || {})
+    .filter((k) => (days[k]?.meals || []).length > 0)
+    .sort((a, b) => (a < b ? 1 : -1))
+    .slice(0, 7)
+
+  const groupsOf = (key) => {
+    const meals = days[key]?.meals || []
+    return MEAL_TYPES
+      .map((t) => ({ ...t, items: meals.filter((m) => m.type === t.key) }))
+      .filter((g) => g.items.length > 0)
+  }
+
+  const pick = (key, group) => {
+    const totals = group.items.reduce(
+      (a, m) => ({
+        kcal: a.kcal + (+m.kcal || 0),
+        protein: a.protein + (+m.protein || 0),
+        carbs: a.carbs + (+m.carbs || 0),
+        fat: a.fat + (+m.fat || 0),
+      }),
+      { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+    )
+    onPick({
+      v: 2,                       // версия схемы: v1 (старые) рисуем прежним видом
+      type: group.key,
+      label: group.label,
+      emoji: group.emoji,
+      date: key,
+      items: group.items.map((m) => ({
+        name: m.name, emoji: m.emoji || null,
+        grams: m.grams ?? null, unit: m.unit || 'г',
+        kcal: Math.round(+m.kcal || 0),
+      })),
+      kcal: Math.round(totals.kcal),
+      protein: Math.round(totals.protein),
+      carbs: Math.round(totals.carbs),
+      fat: Math.round(totals.fat),
+    })
+    close()
+  }
+
+  return (
+    <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 85 }}>
+      <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <h2 className="h2" style={{ fontSize: 18 }}>Отправить приём пищи</h2>
+          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+        </div>
+
+        {dayKeys.length === 0 ? (
+          <p className="muted" style={{ fontSize: 14, padding: '10px 0 16px' }}>
+            Пока нечего отправить — сначала запишите приём пищи в дневник.
+          </p>
+        ) : (
+          <div className="mealpick-scroll">
+            {dayKeys.map((key) => (
+              <div key={key} className="mealpick-day">
+                <div className="mealpick-daylabel">{dayLabel(key + 'T12:00:00')}</div>
+                {groupsOf(key).map((g) => (
+                  <button key={g.key} className="mealpick-row" onClick={() => pick(key, g)}>
+                    <span className="mealpick-emoji">{g.emoji}</span>
+                    <span className="mealpick-meta">
+                      <span className="mealpick-name">{g.label}</span>
+                      <span className="mealpick-sub">
+                        {g.items.map((m) => m.name).join(', ')}
+                      </span>
+                    </span>
+                    <span className="mealpick-kcal">
+                      {Math.round(g.items.reduce((s, m) => s + (+m.kcal || 0), 0))}
+                      <span className="mealpick-kcal-u"> ккал</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ── меню чата (⋯ в хедере) ────────────────────────────────────────────────────
 // Тоже декларативное — место под «Поиск», «Отключить уведомления», настройки
