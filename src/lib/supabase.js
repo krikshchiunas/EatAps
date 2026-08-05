@@ -254,6 +254,24 @@ export function markChatRead(friendId) {
   localStorage.setItem(CHAT_READ_KEY, JSON.stringify(map))
 }
 
+// ── «Удалить у меня» ──────────────────────────────────────────────────────────
+// Сообщение остаётся в БД (у собеседника оно на месте), но скрыто на этом
+// устройстве. Храним список id локально; при загрузке истории фильтруем.
+// Отдельно от «удалить у всех» (DELETE в БД) — то придёт позже.
+const CHAT_HIDDEN_KEY = 'eataps:chatHidden'
+
+export function getHiddenMessageIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(CHAT_HIDDEN_KEY) || '[]')) } catch { return new Set() }
+}
+
+export function hideMessageLocally(id) {
+  const set = getHiddenMessageIds()
+  set.add(String(id))
+  // Держим список ограниченным, чтобы localStorage не разрастался бесконечно.
+  const arr = [...set].slice(-2000)
+  try { localStorage.setItem(CHAT_HIDDEN_KEY, JSON.stringify(arr)) } catch {}
+}
+
 // Возвращает { [senderId]: count } — только сообщения моложе 30 дней.
 export async function fetchUnreadCounts(myId) {
   if (!supabase || !myId) return {}
@@ -288,7 +306,31 @@ export function subscribeToIncoming(myId, onNew) {
   return () => supabase.removeChannel(channel)
 }
 
-const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at'
+const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at, read_at'
+
+// Отметить прочитанными все входящие от собеседника (серверная функция —
+// одним запросом, без гонок). Локальная метка остаётся для офлайн-бейджа.
+export async function markMessagesRead(senderId) {
+  if (!supabase || !senderId) return
+  try { await supabase.rpc('mark_messages_read', { p_sender: senderId }) } catch {}
+}
+
+// Подписка на прочтение МОИХ сообщений собеседником: ловим UPDATE, где
+// sender = я. Нужен replica identity full на messages (см. schema.sql).
+export function subscribeToReadReceipts(myId, friendId, onRead) {
+  if (!supabase || !myId) return () => {}
+  const channel = supabase
+    .channel(`reads:${myId}:${friendId}:${Date.now()}`)
+    .on('postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender=eq.${myId}` },
+      (payload) => {
+        const row = payload.new
+        if (row?.recipient === friendId && row.read_at) onRead(row)
+      },
+    )
+    .subscribe()
+  return () => supabase.removeChannel(channel)
+}
 
 export async function sendChatMessage({ sender, recipient, text, imageUrl, mealRef, replyTo, replySnapshot, forwardedName }) {
   if (!supabase) return { error: 'Нет подключения' }
@@ -323,7 +365,9 @@ export async function listMessagesWith(myId, friendId, limit = 300) {
     .order('created_at', { ascending: true })
     .limit(limit)
   if (error) throw error
-  return data || []
+  // Скрытые «у меня» не показываем — в БД они остаются для собеседника.
+  const hidden = getHiddenMessageIds()
+  return (data || []).filter((m) => !hidden.has(String(m.id)))
 }
 
 // Realtime-подписка на новые входящие сообщения от конкретного друга.

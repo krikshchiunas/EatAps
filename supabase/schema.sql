@@ -208,6 +208,70 @@ drop policy if exists "messages delete" on public.messages;
 create policy "messages delete" on public.messages
   for delete using (auth.uid() = sender);
 
+-- Статус прочтения: получатель проставляет read_at, отправитель видит «вилку».
+-- Бэкфилл делаем ТОЛЬКО в момент первого добавления колонки: вся переписка,
+-- существовавшая до появления фичи, считается прочитанной. Иначе при повторном
+-- прогоне схемы мы бы затёрли настоящие непрочитанные.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'messages' and column_name = 'read_at'
+  ) then
+    alter table public.messages add column read_at timestamptz;
+    update public.messages set read_at = created_at;
+  end if;
+end $$;
+
+create index if not exists messages_unread_idx
+  on public.messages (recipient, read_at) where read_at is null;
+
+-- Обновлять строку может только получатель — и только чтобы отметить прочтение.
+-- Триггер ниже страхует: получателю разрешено менять исключительно read_at.
+drop policy if exists "messages mark read" on public.messages;
+create policy "messages mark read" on public.messages
+  for update using (auth.uid() = recipient) with check (auth.uid() = recipient);
+
+create or replace function public.guard_message_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  -- Получатель не может подменить содержимое — только выставить read_at.
+  if auth.uid() = old.recipient and auth.uid() <> old.sender then
+    if new.text is distinct from old.text
+       or new.image_url is distinct from old.image_url
+       or new.meal_ref is distinct from old.meal_ref
+       or new.sender is distinct from old.sender
+       or new.recipient is distinct from old.recipient
+       or new.created_at is distinct from old.created_at then
+      raise exception 'Only read_at can be updated by the recipient';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists messages_update_guard on public.messages;
+create trigger messages_update_guard
+  before update on public.messages
+  for each row execute function public.guard_message_update();
+
+-- Отметить прочитанными все входящие от конкретного собеседника.
+create or replace function public.mark_messages_read(p_sender uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.messages
+  set read_at = now()
+  where recipient = auth.uid() and sender = p_sender and read_at is null;
+$$;
+
+revoke all on function public.mark_messages_read(uuid) from public, anon;
+grant execute on function public.mark_messages_read(uuid) to authenticated;
+
 -- Realtime: включить публикацию для этой таблицы (для supabase.channel).
 -- Идемпотентно: alter publication add table падает, если таблица уже там.
 do $$
@@ -219,6 +283,11 @@ begin
     execute 'alter publication supabase_realtime add table public.messages';
   end if;
 end $$;
+
+-- REPLICA IDENTITY FULL нужен, чтобы realtime-фильтры (sender=eq.…) работали
+-- на UPDATE-событиях: иначе в WAL уезжает только PK и фильтр не матчится.
+-- Без этого статус прочтения не долетал бы до отправителя в реальном времени.
+alter table public.messages replica identity full;
 
 -- ---------------- Бакет для фото из чата ----------------
 insert into storage.buckets (id, name, public)

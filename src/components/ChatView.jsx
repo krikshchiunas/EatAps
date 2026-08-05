@@ -3,6 +3,7 @@ import { useStore } from '../store.jsx'
 import {
   listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage,
   markChatRead, deleteChatMessage, listFriendships,
+  markMessagesRead, subscribeToReadReceipts, hideMessageLocally,
 } from '../lib/supabase.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
@@ -131,6 +132,7 @@ export default function ChatView({ friend, onClose }) {
   // Загрузка истории + realtime.
   useEffect(() => {
     markChatRead(friend.id)
+    markMessagesRead(friend.id)
     let cancelled = false
     ;(async () => {
       try {
@@ -145,13 +147,42 @@ export default function ChatView({ friend, onClose }) {
 
     const unsub = subscribeToChat(myId, friend.id, (m) => {
       markChatRead(friend.id)
+      // Чат открыт — сразу отмечаем входящее прочитанным (собеседник увидит вилку).
+      markMessagesRead(friend.id)
       setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]))
       if (atBottomRef.current) requestAnimationFrame(() => pinBottom(true))
       else setShowJump(true)
     })
-    return () => { cancelled = true; unsub() }
+
+    // Собеседник прочитал моё сообщение → перекрашиваем вилку.
+    const unsubReads = subscribeToReadReceipts(myId, friend.id, (row) => {
+      setMessages((cur) => cur.map((x) => (x.id === row.id ? { ...x, read_at: row.read_at } : x)))
+    })
+
+    return () => { cancelled = true; unsub(); unsubReads() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myId, friend.id])
+
+  // Подсветка сообщения на время контекст-меню. Раньше подсветка ставилась
+  // жестом и снималась вручную в разных ветках — при некоторых путях (меню
+  // открылось, палец ушёл за пределы строки) класс оставался и сообщение
+  // «залипало» выделенным. Теперь состояние ведётся ОДНИМ эффектом от menuMsg:
+  // открылось — подсветили, закрылось — сняли со всех строк, что бы ни было.
+  useEffect(() => {
+    const root = listRef.current
+    if (!root) return
+    const clearAll = () => {
+      root.querySelectorAll('.msg-row.selected').forEach((el) => el.classList.remove('selected'))
+      // Снимаем и нативное выделение текста / фокус — на iOS они переживают
+      // закрытие шторки и оставляют серый прямоугольник поверх пузыря.
+      try { window.getSelection()?.removeAllRanges() } catch {}
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    }
+    if (!menuMsg) { clearAll(); return }
+    clearAll()
+    root.querySelector(`[data-mid="${menuMsg.id}"]`)?.classList.add('selected')
+    return clearAll
+  }, [menuMsg])
 
   // Отслеживаем «у низа ли пользователь».
   const onScroll = useCallback(() => {
@@ -240,10 +271,16 @@ export default function ChatView({ friend, onClose }) {
     catch { flash('Не удалось скопировать') }
   }, [flash])
 
-  const doDelete = useCallback(async (m) => {
+  // «Удалить у меня» — прячем локально. Своё неотправленное (temp-) и своё
+  // отправленное чистим и в БД: для автора это ожидаемое поведение. Чужое
+  // сообщение только скрываем — у собеседника оно остаётся.
+  const doDeleteForMe = useCallback(async (m) => {
     setMessages((cur) => cur.filter((x) => x.id !== m.id))
-    if (!String(m.id).startsWith('temp-')) await deleteChatMessage(m.id)
-  }, [])
+    const isTemp = String(m.id).startsWith('temp-')
+    if (isTemp) return
+    hideMessageLocally(m.id)
+    if (m.sender === myId) await deleteChatMessage(m.id)
+  }, [myId])
 
   // ── delegated gestures on the list: swipe-left → reply, long-press → menu ──
   useEffect(() => {
@@ -369,7 +406,7 @@ export default function ChatView({ friend, onClose }) {
           onReply={() => startReply(menuMsg)}
           onCopy={() => doCopy(menuMsg)}
           onForward={() => setForwardMsg(menuMsg)}
-          onDelete={() => doDelete(menuMsg)}
+          onDeleteForMe={() => doDeleteForMe(menuMsg)}
           onRetry={() => retry(menuMsg)}
         />
       )}
@@ -413,6 +450,20 @@ const MessageList = memo(function MessageList({ messages, myId, friendName, onQu
   })
 })
 
+// Индикатор доставки/прочтения — вилка. Серая = отправлено, морская синяя =
+// собеседник прочитал. Цвет задаётся через currentColor в CSS (.msg-tick.read).
+function ForkTick() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+         strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M7 2.5v6.2" />
+      <path d="M11 2.5v6.2" />
+      <path d="M15 2.5v6.2" />
+      <path d="M5.4 8.7h11.2a1 1 0 0 1 .9 1.4c-.7 1.6-2.1 2.6-3.8 2.8l-1 .1v8a1.6 1.6 0 0 1-3.2 0v-8l-1-.1c-1.7-.2-3.1-1.2-3.8-2.8a1 1 0 0 1 .9-1.4z" />
+    </svg>
+  )
+}
+
 function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry }) {
   const status = m.status // sending | failed | undefined(=sent)
   return (
@@ -447,8 +498,12 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry }) 
         {m.text && <div className="msg-text">{renderText(m.text)}</div>}
         <div className="msg-meta">
           <span className="msg-time">{timeShort(m.created_at)}</span>
-          {mine && status === 'sending' && <span className="msg-tick">⏳</span>}
-          {mine && !status && <span className="msg-tick">✓</span>}
+          {mine && status === 'sending' && <span className="msg-tick sending"><ForkTick /></span>}
+          {mine && !status && (
+            <span className={`msg-tick${m.read_at ? ' read' : ''}`} title={m.read_at ? 'Прочитано' : 'Отправлено'}>
+              <ForkTick />
+            </span>
+          )}
           {mine && status === 'failed' && (
             <button className="msg-fail" onClick={() => onRetry(m)} title="Повторить">! повторить</button>
           )}
@@ -538,34 +593,62 @@ function Composer({ reply, onCancelReply, onSend }) {
 }
 
 // ── context sheet (long-press) ────────────────────────────────────────────────
-function ContextSheet({ m, mine, onClose, onReply, onCopy, onForward, onDelete, onRetry }) {
+// Пункты описаны декларативно: чтобы добавить новый (реакции, «удалить у всех»,
+// закрепить…), достаточно дописать объект в массив — рендер и закрытие общие.
+// `show` получает контекст { m, mine } и решает, показывать ли пункт.
+const CTX_ACTIONS = [
+  {
+    key: 'reply',
+    label: 'Ответить',
+    icon: 'M9 14L4 9l5-5 M4 9h11a5 5 0 0 1 5 5v3',
+    run: (h) => h.onReply(),
+  },
+  {
+    key: 'copy',
+    label: 'Копировать',
+    icon: 'M9 9h11v11H9z M5 15V4h11',
+    show: ({ m }) => !!m.text,
+    run: (h) => h.onCopy(),
+  },
+  {
+    key: 'forward',
+    label: 'Переслать',
+    icon: 'M15 5l7 7-7 7 M22 12H4a2 2 0 0 0-2 2v3',
+    run: (h) => h.onForward(),
+  },
+  {
+    key: 'retry',
+    label: 'Повторить отправку',
+    icon: 'M21 12a9 9 0 1 1-3-6.7 M21 4v4h-4',
+    show: ({ m, mine }) => mine && m.status === 'failed',
+    run: (h) => h.onRetry(),
+  },
+  {
+    key: 'delete-me',
+    label: 'Удалить у меня',
+    icon: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+    danger: true,
+    run: (h) => h.onDeleteForMe(),
+  },
+]
+
+function ContextSheet({ m, mine, onClose, ...handlers }) {
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+  const ctx = { m, mine }
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 80 }}>
       <div className="sheet ctx-sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="ctx-preview">{previewOf(m)}</div>
-        <button className="ctx-item" onClick={() => { onReply(); close() }}>
-          <Ico d="M9 14L4 9l5-5 M4 9h11a5 5 0 0 1 5 5v3" /> Ответить
-        </button>
-        {m.text && (
-          <button className="ctx-item" onClick={() => { onCopy(); close() }}>
-            <Ico d="M9 9h11v11H9z M5 15V4h11" /> Копировать
+        {CTX_ACTIONS.filter((a) => !a.show || a.show(ctx)).map((a) => (
+          <button
+            key={a.key}
+            className={`ctx-item${a.danger ? ' danger' : ''}`}
+            onClick={() => { a.run(handlers); close() }}
+          >
+            <Ico d={a.icon} /> {a.label}
           </button>
-        )}
-        <button className="ctx-item" onClick={() => { onForward(); close() }}>
-          <Ico d="M15 5l7 7-7 7 M22 12H4a2 2 0 0 0-2 2v3" /> Переслать
-        </button>
-        {mine && m.status === 'failed' && (
-          <button className="ctx-item" onClick={() => { onRetry(); close() }}>
-            <Ico d="M21 12a9 9 0 1 1-3-6.7 M21 4v4h-4" /> Повторить отправку
-          </button>
-        )}
-        {mine && (
-          <button className="ctx-item danger" onClick={() => { onDelete(); close() }}>
-            <Ico d="M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13" /> Удалить
-          </button>
-        )}
+        ))}
       </div>
     </div>
   )
