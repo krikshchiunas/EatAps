@@ -4,7 +4,7 @@ import {
   listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage,
   markChatRead, deleteChatMessage, listFriendships,
   markMessagesRead, subscribeToReadReceipts, hideMessageLocally,
-  createTypingChannel,
+  createTypingChannel, watchPresence, fetchLastSeen,
 } from '../lib/supabase.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
@@ -33,6 +33,21 @@ function dayLabel(iso) {
   if (d.toDateString() === yest.toDateString()) return 'Вчера'
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
 }
+// «Был(а) в сети»: свежие отметки — человеческим языком, старые — датой.
+// Пол собеседника нам неизвестен, поэтому нейтральное «Был(а)».
+function lastSeenLabel(iso) {
+  if (!iso) return ''
+  const then = new Date(iso)
+  const mins = Math.floor((Date.now() - then.getTime()) / 60000)
+  if (mins < 1) return 'Был(а) только что'
+  if (mins < 60) return `Был(а) ${mins} мин назад`
+  const today = new Date()
+  if (then.toDateString() === today.toDateString()) return `Был(а) в ${timeShort(iso)}`
+  const yest = new Date(); yest.setDate(today.getDate() - 1)
+  if (then.toDateString() === yest.toDateString()) return `Был(а) вчера в ${timeShort(iso)}`
+  return `Был(а) ${then.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`
+}
+
 function previewOf(m) {
   if (m.text) return m.text
   if (m.image_url) return '📷 Фото'
@@ -69,6 +84,8 @@ export default function ChatView({ friend, onClose }) {
   const [mealPick, setMealPick] = useState(false)   // шторка выбора приёма пищи
   const [mealCard, setMealCard] = useState(null)    // раскрытая карточка еды
   const [peerTyping, setPeerTyping] = useState(false)
+  const [peerOnline, setPeerOnline] = useState(false)
+  const [peerLastSeen, setPeerLastSeen] = useState(null)
 
   const listRef = useRef(null)
   const atBottomRef = useRef(true)
@@ -173,6 +190,19 @@ export default function ChatView({ friend, onClose }) {
   // «Печатает…»: канал живёт весь чат. Гасим индикатор по таймауту — если
   // собеседник свернул вкладку, события просто перестают приходить и «печатает»
   // иначе висело бы вечно.
+  // Присутствие собеседника. Ушёл офлайн — подтягиваем «был(а) в сети»,
+  // чтобы шапка не схлопывалась в пустоту.
+  useEffect(() => {
+    let cancelled = false
+    const stop = watchPresence(friend.id, (online) => {
+      if (cancelled) return
+      setPeerOnline(online)
+      if (!online) fetchLastSeen(friend.id).then((t) => { if (!cancelled) setPeerLastSeen(t) })
+    })
+    fetchLastSeen(friend.id).then((t) => { if (!cancelled) setPeerLastSeen(t) })
+    return () => { cancelled = true; stop() }
+  }, [friend.id])
+
   const typingRef = useRef({ sendTyping: () => {} })
   // Ссылка ДОЛЖНА быть стабильной. Если пересоздавать её на каждый рендер,
   // Composer пересоздаёт свои колбэки, его cleanup принимает это за уход из
@@ -447,10 +477,21 @@ export default function ChatView({ friend, onClose }) {
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
           <button className="chat-peer" onClick={() => setProfileOpen(true)}>
-            <span className="chat-peer-ava"><Avatar src={friend.avatar} name={friendName} size={40} /></span>
+            <span className={`chat-peer-ava${peerOnline ? ' online' : ''}`}>
+              <Avatar src={friend.avatar} name={friendName} size={40} />
+            </span>
             <span className="chat-peer-meta">
               <span className="chat-peer-name">{friendName}</span>
-              <span className="chat-peer-sub">Открыть профиль</span>
+              {/* Приоритет: печатает → в сети → был(а) → запасной вариант */}
+              {peerTyping ? (
+                <span className="chat-peer-sub typing">печатает…</span>
+              ) : peerOnline ? (
+                <span className="chat-peer-sub online">в сети</span>
+              ) : peerLastSeen ? (
+                <span className="chat-peer-sub">{lastSeenLabel(peerLastSeen)}</span>
+              ) : (
+                <span className="chat-peer-sub">Открыть профиль</span>
+              )}
             </span>
           </button>
           <button className="chat-more" onClick={() => setMenuOpen(true)} aria-label="Действия">

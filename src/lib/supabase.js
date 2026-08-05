@@ -370,6 +370,53 @@ export async function listMessagesWith(myId, friendId, limit = 300) {
   return (data || []).filter((m) => !hidden.has(String(m.id)))
 }
 
+// ── Присутствие (онлайн/офлайн) ───────────────────────────────────────────────
+// У каждого пользователя свой канал presence:user:{id}. Хозяин канала себя
+// в нём «трекает», наблюдатели просто подключаются и читают состояние. Так
+// присутствие видно только тем, кто спросил, а не всем сразу — в отличие от
+// одного общего канала на всё приложение.
+
+export function startPresence(myId) {
+  if (!supabase || !myId) return () => {}
+  const channel = supabase.channel(`presence:user:${myId}`, {
+    config: { presence: { key: myId } },
+  })
+  channel.subscribe((status) => {
+    if (status === 'SUBSCRIBED') channel.track({ at: Date.now() }).catch(() => {})
+  })
+  return () => supabase.removeChannel(channel)
+}
+
+export function watchPresence(userId, onChange) {
+  if (!supabase || !userId) return () => {}
+  const channel = supabase.channel(`presence:user:${userId}`)
+  const read = () => {
+    const metas = channel.presenceState?.()?.[userId]
+    onChange(Array.isArray(metas) && metas.length > 0)
+  }
+  channel
+    .on('presence', { event: 'sync' }, read)
+    .on('presence', { event: 'join' }, read)
+    .on('presence', { event: 'leave' }, read)
+    .subscribe((status) => { if (status === 'SUBSCRIBED') read() })
+  return () => supabase.removeChannel(channel)
+}
+
+// Отметка «был(а) в сети». Тихо ничего не делает, если миграция ещё не
+// прогнана — статус тогда просто не показывается.
+export async function touchLastSeen() {
+  if (!supabase) return
+  try { await supabase.rpc('touch_last_seen') } catch {}
+}
+
+export async function fetchLastSeen(userId) {
+  if (!supabase || !userId) return null
+  const { data, error } = await supabase
+    .from('app_state').select('last_seen').eq('user_id', userId).maybeSingle()
+  if (error) return null // колонки нет — деградируем молча
+  return data?.last_seen || null
+}
+
 // ── Индикатор «печатает…» ─────────────────────────────────────────────────────
 // Broadcast-канал (не postgres_changes): события эфемерные, в БД их писать
 // незачем. Имя канала одинаковое с обеих сторон — сортируем пару id, иначе

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
-import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief } from './lib/supabase.js'
+import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief, startPresence, touchLastSeen } from './lib/supabase.js'
 import { startScheduler, notifyIncomingMessage } from './lib/notifications.js'
 import Onboarding from './components/Onboarding.jsx'
 import DayScreen from './components/DayScreen.jsx'
@@ -39,6 +39,25 @@ export default function App() {
   const refreshUnread = useCallback(async () => {
     if (!user?.id) return
     setUnreadCounts(await fetchUnreadCounts(user.id))
+  }, [user?.id])
+
+  // Присутствие «онлайн» + отметка «был(а) в сети». Живут на уровне приложения,
+  // а не чата: друг должен считаться онлайн, даже если сейчас смотрит дневник.
+  // Heartbeat раз в минуту и при возврате на вкладку — чаще нет смысла, точность
+  // «был(а) в 14:32» этого не требует.
+  useEffect(() => {
+    if (!user?.id) return
+    const stop = startPresence(user.id)
+    touchLastSeen()
+    const beat = setInterval(touchLastSeen, 60_000)
+    const onVis = () => { if (document.visibilityState === 'visible') touchLastSeen() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(beat)
+      document.removeEventListener('visibilitychange', onVis)
+      touchLastSeen() // фиксируем момент ухода
+      stop()
+    }
   }, [user?.id])
 
   // Кэш имени/аватарки отправителей — один лукап на друга за сессию.

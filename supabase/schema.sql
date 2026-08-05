@@ -56,6 +56,25 @@ drop policy if exists "own state delete" on public.app_state;
 create policy "own state delete" on public.app_state
   for delete using (auth.uid() = user_id);
 
+-- «Был(а) в сети» — живёт в app_state, потому что его select-политика уже
+-- разрешает друзьям читать чужую строку. Отдельная таблица потребовала бы
+-- дублировать эту же логику доступа.
+alter table public.app_state add column if not exists last_seen timestamptz;
+
+-- Обновляем отдельной функцией, а НЕ через pushState: иначе каждый heartbeat
+-- трогал бы updated_at и ломал last-write-wins при синхронизации состояния.
+create or replace function public.touch_last_seen()
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.app_state set last_seen = now() where user_id = auth.uid();
+$$;
+
+revoke all on function public.touch_last_seen() from public, anon;
+grant execute on function public.touch_last_seen() to authenticated;
+
 -- ---------------- friendships policies ----------------
 
 -- Видеть строки, где вы участвуете.
