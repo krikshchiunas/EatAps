@@ -174,20 +174,44 @@ export default function ChatView({ friend, onClose }) {
   // собеседник свернул вкладку, события просто перестают приходить и «печатает»
   // иначе висело бы вечно.
   const typingRef = useRef({ sendTyping: () => {} })
+  // Ссылка ДОЛЖНА быть стабильной. Если пересоздавать её на каждый рендер,
+  // Composer пересоздаёт свои колбэки, его cleanup принимает это за уход из
+  // чата и шлёт ложное «перестал печатать» — у собеседника индикатор мигал,
+  // а лента дёргалась на каждом мигании.
+  const sendTyping = useCallback((t) => typingRef.current.sendTyping(t), [])
+
   useEffect(() => {
-    let offTimer = null
+    let hideTimer = null   // страховка: собеседник свернул вкладку
+    let graceTimer = null  // пауза перед скрытием
     const ch = createTypingChannel(myId, friend.id, (typing) => {
-      clearTimeout(offTimer)
-      setPeerTyping(typing)
-      if (typing) offTimer = setTimeout(() => setPeerTyping(false), 4000)
+      clearTimeout(graceTimer)
+      clearTimeout(hideTimer)
+      if (typing) {
+        setPeerTyping(true)
+        hideTimer = setTimeout(() => setPeerTyping(false), 5000)
+      } else {
+        // Между словами прилетает false. Без паузы пузырь мигал бы, каждый
+        // раз меняя высоту ленты.
+        graceTimer = setTimeout(() => setPeerTyping(false), 1200)
+      }
     })
     typingRef.current = ch
-    return () => { clearTimeout(offTimer); ch.unsubscribe(); setPeerTyping(false) }
+    return () => {
+      clearTimeout(hideTimer); clearTimeout(graceTimer)
+      ch.unsubscribe(); setPeerTyping(false)
+    }
   }, [myId, friend.id])
 
-  // Прокрутить к «печатает», если пользователь и так внизу.
+  // Прокрутка — только в момент ПОЯВЛЕНИЯ индикатора и только плавная.
+  // pinBottom(true) делал мгновенный прыжок И smooth-скролл одновременно —
+  // вот это и выглядело как тряска.
+  const prevTypingRef = useRef(false)
   useEffect(() => {
-    if (peerTyping && atBottomRef.current) requestAnimationFrame(() => pinBottom(true))
+    const appeared = peerTyping && !prevTypingRef.current
+    prevTypingRef.current = peerTyping
+    if (!appeared || !atBottomRef.current) return
+    const el = listRef.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [peerTyping])
 
   // Подсветка сообщения на время контекст-меню. Раньше подсветка ставилась
@@ -465,7 +489,7 @@ export default function ChatView({ friend, onClose }) {
           onCancelReply={() => setReply(null)}
           onSend={doSend}
           onPickMeal={() => setMealPick(true)}
-          onTyping={(t) => typingRef.current.sendTyping(t)}
+          onTyping={sendTyping}
         />
       </div>
 
@@ -682,8 +706,12 @@ function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
     if (t.active) { t.active = false; onTyping?.(false) }
   }, [onTyping])
 
-  // Уходим из чата с открытым «печатает» — гасим, чтобы не залипло у собеседника.
-  useEffect(() => stopTyping, [stopTyping])
+  // Гасим ТОЛЬКО при реальном размонтировании. Зависимость от stopTyping
+  // заставляла cleanup срабатывать на каждый рендер и слать ложное
+  // «перестал печатать» — из-за этого лента тряслась.
+  const stopRef = useRef(stopTyping)
+  stopRef.current = stopTyping
+  useEffect(() => () => stopRef.current(), [])
 
   const grow = () => {
     const el = taRef.current
