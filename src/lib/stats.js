@@ -3,12 +3,13 @@
 // рисуют результат. Считаем из существующего store.days (одна копия истории, без
 // дублирования). Всё детерминированно и без побочных эффектов — можно мемоизировать.
 //
-// Сахар в приложении отдельно не хранится: оцениваем «свободные сахара» из
-// углеводов через freeSugarShare (та же логика, что на экране дня). Ориентир по
-// сахару — существующий в приложении лимит свободных сахаров (sugarLimit, 10%
-// калорий по ВОЗ), а не выдуманная медицинская норма.
+// Сахар: у части продуктов (ручной ввод, напитки) есть реальное поле `sugar`
+// («из них сахар»). Там, где его нет (продукты из базы, конструкторы), значение
+// НЕ измерено — оно ОЦЕНИВАЕТСЯ из углеводов через freeSugarShare. Поэтому в UI
+// это «Оценка сахара» (приблизительно), а не достоверное количество свободных
+// сахаров; строгого сравнения с лимитом ВОЗ у сахара нет.
 // ─────────────────────────────────────────────────────────────────────────────
-import { sumDay, freeSugarShare, sugarLimit } from './nutrition.js'
+import { sumDay, freeSugarShare } from './nutrition.js'
 import { keyOf, fromKey, addDays } from './date.js'
 
 export const PERIODS = [
@@ -18,13 +19,13 @@ export const PERIODS = [
   { key: '1y', days: 365, label: '1 год', gran: 'month' },
 ]
 
-// Порядок и оформление нутриентов. invert: меньше — лучше (сахар).
+// Порядок и оформление нутриентов. estimate: значение приблизительное (сахар).
 export const NUTRIENTS = [
   { key: 'kcal', label: 'Калории', short: 'Ккал', unit: 'ккал', color: 'var(--primary)' },
   { key: 'protein', label: 'Белки', short: 'Белки', unit: 'г', color: 'var(--good)' },
   { key: 'fat', label: 'Жиры', short: 'Жиры', unit: 'г', color: 'var(--warn)' },
   { key: 'carbs', label: 'Углеводы', short: 'Углеводы', unit: 'г', color: 'var(--accent)' },
-  { key: 'sugar', label: 'Сахар', short: 'Сахар', unit: 'г', color: 'var(--danger)', invert: true },
+  { key: 'sugar', label: 'Оценка сахара', short: 'Сахар', unit: 'г', color: 'var(--danger)', invert: true, estimate: true },
 ]
 
 // Допуск попадания «в норму» (доля от цели). Калории строже, макросы мягче.
@@ -44,9 +45,22 @@ export function normalizeName(s) {
 
 const hasMeals = (day) => Boolean(day && Array.isArray(day.meals) && day.meals.length > 0)
 
-// Оценка сахара одного приёма: свободные сахара из углеводов.
+const safeNum = (x) => {
+  const n = Number(x)
+  return Number.isFinite(n) ? n : 0
+}
+
+// Реальное поле «из них сахар» у приёма, если задано положительное число.
+// Пустой ручной ввод сохраняется как 0 — считаем его «не указано» и оцениваем.
+export function realSugar(m) {
+  const n = Number(m?.sugar)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+// Сахар приёма: берём реальное поле, если оно есть, иначе ОЦЕНКА из углеводов.
 export function mealSugar(m) {
-  return (Number(m.carbs) || 0) * freeSugarShare(m.name)
+  const real = realSugar(m)
+  return real != null ? real : safeNum(m?.carbs) * freeSugarShare(m?.name)
 }
 
 // Итоги дня по всем нутриентам. Отсутствующие поля считаем нулём (неполные данные).
@@ -54,16 +68,18 @@ export function dayNutrients(meals = []) {
   const s = sumDay(meals)
   let sugar = 0
   for (const m of meals) sugar += mealSugar(m)
-  return { kcal: s.kcal, protein: s.protein, fat: s.fat, carbs: s.carbs, sugar }
+  return { kcal: safeNum(s.kcal), protein: safeNum(s.protein), fat: safeNum(s.fat), carbs: safeNum(s.carbs), sugar: safeNum(sugar) }
 }
 
-// Цель по нутриенту из профиля. Нет цели → null (аналитика покажет только факт).
+// Цель по нутриенту из профиля. Приводим к конечному числу > 0, иначе null
+// (аналитика покажет только факт). У сахара пользовательской цели нет вовсе —
+// не сравниваем оценку с нормой ВОЗ как с достоверными данными.
 function targetFor(key, profile) {
   const t = profile?.targets
-  if (!t) return null
-  if (key === 'kcal') return t.calories || null
-  if (key === 'sugar') return t.calories ? sugarLimit(t.calories) : null
-  return t[key] || null
+  if (!t || key === 'sugar') return null
+  const raw = key === 'kcal' ? t.calories : t[key]
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : null
 }
 
 // Статус дня/бакета по нутриенту относительно цели.
@@ -237,6 +253,7 @@ function nutrientStats(nutDef, days, keys, prevKeys, gran, profile) {
 function productStats(days, keys) {
   const groups = new Map()
   let totalMeals = 0
+  let sugarEstimated = false // хоть один приём без реального поля sugar
   const grand = { kcal: 0, protein: 0, fat: 0, carbs: 0, sugar: 0 }
 
   for (const k of keys) {
@@ -245,6 +262,7 @@ function productStats(days, keys) {
     for (const m of day.meals) {
       const norm = normalizeName(m.name)
       if (!norm) continue
+      if (realSugar(m) == null) sugarEstimated = true
       totalMeals += 1
       let g = groups.get(norm)
       if (!g) {
@@ -331,6 +349,7 @@ function productStats(days, keys) {
 
   return {
     totalMeals,
+    sugarEstimated,
     grand,
     frequent,
     sources: {
@@ -345,30 +364,34 @@ function productStats(days, keys) {
 
 // ── Главная точка входа: собрать всю статистику за период ─────────────────────
 export function computeStats(days, profile, periodKey, today = keyOf()) {
+  const D = days && typeof days === 'object' ? days : {} // не падаем на null/undefined
   const period = PERIODS.find((p) => p.key === periodKey) || PERIODS[0]
   const keys = periodKeys(period.days, today)
   const prevKeys = periodKeys(period.days, addDays(keys[0], -1))
 
-  const loggedKeys = keys.filter((k) => hasMeals(days[k]))
+  const loggedKeys = keys.filter((k) => hasMeals(D[k]))
   const loggedDays = loggedKeys.length
 
   const nutrients = {}
   for (const def of NUTRIENTS) {
-    nutrients[def.key] = nutrientStats(def, days, keys, prevKeys, period.gran, profile)
+    nutrients[def.key] = nutrientStats(def, D, keys, prevKeys, period.gran, profile)
   }
 
-  const products = productStats(days, keys)
+  const products = productStats(D, keys)
+  nutrients.sugar.estimated = products.sugarEstimated
 
   // Сводка «Общая динамика».
   const calTarget = targetFor('kcal', profile)
   let goalHitPct = null
+  let daysInTarget = null
   let bestDay = null
   let worstDay = null
   if (calTarget != null && loggedDays) {
     const kc = nutrients.kcal
+    daysInTarget = kc.daysIn
     goalHitPct = Math.round((kc.daysIn / loggedDays) * 100)
     for (const k of loggedKeys) {
-      const kcal = dayNutrients(days[k].meals).kcal
+      const kcal = dayNutrients(D[k].meals).kcal
       const dev = kcal - calTarget
       if (!bestDay || Math.abs(dev) < Math.abs(bestDay.dev)) bestDay = { key: k, kcal, dev }
       if (!worstDay || Math.abs(dev) > Math.abs(worstDay.dev)) worstDay = { key: k, kcal, dev }
@@ -384,6 +407,7 @@ export function computeStats(days, profile, periodKey, today = keyOf()) {
       sugar: nutrients.sugar.avg,
     },
     goalHitPct,
+    daysInTarget,
     bestDay,
     worstDay,
     calTarget,
@@ -395,6 +419,7 @@ export function computeStats(days, profile, periodKey, today = keyOf()) {
     loggedDays,
     totalDays: keys.length,
     totalMeals: products.totalMeals,
+    sugarEstimated: products.sugarEstimated,
     hasData: loggedDays > 0,
     single: loggedDays === 1, // особый случай: одного дня мало для трендов
     nutrients,

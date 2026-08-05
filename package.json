@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/inject-precache.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test src/lib/*.test.js"
   },
   "dependencies": {
     "@reown/appkit": "^1.8.23",

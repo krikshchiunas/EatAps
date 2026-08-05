@@ -16,33 +16,43 @@ const PAD_X = 12
 const PAD_TOP = 14
 const PAD_BOTTOM = 22
 
-export default function StatChart({ series, target, color, unit, invert = false, tolerance = 0 }) {
+export default function StatChart({ series = [], target, color, unit, invert = false, estimate = false, tolerance = 0 }) {
   const [sel, setSel] = useState(null)
 
-  const values = series.map((s) => s.value).filter((v) => v != null)
+  // Строго конечные значения: null/undefined/NaN/Infinity → null (разрыв линии),
+  // иначе линии/цель рисуются в баз­овой точке 0 вместо пропуска. Number(null)===0,
+  // поэтому null проверяем явно.
+  const num = (v) => {
+    if (v == null) return null
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  const tgt = num(target)
+  const values = series.map((s) => num(s.value)).filter((v) => v != null)
   const dataMax = values.length ? Math.max(...values) : 0
-  const yMax = Math.max(dataMax, target || 0) * 1.15 || 1
+  const yMax = Math.max(dataMax, tgt || 0) * 1.15 || 1
 
   const n = series.length
   const xAt = (i) => (n <= 1 ? W / 2 : PAD_X + (i / (n - 1)) * (W - 2 * PAD_X))
-  const yAt = (v) => PAD_TOP + (1 - v / yMax) * (H - PAD_TOP - PAD_BOTTOM)
+  const yAt = (v) => PAD_TOP + (1 - num(v) / yMax) * (H - PAD_TOP - PAD_BOTTOM)
 
-  // Линию рвём на сегменты по разрывам (null между точками).
+  // Линию рвём на сегменты по разрывам (нет значения / нечисло между точками).
   const segments = []
   let cur = []
   series.forEach((s, i) => {
-    if (s.value == null) {
+    const v = num(s.value)
+    if (v == null) {
       if (cur.length) segments.push(cur)
       cur = []
     } else {
-      cur.push({ x: xAt(i), y: yAt(s.value), i })
+      cur.push({ x: xAt(i), y: yAt(v), i })
     }
   })
   if (cur.length) segments.push(cur)
 
-  const bandTop = target != null && tolerance > 0 ? yAt(target * (1 + tolerance)) : null
-  const bandBot = target != null && tolerance > 0 ? yAt(target * (1 - tolerance)) : null
-  const targetY = target != null ? yAt(target) : null
+  const bandTop = tgt != null && tolerance > 0 ? yAt(tgt * (1 + tolerance)) : null
+  const bandBot = tgt != null && tolerance > 0 ? yAt(tgt * (1 - tolerance)) : null
+  const targetY = tgt != null ? yAt(tgt) : null
 
   // Подписи оси X: до ~6 равномерно распределённых меток, включая концы —
   // так соседние подписи у края не наезжают друг на друга.
@@ -79,12 +89,12 @@ export default function StatChart({ series, target, color, unit, invert = false,
           />
         ))}
         {/* Маркер выбора */}
-        {selected && selected.value != null && (
+        {selected && num(selected.value) != null && (
           <line x1={xAt(sel)} y1={PAD_TOP - 6} x2={xAt(sel)} y2={H - PAD_BOTTOM} stroke="var(--ink-3)" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
         )}
         {/* Точки */}
         {series.map((s, i) =>
-          s.value == null ? null : (
+          num(s.value) == null ? null : (
             <circle
               key={i}
               cx={xAt(i)}
@@ -105,7 +115,7 @@ export default function StatChart({ series, target, color, unit, invert = false,
             width={n <= 1 ? W : (W - 2 * PAD_X) / (n - 1) + 2}
             height={H}
             fill="transparent"
-            style={{ cursor: s.value != null ? 'pointer' : 'default' }}
+            style={{ cursor: num(s.value) != null ? 'pointer' : 'default' }}
             onPointerDown={() => setSel(sel === i ? null : i)}
           />
         ))}
@@ -120,7 +130,7 @@ export default function StatChart({ series, target, color, unit, invert = false,
       </svg>
 
       {/* Тултип точного значения */}
-      {selected && selected.value != null && (
+      {selected && num(selected.value) != null && (
         <div
           className="stat-tip"
           style={{
@@ -129,7 +139,7 @@ export default function StatChart({ series, target, color, unit, invert = false,
           }}
         >
           <span className="stat-tip__val" style={{ color }}>
-            {Math.round(selected.value)} {unit}
+            {estimate ? '≈' : ''}{Math.round(num(selected.value))} {unit}
           </span>
           <span className="stat-tip__day">{selected.full}</span>
         </div>

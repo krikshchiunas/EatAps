@@ -1,6 +1,10 @@
 export default function Ring({ value, max, size = 168, stroke = 14, children }) {
-  const pct = max > 0 ? Math.min(value / max, 1) : 0
-  const over = max > 0 && value > max
+  // Приводим к конечным числам: NaN/Infinity/undefined/строки/null не должны
+  // попасть в SVG-атрибуты (иначе React ругается и кольцо ломается).
+  const v = Number.isFinite(Number(value)) ? Number(value) : 0
+  const m = Number.isFinite(Number(max)) && Number(max) > 0 ? Number(max) : 0
+  const pct = m > 0 ? Math.min(Math.max(v / m, 0), 1) : 0
+  const over = m > 0 && v > m
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
   const dash = c * pct

@@ -5,8 +5,9 @@ import { computeStats, PERIODS, NUTRIENTS, TOL } from '../lib/stats.js'
 import StatChart from './StatChart.jsx'
 
 const fmt = (n, digits = 0) => {
-  if (n == null || Number.isNaN(n)) return '—'
-  const v = digits ? Math.round(n * 10 ** digits) / 10 ** digits : Math.round(n)
+  const num = Number(n)
+  if (n == null || !Number.isFinite(num)) return '—' // отсекаем NaN/Infinity/undefined/строки
+  const v = digits ? Math.round(num * 10 ** digits) / 10 ** digits : Math.round(num)
   return v.toLocaleString('ru-RU')
 }
 
@@ -53,8 +54,9 @@ export default function StatsScreen({ onClose }) {
           {NUTRIENTS.map((def) => (
             <SourcesCard key={def.key} def={def} rows={stats.products.sources[def.key]} />
           ))}
-          <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', margin: '4px 4px 0' }}>
-            Средние значения считаются по дням с записями. Сахар оценивается как свободные сахара из углеводов.
+          <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', margin: '4px 4px 0', lineHeight: 1.5 }}>
+            Средние и проценты считаются по дням с записями ({stats.loggedDays} из {stats.totalDays}).
+            {stats.sugarEstimated && ' «Оценка сахара» рассчитана приблизительно из углеводов там, где сахар не указан отдельно, — это ориентир, а не точное количество.'}
           </p>
         </>
       )}
@@ -78,7 +80,7 @@ function EmptyState({ period }) {
 function DataScope({ stats }) {
   return (
     <div className="row between" style={{ margin: '0 4px 14px', fontSize: 13, color: 'var(--ink-3)' }}>
-      <span>Данные за {stats.loggedDays} {plural(stats.loggedDays, 'день', 'дня', 'дней')} из {stats.totalDays}</span>
+      <span>Заполнено дней: <b style={{ color: 'var(--ink-2)' }}>{stats.loggedDays} из {stats.totalDays}</b></span>
       <span>{stats.totalMeals} {plural(stats.totalMeals, 'приём', 'приёма', 'приёмов')}</span>
     </div>
   )
@@ -92,7 +94,8 @@ function SummaryCard({ stats, today }) {
     { label: 'Белки', value: fmt(summary.avg.protein), unit: 'г', color: 'var(--good)' },
     { label: 'Жиры', value: fmt(summary.avg.fat), unit: 'г', color: 'var(--warn)' },
     { label: 'Углеводы', value: fmt(summary.avg.carbs), unit: 'г', color: 'var(--accent)' },
-    { label: 'Сахар', value: fmt(summary.avg.sugar), unit: 'г', color: 'var(--danger)' },
+    // Сахар — приблизительная оценка (см. секцию «Оценка сахара»), помечаем ≈.
+    { label: 'Сахар*', value: `${stats.sugarEstimated ? '≈' : ''}${fmt(summary.avg.sugar)}`, unit: 'г', color: 'var(--danger)' },
   ]
   return (
     <div className="card" style={{ marginBottom: 14 }}>
@@ -111,12 +114,15 @@ function SummaryCard({ stats, today }) {
       {summary.goalHitPct != null && (
         <>
           <div className="divider" />
-          <div className="row between" style={{ marginBottom: 6 }}>
-            <span style={{ fontSize: 14, fontWeight: 550 }}>Попадание в цель по калориям</span>
+          <div className="row between" style={{ marginBottom: 6, alignItems: 'baseline' }}>
+            <span style={{ fontSize: 14, fontWeight: 550 }}>Цель по калориям достигнута</span>
             <span className="tabular" style={{ fontSize: 14, fontWeight: 650, color: 'var(--primary)' }}>{summary.goalHitPct}%</span>
           </div>
           <div style={{ height: 8, borderRadius: 5, background: 'var(--track)', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${summary.goalHitPct}%`, background: 'var(--primary)', borderRadius: 5, transition: 'width 0.5s ease' }} />
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
+            в {summary.daysInTarget} из {stats.loggedDays} {plural(stats.loggedDays, 'заполненного дня', 'заполненных дней', 'заполненных дней')} (±{Math.round(TOL.kcal * 100)}% от цели)
           </div>
         </>
       )}
@@ -151,6 +157,7 @@ function HighlightDay({ title, emoji, day, today, caption, accent }) {
 // ── Секция нутриента: график + метрики ────────────────────────────────────────
 function NutrientSection({ nut, single }) {
   const digits = nut.key === 'kcal' ? 0 : 1
+  const approx = nut.estimate ? '≈' : '' // сахар — приблизительная оценка
   const t = nut.trend
   return (
     <div className="card" style={{ marginBottom: 14 }}>
@@ -161,15 +168,21 @@ function NutrientSection({ nut, single }) {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className="tabular" style={{ fontSize: 20, fontWeight: 700, lineHeight: 1 }}>
-            {fmt(nut.avg, digits)}<span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-3)', marginLeft: 3 }}>{nut.unit}/день</span>
+            {approx}{fmt(nut.avg, digits)}<span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-3)', marginLeft: 3 }}>{nut.unit}/день</span>
           </div>
           <TrendChip trend={t} unit={nut.unit} invert={nut.invert} single={single} />
         </div>
       </div>
 
-      <StatChart series={nut.series} target={nut.target} color={nut.color} unit={nut.unit} invert={nut.invert} tolerance={nut.invert ? 0 : TOL[nut.key]} />
+      <StatChart series={nut.series} target={nut.target} color={nut.color} unit={nut.unit} invert={nut.invert} estimate={nut.estimate} tolerance={nut.invert ? 0 : TOL[nut.key]} />
 
       <ChartLegend nut={nut} />
+
+      {nut.estimate && (
+        <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '10px 0 0', lineHeight: 1.45 }}>
+          ≈ Приблизительная оценка: сахар рассчитан из углеводов там, где не указан отдельно. Это ориентир, а не точное количество свободных сахаров.
+        </p>
+      )}
 
       <div className="divider" />
       <div className="stat-metrics">
@@ -181,13 +194,10 @@ function NutrientSection({ nut, single }) {
             <Metric label="Ср. отклонение" value={`${nut.avgDeviation >= 0 ? '+' : '−'}${fmt(Math.abs(nut.avgDeviation), digits)}`} />
           </>
         )}
-        {nut.invert && nut.target != null && (
-          <Metric label="Выше лимита" value={`${nut.daysOver} дн.`} color="var(--danger)" />
-        )}
-        <Metric label="Максимум" value={fmt(nut.max, digits)} />
-        <Metric label="Минимум" value={fmt(nut.min, digits)} />
-        {nut.invert && <Metric label="Всего за период" value={`${fmt(nut.total)} ${nut.unit}`} />}
-        {nut.target != null && <Metric label="Цель" value={`${fmt(nut.target, digits)} ${nut.unit}${nut.invert ? ' макс.' : ''}`} />}
+        <Metric label="Максимум" value={`${approx}${fmt(nut.max, digits)}`} />
+        <Metric label="Минимум" value={`${approx}${fmt(nut.min, digits)}`} />
+        {nut.invert && <Metric label="Всего за период" value={`${approx}${fmt(nut.total)} ${nut.unit}`} />}
+        {nut.target != null && <Metric label="Цель" value={`${fmt(nut.target, digits)} ${nut.unit}`} />}
       </div>
     </div>
   )
@@ -214,10 +224,8 @@ function TrendChip({ trend, unit, invert, single }) {
 
 function ChartLegend({ nut }) {
   const items = nut.target == null
-    ? [{ c: nut.color, t: 'фактическое потребление' }]
-    : nut.invert
-      ? [{ c: 'var(--good)', t: 'в норме' }, { c: 'var(--danger)', t: 'выше лимита' }]
-      : [{ c: 'var(--good)', t: 'в норме' }, { c: 'var(--accent)', t: 'недобор' }, { c: 'var(--warn)', t: 'перебор' }]
+    ? [{ c: nut.color, t: nut.estimate ? 'оценка потребления' : 'фактическое потребление' }]
+    : [{ c: 'var(--good)', t: 'в норме' }, { c: 'var(--accent)', t: 'недобор' }, { c: 'var(--warn)', t: 'перебор' }]
   return (
     <div className="row wrap gap12" style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-3)' }}>
       {items.map((it) => (
@@ -297,7 +305,7 @@ function SourceRow({ r, i, def, digits }) {
         <div className="src-sub">{r.count} {plural(r.count, 'употребление', 'употребления', 'употреблений')}</div>
       </div>
       <div style={{ textAlign: 'right', flex: '0 0 auto', minWidth: 74 }}>
-        <div className="tabular src-val">{fmt(r.value, digits)} {def.unit}</div>
+        <div className="tabular src-val">{def.estimate ? '≈' : ''}{fmt(r.value, digits)} {def.unit}</div>
         <div className="src-pct">{Math.round(r.percent)}%</div>
       </div>
     </div>

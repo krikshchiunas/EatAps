@@ -203,30 +203,38 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 function DayBody({ date, interactive, profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal, clipboard, setClipboard, onOpenAdd, onEditMeal, today }) {
   const day = dayOf(date)
   const totals = sumDay(day.meals)
-  const t = profile.targets
-  const remaining = t.calories - totals.kcal
+  // Цели могут отсутствовать/быть неполными (частичный онбординг, битые данные).
+  // Приводим к конечным числам, чтобы в кольцо/бары не попали NaN/undefined.
+  const t = profile?.targets || {}
+  const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0)
+  const calGoal = num(t.calories)
+  const proteinGoal = num(t.protein)
+  const carbGoal = num(t.carbs)
+  const fatGoal = num(t.fat)
+  const hasCalGoal = calGoal > 0
+  const remaining = calGoal - totals.kcal
 
   const quality = sumQuality(day.meals)
-  const sugarMax = sugarLimit(t.calories)
+  const sugarMax = sugarLimit(calGoal)
   const fiberMax = fiberGoal()
   const grade = carbGrade({ freeSugar: quality.freeSugar, sugarLimit: sugarMax, fiber: quality.fiber, fiberGoal: fiberMax, carbs: totals.carbs })
-  const carbsLeft = t.carbs - totals.carbs
+  const carbsLeft = carbGoal - totals.carbs
 
   return (
     <div className="day-body" style={interactive ? undefined : { pointerEvents: 'none' }}>
       <div className="card" style={{ textAlign: 'center' }}>
-        <Ring value={totals.kcal} max={t.calories} size={196} stroke={16}>
+        <Ring value={totals.kcal} max={calGoal} size={196} stroke={16}>
           <div>
-            <div className="tabular" style={{ fontSize: 44, fontWeight: 700, lineHeight: 1 }}>{Math.abs(remaining)}</div>
-            <div className="muted" style={{ fontSize: 14, marginTop: 4 }}>{remaining >= 0 ? 'ккал осталось' : 'ккал перебор'}</div>
+            <div className="tabular" style={{ fontSize: 44, fontWeight: 700, lineHeight: 1 }}>{hasCalGoal ? Math.abs(remaining) : totals.kcal}</div>
+            <div className="muted" style={{ fontSize: 14, marginTop: 4 }}>{hasCalGoal ? (remaining >= 0 ? 'ккал осталось' : 'ккал перебор') : 'ккал съедено'}</div>
           </div>
         </Ring>
         <div className="row" style={{ justifyContent: 'center', gap: 20, marginTop: 18 }}>
           <ChipStat label="Съедено" value={`${totals.kcal}`} />
           <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch' }} />
-          <ChipStat label="Цель" value={`${t.calories}`} />
+          <ChipStat label="Цель" value={hasCalGoal ? `${calGoal}` : '—'} />
           <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch' }} />
-          <ChipStat label={remaining >= 0 ? 'Недобор' : 'Перебор'} value={`${remaining >= 0 ? '' : '+'}${Math.abs(remaining)}`} accent={remaining < 0 ? 'var(--warn)' : 'var(--primary)'} />
+          <ChipStat label={remaining >= 0 ? 'Недобор' : 'Перебор'} value={hasCalGoal ? `${remaining >= 0 ? '' : '+'}${Math.abs(remaining)}` : '—'} accent={hasCalGoal && remaining < 0 ? 'var(--warn)' : 'var(--primary)'} />
         </div>
       </div>
 
@@ -269,9 +277,9 @@ function DayBody({ date, interactive, profile, dayOf, removeMeal, editMeal, togg
 
       <div className="card" style={{ marginTop: 14 }}>
         <div className="row gap16" style={{ alignItems: 'flex-start' }}>
-          <MacroBar label="Белки" value={totals.protein} max={t.protein} />
-          <MacroBar label="Углеводы" value={totals.carbs} max={t.carbs} color="var(--accent)" />
-          <MacroBar label="Жиры" value={totals.fat} max={t.fat} color="var(--warn)" />
+          <MacroBar label="Белки" value={totals.protein} max={proteinGoal} />
+          <MacroBar label="Углеводы" value={totals.carbs} max={carbGoal} color="var(--accent)" />
+          <MacroBar label="Жиры" value={totals.fat} max={fatGoal} color="var(--warn)" />
         </div>
       </div>
 
