@@ -303,66 +303,280 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
-/* ── AI-подписка: карточки планов ── */
-.plan-card {
+/* ── AI Assistant: hero, планы, домашний экран ── */
+
+@keyframes ai-fade-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes ai-orb-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+@keyframes ai-glow-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.65; }
+}
+@keyframes ai-dot-pulse {
+  0%, 100% { transform: scale(1);   opacity: 0.9; }
+  50%      { transform: scale(1.5); opacity: 0.35; }
+}
+
+/* Экран покупки — обёртка */
+.ai-plans {
+  padding-top: calc(env(safe-area-inset-top) + 24px);
+}
+.ai-plans__eyebrow {
+  text-align: center;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  font-size: 12px;
+  margin-bottom: 18px;
+}
+
+/* Hero-блок наверху */
+.ai-hero {
+  text-align: center;
+  padding: 4px 4px 26px;
+  animation: ai-fade-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ai-hero__orb {
+  width: 84px; height: 84px;
+  margin: 0 auto 20px;
+  border-radius: 26px;
+  display: grid; place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  box-shadow:
+    0 12px 32px rgba(79, 131, 117, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  animation: ai-orb-float 4.5s ease-in-out infinite;
+}
+[data-theme="dark"] .ai-hero__orb {
+  box-shadow:
+    0 14px 40px rgba(138, 168, 145, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+.ai-hero__title {
+  font-size: 30px; font-weight: 700; letter-spacing: -0.7px;
+  line-height: 1.12;
+  margin: 0 0 12px;
+}
+.ai-hero__sub {
+  font-size: 15px; color: var(--ink-2);
+  max-width: 320px; margin: 0 auto;
+  line-height: 1.5;
+}
+
+/* Список карточек */
+.ai-plans__list {
+  display: flex; flex-direction: column; gap: 14px;
+  margin-top: 6px;
+}
+.ai-plans__foot {
+  text-align: center; font-size: 12px; color: var(--ink-3);
+  margin-top: 22px;
+}
+
+/* Карточка тарифа */
+.ai-card {
   position: relative;
+  border-radius: 24px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 22px;
-  padding: 22px;
   box-shadow: var(--shadow-card);
-  transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  overflow: hidden;
+  opacity: 0;
+  animation: ai-fade-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: transform 0.14s ease, box-shadow 0.25s ease;
 }
-.plan-card:active { transform: scale(0.985); }
-.plan-card--plus {
-  border-color: transparent;
-  background:
-    linear-gradient(var(--surface), var(--surface)) padding-box,
-    linear-gradient(135deg, var(--primary), var(--accent)) border-box;
-  border: 1.5px solid transparent;
+.ai-card:active { transform: scale(0.99); }
+
+.ai-card__body {
+  position: relative;
+  padding: 22px 22px 20px;
+  z-index: 1;
 }
-.plan-card--active {
-  border-color: var(--primary);
-}
-.plan-card__head {
+
+.ai-card__head {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 10px;
+  gap: 10px; margin-bottom: 12px;
 }
-.plan-card__name {
+.ai-card__name {
   font-size: 22px; font-weight: 700; letter-spacing: -0.4px;
-}
-.plan-card__badge {
-  font-size: 12px; font-weight: 600;
-  padding: 5px 10px; border-radius: 999px;
-  background: var(--primary-weak); color: var(--primary-strong);
-  letter-spacing: 0.2px;
-}
-.plan-card__price {
-  display: flex; align-items: baseline; gap: 4px;
-  margin-bottom: 10px;
-}
-.plan-card__amount {
-  font-size: 30px; font-weight: 700; letter-spacing: -0.8px;
   color: var(--ink);
 }
-.plan-card__period {
-  font-size: 15px; color: var(--ink-3); font-weight: 550;
+.ai-card__badge {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+  padding: 6px 11px; border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  box-shadow: 0 4px 14px rgba(79, 131, 117, 0.28);
 }
-.plan-card__tagline {
-  font-size: 14px; color: var(--ink-2); margin-bottom: 12px;
+[data-theme="dark"] .ai-card__badge { color: #171D19; }
+
+.ai-card__price {
+  display: flex; align-items: baseline; gap: 4px;
+  margin-bottom: 12px;
 }
-.plan-card__list {
-  list-style: none; padding: 0; margin: 0 0 4px;
-  display: flex; flex-direction: column; gap: 8px;
+.ai-card__amount {
+  font-size: 34px; font-weight: 720; letter-spacing: -0.9px;
+  color: var(--ink);
 }
-.plan-card__list li {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 14px; color: var(--ink);
+.ai-card__period {
+  font-size: 15px; color: var(--ink-3); font-weight: 560;
 }
-.plan-card__dot {
+
+.ai-card__tagline {
+  font-size: 14px; color: var(--ink-2);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.ai-card__list {
+  list-style: none; padding: 0; margin: 0 0 20px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.ai-card__list li {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 14.5px; color: var(--ink);
+  line-height: 1.4;
+}
+.ai-card__dot {
   flex: 0 0 auto;
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-weak);
+}
+
+.ai-card__cta { margin-top: 4px; }
+
+/* AI+ — премиум с градиентной рамкой и лёгким свечением */
+.ai-card--plus {
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(var(--surface), var(--surface)) padding-box,
+    linear-gradient(135deg, var(--primary), var(--accent)) border-box;
+}
+.ai-card--plus .ai-card__glow {
+  position: absolute; inset: -40% -20% auto -20%;
+  height: 220px;
+  background: radial-gradient(60% 60% at 50% 0%, var(--primary) 0%, transparent 70%);
+  opacity: 0.18;
+  pointer-events: none;
+  z-index: 0;
+  animation: ai-glow-pulse 4.5s ease-in-out infinite;
+}
+[data-theme="dark"] .ai-card--plus .ai-card__glow { opacity: 0.28; }
+
+/* Ошибка под карточками */
+.ai-error {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--danger);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* ── AI Home (после покупки) ── */
+.ai-home {
+  padding-top: calc(env(safe-area-inset-top) + 16px);
+  display: flex; flex-direction: column;
+  min-height: 100vh;
+}
+.ai-home__topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 32px;
+}
+
+.ai-badge {
+  display: inline-flex; align-items: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.8px;
+  color: var(--primary-strong);
+  background: var(--primary-weak);
+  text-transform: uppercase;
+}
+.ai-badge--plus {
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  box-shadow: 0 6px 18px rgba(79, 131, 117, 0.30);
+}
+[data-theme="dark"] .ai-badge--plus { color: #171D19; }
+
+.ai-home__stage {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+  padding: 20px 8px 40px;
+  animation: ai-fade-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ai-home__orb {
+  position: relative;
+  width: 132px; height: 132px;
+  border-radius: 40px;
+  display: grid; place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  box-shadow:
+    0 24px 60px rgba(79, 131, 117, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  margin-bottom: 28px;
+  animation: ai-orb-float 5s ease-in-out infinite;
+}
+.ai-home__orb::before {
+  content: '';
+  position: absolute; inset: -30px;
+  border-radius: 60px;
+  background: radial-gradient(50% 50% at 50% 50%, var(--primary) 0%, transparent 70%);
+  opacity: 0.20;
+  z-index: -1;
+  animation: ai-glow-pulse 4s ease-in-out infinite;
+}
+[data-theme="dark"] .ai-home__orb {
+  box-shadow: 0 26px 70px rgba(138, 168, 145, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+[data-theme="dark"] .ai-home__orb::before { opacity: 0.35; }
+
+.ai-home__orb--plus {
+  border-radius: 44px;
+}
+.ai-home__orb--plus::before { opacity: 0.30; }
+
+.ai-home__title {
+  font-size: 32px; font-weight: 720; letter-spacing: -0.8px;
+  margin-bottom: 12px;
+}
+.ai-home__sub {
+  font-size: 15.5px; color: var(--ink-2);
+  max-width: 320px;
+  line-height: 1.55;
+  margin-bottom: 26px;
+}
+.ai-home__soon {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 12px 20px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  font-size: 14px; font-weight: 600;
+  color: var(--ink-2);
+  letter-spacing: 0.3px;
+}
+.ai-home__pulse {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--primary);
+  animation: ai-dot-pulse 1.6s ease-in-out infinite;
+}
+.ai-home__foot {
+  text-align: center;
+  font-size: 12px; color: var(--ink-3);
+  padding-bottom: 8px;
 }
 
 .divider { height: 1px; background: var(--border); margin: 18px 0; }

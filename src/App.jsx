@@ -11,6 +11,7 @@ import BottomNav from './components/BottomNav.jsx'
 import AddMealSheet from './components/AddMealSheet.jsx'
 import ResetPasswordSheet from './components/ResetPasswordSheet.jsx'
 import PushScreen from './components/PushScreen.jsx'
+import AITab from './components/AITab.jsx'
 
 export default function App() {
   const { profile, addMeal, recovery, clearRecovery, user } = useStore()
@@ -55,6 +56,7 @@ export default function App() {
   return (
     <div className="app">
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} onOpenCalendar={() => setCalendarOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
+      {tab === 'ai' && <AITab />}
       {tab === 'friends' && <FriendsScreen unreadCounts={unreadCounts} onChatClosed={refreshUnread} setTab={setTab} />}
       {tab === 'profile' && <ProfileScreen />}
 

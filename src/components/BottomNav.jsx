@@ -4,6 +4,12 @@ const ICONS = {
       <path d="M12 3.5 4 9.2V20a1 1 0 0 0 1 1h4v-6h6v6h4a1 1 0 0 0 1-1V9.2L12 3.5z" />
     </svg>
   ),
+  ai: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="navicon">
+      <path d="M12 3.5l1.9 4.9 4.9 1.9-4.9 1.9L12 17.1l-1.9-4.9-4.9-1.9 4.9-1.9L12 3.5z" />
+      <path d="M18.6 15.2l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9.9-2.3z" />
+    </svg>
+  ),
   history: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="navicon">
       <rect x="3.5" y="4.5" width="17" height="16" rx="3" />
@@ -31,12 +37,8 @@ export default function BottomNav({ tab, setTab, onAdd, totalUnread = 0 }) {
       <button className={tab === 'day' ? 'on' : ''} onClick={() => setTab('day')}>
         {ICONS.day}<span>День</span>
       </button>
-      <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')} style={{ position: 'relative' }}>
-        {ICONS.friends}
-        {totalUnread > 0 && (
-          <span className="nav-badge">{totalUnread > 99 ? '99+' : totalUnread}</span>
-        )}
-        <span>Друзья</span>
+      <button className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>
+        {ICONS.ai}<span>AI</span>
       </button>
       <div className="fab-slot">
         <button className="fab" onClick={onAdd} aria-label="Добавить приём пищи">
@@ -45,6 +47,13 @@ export default function BottomNav({ tab, setTab, onAdd, totalUnread = 0 }) {
           </svg>
         </button>
       </div>
+      <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')} style={{ position: 'relative' }}>
+        {ICONS.friends}
+        {totalUnread > 0 && (
+          <span className="nav-badge">{totalUnread > 99 ? '99+' : totalUnread}</span>
+        )}
+        <span>Друзья</span>
+      </button>
       <button className={tab === 'profile' ? 'on' : ''} onClick={() => setTab('profile')}>
         {ICONS.profile}<span>Профиль</span>
       </button>
