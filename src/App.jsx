@@ -49,9 +49,15 @@ export default function App() {
     senderCache.current = new Map()
     refreshUnread()
     return subscribeToIncoming(user.id, async (payload) => {
-      refreshUnread()
       const row = payload?.new
-      if (!row?.sender || row.sender === user.id) return
+      if (!row?.sender || row.sender === user.id) {
+        refreshUnread()
+        return
+      }
+
+      // Свежий счётчик непрочитанных, чтобы в теле пуша была правильная цифра.
+      const counts = await fetchUnreadCounts(user.id)
+      setUnreadCounts(counts)
 
       let brief = senderCache.current.get(row.sender)
       if (!brief) {
@@ -63,7 +69,7 @@ export default function App() {
         senderId: row.sender,
         senderName: brief.name,
         senderAvatar: brief.avatar,
-        text: row.text,
+        unreadCount: counts[row.sender] || 1,
         messageId: row.id,
       })
     })
