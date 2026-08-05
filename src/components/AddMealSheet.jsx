@@ -35,6 +35,7 @@ const SECTIONS = [
   { key: 'sweet', label: 'Сладкое' },
   { key: 'dish', label: 'Блюда' },
   { key: 'dessert', label: 'Десерты' },
+  { key: 'mcdonalds', label: 'Макдоналдс' },
   { key: 'fastfood', label: 'Фастфуд' },
 ]
 
