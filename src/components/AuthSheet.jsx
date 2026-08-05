@@ -1,9 +1,55 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component } from 'react'
 import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from '@reown/appkit/react'
 import { useStore } from '../store.jsx'
 import { web3Enabled } from '../lib/appkit.js'
 import { ruAuthError } from '../lib/authErrors.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+
+// ── Web3-кнопка вынесена в отдельный компонент ────────────────────────────────
+// AppKit-хуки (useAppKit, useAppKitAccount…) бросают исключение, если
+// createAppKit не был вызван (т.е. VITE_WALLETCONNECT_PROJECT_ID не задан).
+// Чтобы это не ронило весь AuthSheet через LazyBoundary, хуки живут ТОЛЬКО
+// здесь — и рендерится компонент тоже только при web3Enabled === true.
+class Web3ErrorBoundary extends Component {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  render() { return this.state.failed ? null : this.props.children }
+}
+
+function Web3Button({ busy, run, auth }) {
+  const { open } = useAppKit()
+  const { isConnected, caipAddress } = useAppKitAccount()
+  const { walletProvider: ethProvider } = useAppKitProvider('eip155')
+  const { walletProvider: solProvider } = useAppKitProvider('solana')
+  const { disconnect } = useDisconnect()
+  const [awaitingWeb3, setAwaitingWeb3] = useState(false)
+
+  const openWeb3 = async () => {
+    if (isConnected) { try { await disconnect() } catch {} }
+    setAwaitingWeb3(true)
+    open()
+  }
+
+  useEffect(() => {
+    if (!awaitingWeb3 || !isConnected || !caipAddress) return
+    const ns = caipAddress.split(':')[0]
+    const chain = ns === 'eip155' ? 'ethereum' : ns === 'solana' ? 'solana' : null
+    const provider = ns === 'eip155' ? ethProvider : solProvider
+    if (!chain || !provider) return
+    setAwaitingWeb3(false)
+    run(async () => {
+      const res = await auth.signInWeb3(chain, provider)
+      if (res?.error) disconnect().catch(() => {})
+      return res
+    })
+  }, [awaitingWeb3, isConnected, caipAddress, ethProvider, solProvider]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <button className="btn ghost" disabled={busy} onClick={openWeb3}>
+      👛 Web3 кошелёк
+    </button>
+  )
+}
 
 export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onRegistered }) {
   const { auth, user } = useStore()
@@ -15,15 +61,10 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
 
   const isRegister = mode === 'register'
 
-  // Появилась сессия → вход удался, шторка больше не нужна.
   useEffect(() => {
     if (user) onClose?.()
   }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // beforeAuth — только для потоков с редиректом (OAuth): страница вот-вот
-  // умрёт, анкету надо сохранить ДО ухода. Для email-потоков профиль
-  // сохраняется после (onRegistered → закрытие шторки), чтобы человек успел
-  // прочитать «подтвердите почту», а онбординг не размонтировал шторку.
   const run = async (fn, okText, { beforeAuth = false } = {}) => {
     if (beforeAuth) onBeforeAuth?.()
     setBusy(true)
@@ -41,8 +82,6 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
 
   const doLogin = () => run(() => auth.signInEmail(email, password))
 
-  // Supabase при регистрации на занятый email возвращает «успех» с пустыми
-  // identities (защита от перебора адресов). Ловим и говорим честно.
   const doRegister = () =>
     run(async () => {
       const res = await auth.signUpEmail(email, password)
@@ -54,44 +93,6 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
     }, 'Готово. Подтвердите почту по ссылке из письма — и можно пользоваться приложением.')
 
   const emailOk = /\S+@\S+\.\S+/.test(email)
-
-  // --- Web3 через Reown AppKit (список кошельков + WalletConnect) ---
-  const { open } = useAppKit()
-  const { isConnected, caipAddress } = useAppKitAccount()
-  const { walletProvider: ethProvider } = useAppKitProvider('eip155')
-  const { walletProvider: solProvider } = useAppKitProvider('solana')
-  const { disconnect } = useDisconnect()
-  const [awaitingWeb3, setAwaitingWeb3] = useState(false)
-
-  const openWeb3 = async () => {
-    setMsg(null)
-    // Кошелёк мог остаться подключённым с прошлой сессии — тогда вход молча
-    // ушёл бы в старый аккаунт. Сначала отключаем, чтобы показать выбор заново.
-    if (isConnected) {
-      try {
-        await disconnect()
-      } catch {}
-    }
-    setAwaitingWeb3(true)
-    open() // модалка AppKit со списком кошельков
-  }
-
-  // Кошелёк подключился → просим подпись и логинимся в Supabase.
-  useEffect(() => {
-    if (!awaitingWeb3 || !isConnected || !caipAddress) return
-    const ns = caipAddress.split(':')[0] // eip155 | solana
-    const chain = ns === 'eip155' ? 'ethereum' : ns === 'solana' ? 'solana' : null
-    const provider = ns === 'eip155' ? ethProvider : solProvider
-    if (!chain || !provider) return // провайдер ещё не готов — ждём следующий тик
-    setAwaitingWeb3(false)
-    run(async () => {
-      const res = await auth.signInWeb3(chain, provider)
-      // Кошелёк подключён к AppKit, но в Supabase логиниться не обязательно повторно —
-      // при ошибке/отмене подписи отключаем кошелёк, чтобы можно было начать заново.
-      if (res?.error) disconnect().catch(() => {})
-      return res
-    })
-  }, [awaitingWeb3, isConnected, caipAddress, ethProvider, solProvider]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close}>
@@ -112,9 +113,9 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
             <span style={{ fontWeight: 700 }}>G</span> Продолжить с Google
           </button>
           {web3Enabled && (
-            <button className="btn ghost" disabled={busy} onClick={openWeb3}>
-              👛 Web3 кошелёк
-            </button>
+            <Web3ErrorBoundary>
+              <Web3Button busy={busy} run={run} auth={auth} />
+            </Web3ErrorBoundary>
           )}
         </div>
 
