@@ -276,7 +276,9 @@ export function subscribeToIncoming(myId, onNew) {
   return () => supabase.removeChannel(channel)
 }
 
-export async function sendChatMessage({ sender, recipient, text, imageUrl, mealRef }) {
+const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at'
+
+export async function sendChatMessage({ sender, recipient, text, imageUrl, mealRef, replyTo, replySnapshot, forwardedName }) {
   if (!supabase) return { error: 'Нет подключения' }
   const payload = {
     sender,
@@ -284,18 +286,27 @@ export async function sendChatMessage({ sender, recipient, text, imageUrl, mealR
     text: text?.trim() ? text.trim() : null,
     image_url: imageUrl || null,
     meal_ref: mealRef || null,
+    reply_to: replyTo || null,
+    reply_snapshot: replySnapshot || null,
+    forwarded_name: forwardedName || null,
   }
   if (!payload.text && !payload.image_url && !payload.meal_ref) return { error: 'Пустое сообщение' }
-  const { data, error } = await supabase.from('messages').insert(payload).select('*').single()
+  const { data, error } = await supabase.from('messages').insert(payload).select(MSG_COLS).single()
   if (error) return { error: error.message }
   return { ok: data }
 }
 
-export async function listMessagesWith(myId, friendId, limit = 200) {
+export async function deleteChatMessage(id) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase.from('messages').delete().eq('id', id)
+  return error ? { error: error.message } : { ok: true }
+}
+
+export async function listMessagesWith(myId, friendId, limit = 300) {
   if (!supabase) return []
   const { data, error } = await supabase
     .from('messages')
-    .select('id, sender, recipient, text, image_url, meal_ref, created_at')
+    .select(MSG_COLS)
     .or(`and(sender.eq.${myId},recipient.eq.${friendId}),and(sender.eq.${friendId},recipient.eq.${myId})`)
     .order('created_at', { ascending: true })
     .limit(limit)

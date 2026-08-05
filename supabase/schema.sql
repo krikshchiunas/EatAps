@@ -168,6 +168,13 @@ create table if not exists public.messages (
   check (text is not null or image_url is not null or meal_ref is not null)
 );
 
+-- Ответы (reply) и пересылка (forward). Связь по ID + денормализованный снимок
+-- цитаты (reply_snapshot), чтобы цитата корректно рисовалась даже если оригинал
+-- удалён (reply_to тогда становится NULL по on delete set null).
+alter table public.messages add column if not exists reply_to uuid references public.messages(id) on delete set null;
+alter table public.messages add column if not exists reply_snapshot jsonb;
+alter table public.messages add column if not exists forwarded_name text;
+
 create index if not exists messages_pair_idx
   on public.messages (least(sender, recipient), greatest(sender, recipient), created_at desc);
 create index if not exists messages_recipient_idx
