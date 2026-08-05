@@ -6,6 +6,7 @@ import { startScheduler, notifyIncomingMessage } from './lib/notifications.js'
 import Onboarding from './components/Onboarding.jsx'
 import DayScreen from './components/DayScreen.jsx'
 import HistoryScreen from './components/HistoryScreen.jsx'
+import StatsScreen from './components/StatsScreen.jsx'
 import ProfileScreen from './components/ProfileScreen.jsx'
 import FriendsScreen from './components/FriendsScreen.jsx'
 import BottomNav from './components/BottomNav.jsx'
@@ -21,6 +22,7 @@ export default function App() {
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(false)
   const [calendarOpen, setCalendarOpen] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(false)
   const [clipboard, setClipboard] = useState(null)
   const [unreadCounts, setUnreadCounts] = useState({})
 
@@ -89,7 +91,7 @@ export default function App() {
 
   return (
     <div className="app">
-      {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} onOpenCalendar={() => setCalendarOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
+      {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} onOpenCalendar={() => setCalendarOpen(true)} onOpenStats={() => setStatsOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
       {tab === 'ai' && <AITab />}
       {tab === 'friends' && <FriendsScreen unreadCounts={unreadCounts} onChatClosed={refreshUnread} setTab={setTab} />}
       {tab === 'profile' && <ProfileScreen />}
@@ -99,6 +101,12 @@ export default function App() {
       {calendarOpen && (
         <PushScreen onClose={() => setCalendarOpen(false)}>
           {(close) => <HistoryScreen onPickDay={pickDay} onClose={close} />}
+        </PushScreen>
+      )}
+
+      {statsOpen && (
+        <PushScreen onClose={() => setStatsOpen(false)}>
+          {(close) => <StatsScreen onClose={close} />}
         </PushScreen>
       )}
 

@@ -582,6 +582,78 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .divider { height: 1px; background: var(--border); margin: 18px 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
+/* ── Статистика ── */
+.stat-seg button { height: 44px; font-size: 14px; }
+
+/* Сводка «Общая динамика» — сетка средних */
+.stat-grid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+}
+.stat-cell {
+  text-align: center; background: var(--surface-2);
+  border-radius: 13px; padding: 12px 4px;
+}
+.stat-cell__v { font-size: 18px; font-weight: 700; letter-spacing: -0.4px; line-height: 1.1; }
+.stat-cell__u { font-size: 10px; color: var(--ink-3); margin-top: 1px; }
+.stat-cell__l { font-size: 11px; color: var(--ink-2); margin-top: 4px; }
+@media (max-width: 360px) {
+  .stat-cell__v { font-size: 16px; }
+  .stat-cell__l { font-size: 10px; }
+}
+
+/* Метрики нутриента */
+.stat-metrics {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 14px 10px;
+}
+.stat-metric__v { font-size: 16px; font-weight: 680; letter-spacing: -0.3px; }
+.stat-metric__l { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+
+/* Тултип графика */
+.stat-tip {
+  position: absolute; top: -6px;
+  background: var(--ink); color: var(--surface);
+  padding: 6px 10px; border-radius: 10px;
+  box-shadow: var(--shadow-float);
+  pointer-events: none; white-space: nowrap; z-index: 2;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+}
+[data-theme="dark"] .stat-tip { background: var(--surface); border: 1px solid var(--border-strong); color: var(--ink); }
+.stat-tip__val { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-tip__day { font-size: 11px; opacity: 0.7; }
+.stat-tip__day::first-letter { text-transform: uppercase; }
+
+/* Строки рейтингов и источников */
+.src-row {
+  display: flex; align-items: center; gap: 11px;
+  padding: 11px 0; border-bottom: 1px solid var(--border);
+}
+.src-row:last-child { border-bottom: none; }
+.src-rank {
+  flex: 0 0 auto; width: 20px; text-align: center;
+  font-size: 13px; font-weight: 700; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.src-emoji {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 11px;
+  background: var(--primary-weak); display: grid; place-items: center; font-size: 17px;
+}
+.src-name {
+  font-size: 15px; font-weight: 560;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.src-sub { font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+.src-val { font-size: 14.5px; font-weight: 650; }
+.src-pct { font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+
+/* Плавное раскрытие таблиц (анимация grid-template-rows) */
+.collapse {
+  display: grid; grid-template-rows: 0fr;
+  transition: grid-template-rows 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.collapse.open { grid-template-rows: 1fr; }
+.collapse-inner { overflow: hidden; min-height: 0; }
+
 /* Пейджер дней: горизонтальный трек из 3 страниц.
    overflow-x: clip прячет соседние страницы, НЕ создавая вертикальный
    скролл-контейнер (в отличие от overflow: hidden) — вертикаль остаётся

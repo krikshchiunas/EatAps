@@ -10,7 +10,7 @@ import MacroBar from './MacroBar.jsx'
 const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
 const EASING = 'cubic-bezier(0.32, 0.72, 0, 1)'
 
-export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, clipboard, setClipboard }) {
+export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, onOpenStats, clipboard, setClipboard }) {
   const store = useStore()
   const { profile, dayOf, removeMeal, editMeal, toggleWellbeing, addMeal } = store
   const [editingMeal, setEditingMeal] = useState(null)
@@ -154,9 +154,12 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, cl
 
   return (
     <div className="screen">
-      {/* Шапка с датой — статична, не свайпается */}
-      <div className="row between" style={{ marginBottom: 20 }}>
-        <button className="iconbtn" onClick={() => go(-1)} aria-label="Предыдущий день">‹</button>
+      {/* Шапка с датой — статична, не свайпается. Grid 1fr/auto/1fr держит дату
+          по центру независимо от ширины боковых групп (справа стрелка + статистика). */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', marginBottom: 20 }}>
+        <div style={{ justifySelf: 'start' }}>
+          <button className="iconbtn" onClick={() => go(-1)} aria-label="Предыдущий день">‹</button>
+        </div>
         <button onClick={onOpenCalendar} aria-label="Открыть календарь" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
           <span className="row gap8" style={{ alignItems: 'center' }}>
             <span style={{ fontSize: 18, fontWeight: 650, letterSpacing: '-0.3px' }}>{humanDay(date, today)}</span>
@@ -166,7 +169,14 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, cl
           </span>
           <span style={{ fontSize: 12, color: 'var(--ink-3)', textTransform: 'capitalize' }}>{humanDow(date)}</span>
         </button>
-        <button className="iconbtn" onClick={() => go(1)} aria-label="Следующий день" style={{ opacity: canNext ? 1 : 0.4 }} disabled={!canNext}>›</button>
+        <div className="row gap8" style={{ justifySelf: 'end' }}>
+          <button className="iconbtn" onClick={() => go(1)} aria-label="Следующий день" style={{ opacity: canNext ? 1 : 0.4 }} disabled={!canNext}>›</button>
+          <button className="iconbtn" onClick={onOpenStats} aria-label="Статистика питания">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 20V10M10 20V4M16 20v-7M4 20h16" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Пейджер: 3 страницы, центр — текущий день */}
