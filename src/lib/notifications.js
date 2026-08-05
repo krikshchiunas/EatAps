@@ -154,12 +154,20 @@ export function startScheduler(getState) {
   return () => clearInterval(id)
 }
 
-// Показать уведомление о новом сообщении, если вкладка не в фокусе.
-export function notifyIncomingMessage({ senderName, text }) {
+// Активный чат — ChatView.jsx проставляет id собеседника, когда открывает чат,
+// и сбрасывает при выходе. Мы подавляем пуш только если пришло сообщение от
+// того, с кем сейчас открыт диалог (тогда оно и так видно на экране).
+let activeChatUserId = null
+export function setActiveChat(userId) { activeChatUserId = userId || null }
+
+// Показать уведомление о новом сообщении. Уникальный tag на каждое сообщение —
+// чтобы новые не затирали старые в шторке уведомлений.
+export function notifyIncomingMessage({ senderId, senderName, text, messageId }) {
   if (Notification.permission !== 'granted') return
-  if (typeof document !== 'undefined' && document.visibilityState === 'visible') return
+  if (senderId && senderId === activeChatUserId) return
   const body = text?.trim()
     ? text.length > 120 ? text.slice(0, 117) + '…' : text
     : '📷 Фото'
-  show(senderName || 'Новое сообщение', body, 'eataps-chat')
+  const tag = messageId ? `eataps-chat-${messageId}` : `eataps-chat-${Date.now()}`
+  show(senderName || 'Новое сообщение', body, tag)
 }

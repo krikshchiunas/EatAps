@@ -44,10 +44,16 @@ export default function App() {
     refreshUnread()
     return subscribeToIncoming(user.id, (payload) => {
       refreshUnread()
-      // Пуш о новом сообщении, если приложение не в фокусе.
+      // Пуш о новом сообщении. Показываем всегда, кроме случая, когда
+      // пользователь прямо сейчас в чате с этим отправителем.
       const row = payload?.new
       if (row?.sender && row.sender !== user.id) {
-        notifyIncomingMessage({ senderName: 'Новое сообщение', text: row.text })
+        notifyIncomingMessage({
+          senderId: row.sender,
+          senderName: 'Новое сообщение',
+          text: row.text,
+          messageId: row.id,
+        })
       }
     })
   }, [user?.id, refreshUnread])

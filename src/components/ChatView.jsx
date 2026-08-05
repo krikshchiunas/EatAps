@@ -7,6 +7,7 @@ import {
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import { setActiveChat } from '../lib/notifications.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 
@@ -120,6 +121,12 @@ export default function ChatView({ friend, onClose }) {
     return () => { vv.removeEventListener('resize', apply); vv.removeEventListener('scroll', apply); el.style.height = '' }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Пока открыт этот чат — не показывать пуш о его же сообщениях (они и так видны).
+  useEffect(() => {
+    setActiveChat(friend.id)
+    return () => setActiveChat(null)
+  }, [friend.id])
 
   // Загрузка истории + realtime.
   useEffect(() => {
