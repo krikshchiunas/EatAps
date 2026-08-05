@@ -1,12 +1,13 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
-import { supabase, supabaseEnabled, pullState, pushState } from './lib/supabase.js'
+import { supabase, supabaseEnabled, pullState, pushState, pullSubscription, subscribeToSubscription } from './lib/supabase.js'
+import { defaultSubscription, checkout as subCheckout, openBillingPortal as subPortal, subFromRow } from './lib/subscription.js'
 
 const KEY = 'eataps:v1'
 const META = 'eataps:sync'
 const LASTUID = 'eataps:lastUid' // чьи данные лежат локально (uid последней синхронизации)
 const StoreCtx = createContext(null)
 
-const empty = { profile: null, theme: 'system', days: {}, customFoods: [], customIngredients: [], recents: [], prefs: {} }
+const empty = { profile: null, theme: 'system', days: {}, customFoods: [], customIngredients: [], recents: [], prefs: {}, subscription: defaultSubscription() }
 
 // Тема: «система» больше не хранится как режим — при первом запуске берём
 // текущую настройку телефона и фиксируем как 'light'/'dark'. Дальше пользователь
@@ -188,6 +189,53 @@ export function StoreProvider({ children }) {
     }
   }, [uid, syncTick])
 
+  // Подписка Stripe: первичный pull после логина + realtime на изменения.
+  useEffect(() => {
+    if (!supabaseEnabled || !uid) return
+    let cancelled = false
+    ;(async () => {
+      const row = await pullSubscription(uid)
+      if (cancelled) return
+      setState((s) => ({ ...s, subscription: subFromRow(row) }))
+    })()
+    const unsub = subscribeToSubscription(uid, (row) => {
+      setState((s) => ({ ...s, subscription: subFromRow(row) }))
+    })
+    return () => { cancelled = true; unsub() }
+  }, [uid])
+
+  // Разлогин → возвращаем FREE (иначе UI останется с чужим тиром до перезагрузки).
+  useEffect(() => {
+    if (!supabaseEnabled || uid) return
+    setState((s) => (s.subscription?.tier === 'FREE' ? s : { ...s, subscription: defaultSubscription() }))
+  }, [uid])
+
+  // Возврат из Stripe Checkout: успех — доопрашиваем несколько раз, пока вебхук
+  // не запишет активную подписку (обычно приходит за 1–3 сек, но бывает дольше).
+  // Затем чистим query, чтобы при обновлении вкладки не повторять цикл.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const outcome = params.get('checkout')
+    if (!outcome) return
+    // Убираем query сразу, чтобы визуально ничего не мигало и рефреш не триггерил.
+    params.delete('checkout')
+    const clean = window.location.pathname + (params.toString() ? `?${params}` : '') + window.location.hash
+    window.history.replaceState(null, '', clean)
+    if (outcome !== 'success' || !uid) return
+    let cancelled = false
+    ;(async () => {
+      for (let i = 0; i < 8 && !cancelled; i++) {
+        const row = await pullSubscription(uid)
+        const next = subFromRow(row)
+        setState((s) => ({ ...s, subscription: next }))
+        if (next.tier !== 'FREE' && next.status !== 'inactive') break
+        await new Promise((r) => setTimeout(r, 1500))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [uid])
+
   // Синк упал (офлайн/сбой) → при возвращении сети повторяем reconcile целиком.
   useEffect(() => {
     if (!supabaseEnabled || !uid || syncStatus !== 'error') return
@@ -300,6 +348,30 @@ export function StoreProvider({ children }) {
     setState((s) => ({ ...s, prefs: { ...s.prefs, [key]: val } }))
   }, [])
 
+  const setSubscription = useCallback((sub) => {
+    setState((s) => ({ ...s, subscription: { ...defaultSubscription(), ...sub } }))
+  }, [])
+
+  // Тянем актуальную подписку из Supabase (webhook — источник истины).
+  const refreshSubscription = useCallback(async () => {
+    if (!uid) return null
+    const row = await pullSubscription(uid)
+    const next = subFromRow(row)
+    setState((s) => ({ ...s, subscription: next }))
+    return next
+  }, [uid])
+
+  // Покупка: редирект на Stripe Checkout. Реальное состояние приедет по
+  // вебхуку в таблицу subscriptions → Realtime канал внизу обновит store.
+  const purchaseSubscription = useCallback(async (tier) => {
+    return subCheckout(tier, { session })
+  }, [session])
+
+  // Портал Stripe: смена карты, апгрейд/даунгрейд, отмена — всё внутри Stripe.
+  const openSubscriptionPortal = useCallback(async () => {
+    return subPortal({ session })
+  }, [session])
+
   const resetAll = useCallback(() => {
     // Сброс обнуляет и метки синхронизации: пустое локальное состояние не
     // должно считаться «новее облака» при следующем входе.
@@ -314,6 +386,7 @@ export function StoreProvider({ children }) {
     customIngredients: state.customIngredients || [],
     recents: state.recents || [],
     prefs: state.prefs || {},
+    subscription: state.subscription || defaultSubscription(),
     dayOf: (date) => state.days[date] || blankDay(),
     setProfile,
     setTheme,
@@ -326,6 +399,10 @@ export function StoreProvider({ children }) {
     removeCustomFood,
     addCustomIngredient,
     setPref,
+    setSubscription,
+    purchaseSubscription,
+    openSubscriptionPortal,
+    refreshSubscription,
     resetAll,
     // auth / sync
     supabaseEnabled,

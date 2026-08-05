@@ -5,6 +5,9 @@ import { lazyWithReload } from '../lib/lazyWithReload.js'
 import { deleteAccount } from '../lib/supabase.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import LegalSheet from './LegalSheet.jsx'
+import PushScreen from './PushScreen.jsx'
+import AISubscriptionScreen from './AISubscriptionScreen.jsx'
+import { isActive, hasAIPlus } from '../lib/subscription.js'
 // Ленивая загрузка: AuthSheet тянет тяжёлый Web3-стек (AppKit). Грузим его
 // только когда пользователь открывает вход — ядро приложения остаётся лёгким
 // и надёжно работает офлайн. lazyWithReload самолечит сбой загрузки чанка.
@@ -20,10 +23,11 @@ const SYNC_LABEL = { idle: '', syncing: 'Синхронизация…', synced:
 
 export default function ProfileScreen() {
   const store = useStore()
-  const { profile, theme, setTheme, resetAll, supabaseEnabled, user, syncStatus, auth } = store
+  const { profile, theme, setTheme, resetAll, supabaseEnabled, user, syncStatus, auth, subscription } = store
   const t = profile.targets
   const [authOpen, setAuthOpen] = useState(false)
   const [myProfileOpen, setMyProfileOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
   const [legal, setLegal] = useState(null) // null | 'impressum' | 'privacy'
   const [busy, setBusy] = useState(false)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
@@ -145,6 +149,41 @@ export default function ProfileScreen() {
         </div>
       </div>
 
+      <button
+        className="card"
+        onClick={() => setAiOpen(true)}
+        style={{
+          marginTop: 14, width: '100%', display: 'flex', alignItems: 'center', gap: 14,
+          textAlign: 'left', cursor: 'pointer', transition: 'transform 0.12s ease',
+        }}
+        onPointerDown={(e) => (e.currentTarget.style.transform = 'scale(0.985)')}
+        onPointerUp={(e) => (e.currentTarget.style.transform = '')}
+        onPointerLeave={(e) => (e.currentTarget.style.transform = '')}
+      >
+        <div style={{
+          width: 46, height: 46, borderRadius: 14, flex: '0 0 auto',
+          display: 'grid', placeItems: 'center',
+          background: 'linear-gradient(135deg, var(--primary), var(--accent))',
+          color: '#fff',
+        }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
+            <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z" />
+            <path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" />
+          </svg>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 620 }}>AI-ассистент</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            {isActive(subscription)
+              ? (hasAIPlus(subscription) ? 'Подписка AI+ активна' : 'Подписка AI активна')
+              : 'Персональные подсказки по питанию'}
+          </div>
+        </div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="18" height="18" style={{ color: 'var(--ink-3)', flex: '0 0 auto' }}>
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+      </button>
+
       <div className="card" style={{ marginTop: 14 }}>
         <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Оформление</div>
         <div className="seg">
@@ -221,6 +260,11 @@ export default function ProfileScreen() {
         </LazyBoundary>
       )}
       {legal && <LegalSheet initial={legal} onClose={() => setLegal(null)} />}
+      {aiOpen && (
+        <PushScreen onClose={() => setAiOpen(false)}>
+          {(close) => <AISubscriptionScreen onClose={close} />}
+        </PushScreen>
+      )}
     </div>
   )
 }

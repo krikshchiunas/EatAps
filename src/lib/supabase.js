@@ -49,6 +49,33 @@ export async function pushState(userId, state) {
   return data.updated_at
 }
 
+// ---------------- Подписки Stripe ----------------
+// Читаем строку подписки текущего пользователя. RLS пускает только к своей.
+export async function pullSubscription(userId) {
+  if (!supabase || !userId) return null
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('tier, status, stripe_customer_id, stripe_subscription_id, current_period_end, cancel_at_period_end')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) return null
+  return data || null
+}
+
+// Realtime-подписка на изменения нашей строки — фронт мгновенно узнаёт, когда
+// вебхук записал новый статус после оплаты/отмены.
+export function subscribeToSubscription(userId, onChange) {
+  if (!supabase || !userId) return () => {}
+  const channel = supabase
+    .channel(`sub:${userId}:${Date.now()}`)
+    .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'subscriptions', filter: `user_id=eq.${userId}` },
+      (payload) => onChange(payload.new || null),
+    )
+    .subscribe()
+  return () => supabase.removeChannel(channel)
+}
+
 // ---------------- Публичные ID (AA000001) ----------------
 const PUBLIC_ID_RE = /^[A-Z]{2}\d{6}$/i
 

@@ -202,7 +202,16 @@ create policy "messages delete" on public.messages
   for delete using (auth.uid() = sender);
 
 -- Realtime: включить публикацию для этой таблицы (для supabase.channel).
-alter publication supabase_realtime add table public.messages;
+-- Идемпотентно: alter publication add table падает, если таблица уже там.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'messages'
+  ) then
+    execute 'alter publication supabase_realtime add table public.messages';
+  end if;
+end $$;
 
 -- ---------------- Бакет для фото из чата ----------------
 insert into storage.buckets (id, name, public)
@@ -229,6 +238,42 @@ create policy "chat-images delete own" on storage.objects
     bucket_id = 'chat-images'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- ---------------- Подписки Stripe ----------------
+-- Одна строка на пользователя. Пишет только сервер (webhook) через
+-- service_role — RLS ему не мешает; пользователю оставляем только SELECT
+-- своей строки. Тир хранится как FREE/AI/AI_PLUS, отдельные детали Stripe
+-- (customer_id, subscription_id, current_period_end) — здесь же.
+
+create table if not exists public.subscriptions (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  tier text not null default 'FREE' check (tier in ('FREE','AI','AI_PLUS')),
+  status text not null default 'inactive',
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  current_period_end timestamptz,
+  cancel_at_period_end boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists subs_customer_idx on public.subscriptions (stripe_customer_id);
+
+alter table public.subscriptions enable row level security;
+
+drop policy if exists "sub select own" on public.subscriptions;
+create policy "sub select own" on public.subscriptions
+  for select using (auth.uid() = user_id);
+
+-- Realtime: чтобы фронт получал апдейты статуса сразу после вебхука.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'subscriptions'
+  ) then
+    execute 'alter publication supabase_realtime add table public.subscriptions';
+  end if;
+end $$;
 
 -- ---------------- Удаление аккаунта (DSGVO Art. 17) ----------------
 -- Пользователь удаляет сам себя. Удаление auth.users каскадно стирает

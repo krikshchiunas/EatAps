@@ -303,6 +303,68 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* ── AI-подписка: карточки планов ── */
+.plan-card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.plan-card:active { transform: scale(0.985); }
+.plan-card--plus {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--surface), var(--surface)) padding-box,
+    linear-gradient(135deg, var(--primary), var(--accent)) border-box;
+  border: 1.5px solid transparent;
+}
+.plan-card--active {
+  border-color: var(--primary);
+}
+.plan-card__head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.plan-card__name {
+  font-size: 22px; font-weight: 700; letter-spacing: -0.4px;
+}
+.plan-card__badge {
+  font-size: 12px; font-weight: 600;
+  padding: 5px 10px; border-radius: 999px;
+  background: var(--primary-weak); color: var(--primary-strong);
+  letter-spacing: 0.2px;
+}
+.plan-card__price {
+  display: flex; align-items: baseline; gap: 4px;
+  margin-bottom: 10px;
+}
+.plan-card__amount {
+  font-size: 30px; font-weight: 700; letter-spacing: -0.8px;
+  color: var(--ink);
+}
+.plan-card__period {
+  font-size: 15px; color: var(--ink-3); font-weight: 550;
+}
+.plan-card__tagline {
+  font-size: 14px; color: var(--ink-2); margin-bottom: 12px;
+}
+.plan-card__list {
+  list-style: none; padding: 0; margin: 0 0 4px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.plan-card__list li {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px; color: var(--ink);
+}
+.plan-card__dot {
+  flex: 0 0 auto;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--primary);
+}
+
 .divider { height: 1px; background: var(--border); margin: 18px 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
