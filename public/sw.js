@@ -23,6 +23,18 @@ self.addEventListener('activate', (e) => {
   )
 })
 
+// Клик по уведомлению — сфокусировать уже открытую вкладку или открыть новую.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close()
+  e.waitUntil((async () => {
+    const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    for (const c of clientsList) {
+      if ('focus' in c) return c.focus()
+    }
+    if (self.clients.openWindow) return self.clients.openWindow('/')
+  })())
+})
+
 self.addEventListener('fetch', (e) => {
   const { request } = e
   if (request.method !== 'GET') return

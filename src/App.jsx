@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
 import { fetchUnreadCounts, subscribeToIncoming } from './lib/supabase.js'
+import { startScheduler, notifyIncomingMessage } from './lib/notifications.js'
 import Onboarding from './components/Onboarding.jsx'
 import DayScreen from './components/DayScreen.jsx'
 import HistoryScreen from './components/HistoryScreen.jsx'
@@ -14,13 +15,24 @@ import PushScreen from './components/PushScreen.jsx'
 import AITab from './components/AITab.jsx'
 
 export default function App() {
-  const { profile, addMeal, recovery, clearRecovery, user } = useStore()
+  const store = useStore()
+  const { profile, days, addMeal, recovery, clearRecovery, user } = store
   const [tab, setTab] = useState('day')
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(false)
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [clipboard, setClipboard] = useState(null)
   const [unreadCounts, setUnreadCounts] = useState({})
+
+  // Актуальный стор для планировщика (не пересоздаём таймер при каждом изменении).
+  const stateRef = useRef({ profile, days })
+  stateRef.current = { profile, days }
+
+  // Локальные напоминания в 15:00 (обед) и 18:00 (недобор). Один раз в день.
+  useEffect(() => {
+    if (!profile) return
+    return startScheduler(() => stateRef.current)
+  }, [profile])
 
   const refreshUnread = useCallback(async () => {
     if (!user?.id) return
@@ -30,7 +42,14 @@ export default function App() {
   useEffect(() => {
     if (!user?.id) return
     refreshUnread()
-    return subscribeToIncoming(user.id, refreshUnread)
+    return subscribeToIncoming(user.id, (payload) => {
+      refreshUnread()
+      // Пуш о новом сообщении, если приложение не в фокусе.
+      const row = payload?.new
+      if (row?.sender && row.sender !== user.id) {
+        notifyIncomingMessage({ senderName: 'Новое сообщение', text: row.text })
+      }
+    })
   }, [user?.id, refreshUnread])
 
   const totalUnread = Object.values(unreadCounts).reduce((s, n) => s + n, 0)

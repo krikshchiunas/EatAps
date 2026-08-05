@@ -1,8 +1,9 @@
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 import { deleteAccount } from '../lib/supabase.js'
+import { notificationsSupported, notificationPermission, requestNotificationPermission } from '../lib/notifications.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import LegalSheet from './LegalSheet.jsx'
 // Ленивая загрузка: AuthSheet тянет тяжёлый Web3-стек (AppKit). Грузим его
@@ -152,6 +153,9 @@ export default function ProfileScreen() {
         </div>
       </div>
 
+      <NotificationsCard />
+
+
       <div className="card" style={{ marginTop: 14 }}>
         <div className="h2" style={{ fontSize: 17, marginBottom: 4 }}>Обратная связь</div>
         {!feedbackOpen ? (
@@ -238,6 +242,47 @@ function KV({ k, v }) {
     <div style={{ textAlign: 'center' }}>
       <div className="tabular" style={{ fontSize: 20, fontWeight: 680 }}>{v}</div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{k}</div>
+    </div>
+  )
+}
+
+function NotificationsCard() {
+  const [perm, setPerm] = useState(() => notificationPermission())
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    // На возвращение из настроек браузера — переопросить статус разрешения.
+    const onFocus = () => setPerm(notificationPermission())
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  if (!notificationsSupported()) return null
+
+  const enable = async () => {
+    setBusy(true)
+    const result = await requestNotificationPermission()
+    setPerm(result)
+    setBusy(false)
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <div className="h2" style={{ fontSize: 17, marginBottom: 6 }}>Уведомления</div>
+      <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
+        Напоминание в 15:00, предупреждение о недоборе в 18:00 и пуш о новых сообщениях от друзей.
+      </p>
+      {perm === 'granted' ? (
+        <div style={{ fontSize: 14, color: 'var(--good)', fontWeight: 600 }}>✓ Включены</div>
+      ) : perm === 'denied' ? (
+        <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+          Разрешение отклонено. Включи вручную в настройках браузера.
+        </div>
+      ) : (
+        <button className="btn" disabled={busy} onClick={enable}>
+          {busy ? 'Запрашиваем…' : 'Включить уведомления'}
+        </button>
+      )}
     </div>
   )
 }
