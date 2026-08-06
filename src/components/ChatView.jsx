@@ -149,6 +149,33 @@ export default function ChatView({ friend, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Жёсткий запрет выделения в чате. Одного CSS мало: iOS успевает начать
+  // выделение до того, как отработает user-select, и красит подсветку поверх
+  // пузырей. Здесь два перехвата — не даём выделению начаться и снимаем его,
+  // если оно всё же возникло. Поле ввода из-под запрета исключено.
+  useEffect(() => {
+    const root = overlayRef.current
+    if (!root) return
+    const inComposer = (n) => {
+      const el = n?.nodeType === 1 ? n : n?.parentElement
+      return !!el?.closest?.('.chat-textarea')
+    }
+    const onSelectStart = (e) => { if (!inComposer(e.target)) e.preventDefault() }
+    const onSelectionChange = () => {
+      const sel = document.getSelection()
+      if (!sel || sel.isCollapsed || !sel.anchorNode) return
+      if (!root.contains(sel.anchorNode)) return
+      if (inComposer(sel.anchorNode)) return
+      sel.removeAllRanges()
+    }
+    root.addEventListener('selectstart', onSelectStart)
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => {
+      root.removeEventListener('selectstart', onSelectStart)
+      document.removeEventListener('selectionchange', onSelectionChange)
+    }
+  }, [])
+
   // Пока открыт этот чат — не показывать пуш о его же сообщениях (они и так видны).
   useEffect(() => {
     setActiveChat(friend.id)

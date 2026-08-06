@@ -898,23 +898,46 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
    работал), но браузер всё равно закрашивал прямоугольники подсветки поверх
    пузырей — это и было «странное синее место» в верхней части сообщения.
    Копирование живёт в контекст-меню, выделение в чате не нужно нигде. */
-.chat-overlay, .chat-overlay * {
-  -webkit-user-select: none; user-select: none;
-  -webkit-touch-callout: none;
+/* !important здесь намеренно: правило должно перебивать любую специфичность,
+   включая инлайновые стили движка жестов. Псевдоэлементы тоже — на iOS
+   подсветка умеет цепляться за ::before/::after. */
+.chat-overlay,
+.chat-overlay *,
+.chat-overlay *::before,
+.chat-overlay *::after {
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-tap-highlight-color: transparent !important;
 }
-/* Поле ввода — исключение: там выделять и править нужно. */
+/* Поле ввода — единственное исключение: там выделять и править нужно. */
 .chat-overlay .chat-textarea {
-  -webkit-user-select: text; user-select: text;
-  -webkit-touch-callout: default;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default !important;
 }
-/* Страховка: если выделение всё же возникло (iOS умеет), оно невидимо.
-   Селектор без пробела нужен, чтобы правило накрыло и сам контейнер —
-   именно он рисовал самый крупный прямоугольник. */
-.chat-overlay::selection,      .chat-overlay ::selection      { background: transparent; }
-.chat-overlay::-moz-selection, .chat-overlay ::-moz-selection { background: transparent; }
-/* А в поле ввода подсветку возвращаем. */
-.chat-overlay .chat-textarea::selection      { background: var(--primary-weak); }
-.chat-overlay .chat-textarea::-moz-selection { background: var(--primary-weak); }
+/* Если выделение всё же возникло — оно полностью невидимо.
+   Селектор без пробела нужен, чтобы накрыть и сам контейнер: именно он
+   рисовал самый крупный прямоугольник. */
+.chat-overlay::selection,
+.chat-overlay ::selection,
+.chat-overlay *::selection {
+  background: transparent !important;
+  color: inherit !important;
+  text-shadow: none !important;
+}
+.chat-overlay::-moz-selection,
+.chat-overlay ::-moz-selection,
+.chat-overlay *::-moz-selection {
+  background: transparent !important;
+  color: inherit !important;
+}
+/* А в поле ввода подсветку возвращаем — иначе не видно, что выделено. */
+.chat-overlay .chat-textarea::selection      { background: var(--primary-weak) !important; }
+.chat-overlay .chat-textarea::-moz-selection { background: var(--primary-weak) !important; }
 
 /* ── Message row (swipe-to-reply container) ── */
 .msg-row {
