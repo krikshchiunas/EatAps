@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { MEAL_TYPES, MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchIngredients, searchOpenFoodFacts, getPortions } from '../lib/foods.js'
+import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchIngredients, searchOpenFoodFacts, getPortions } from '../lib/foods.js'
 import { BEER_BRANDS, SPIRIT_TYPES, COCKTAILS, alcKcal } from '../lib/alcohol.js'
 import { useStore } from '../store.jsx'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
@@ -41,19 +41,16 @@ const SECTIONS = [
 
 const norm = (s) => s.toLowerCase().replace(/ё/g, 'е').trim()
 
-// Auto meal type: count non-snack meals already added today
-function autoMealType(dayMeals) {
-  const nonSnack = (dayMeals || []).filter((m) => m.type !== 'snack')
-  if (nonSnack.length === 0) return 'breakfast'
-  if (nonSnack.length === 1) return 'lunch'
-  return 'dinner'
-}
-
-export default function AddMealSheet({ date, onClose, onAdd }) {
-  const { customFoods, customIngredients, recents, prefs, addCustomFood, removeCustomFood, addCustomIngredient, setPref, dayOf } = useStore()
+// mealId — обязателен: продукт всегда добавляется в конкретный приём пищи
+// (секцию), выбранный на дневном экране. mealType — 'breakfast'/'lunch'/... для
+// стандартных секций (undefined для пользовательских) — сохраняется в записи
+// продукта как легаси-совместимое поле type, источник истины — mealId.
+export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealType }) {
+  const { customFoods, customIngredients, recents, prefs, addCustomFood, removeCustomFood, addCustomIngredient, setPref } = useStore()
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
-  const [type, setType] = useState(() => autoMealType(date ? dayOf(date).meals : []))
+  const type = mealType
+  const emit = (payload) => onAdd({ mealId, ...payload })
   const [selected, setSelected] = useState(null)
   const [method, setMethod] = useState(null)
   const [grams, setGrams] = useState('150')
@@ -173,7 +170,7 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
       })
     } else {
       // No gram info — add directly
-      onAdd({ type, name: r.name, emoji: r.emoji, grams: r.grams, unit: r.unit, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat })
+      emit({ type, name: r.name, emoji: r.emoji, grams: r.grams, unit: r.unit, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat })
       onClose()
     }
   }
@@ -193,13 +190,14 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
     if (!effective || g <= 0) return
     const s = scale(effective, g)
     const name = selected.hasVariants && method ? `${selected.name}, ${method.label.toLowerCase()}` : selected.name
-    onAdd({ type, name, emoji: selected.emoji, grams: g, unit, ...s })
+    emit({ type, name, emoji: selected.emoji, grams: g, unit, cat: selected.cat, ...s })
     if (selected.name === 'Яйцо' && method?.label === 'Глазунья на сл. масле') {
       const bg = g <= 55 ? 5 : 7.5
-      onAdd({
+      emit({
         type,
         name: `Сливочное масло (жарка)`,
         emoji: '🧈',
+        cat: 'oil',
         grams: bg,
         unit: 'г',
         kcal: Math.round(bg * 7.17),
@@ -209,10 +207,11 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
       })
     }
     if (isHotDrink(selected) && sugar > 0) {
-      onAdd({
+      emit({
         type,
         name: `Сахар, ${sugar} ч.л.`,
         emoji: '🥄',
+        cat: 'sweet',
         grams: sugar * SUGAR_TSP.grams,
         unit: 'г',
         kcal: sugar * SUGAR_TSP.kcal,
@@ -301,16 +300,8 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
-          <h2 className="h2">Добавить приём пищи</h2>
+          <h2 className="h2">Добавить в «{mealLabel}»</h2>
           <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
-        </div>
-
-        <div className="row wrap gap8" style={{ marginBottom: 18 }}>
-          {MEAL_TYPES.map((m) => (
-            <button key={m.key} className={`pill ${type === m.key ? 'on' : ''}`} onClick={() => setType(m.key)}>
-              <span>{m.emoji}</span> {m.label}
-            </button>
-          ))}
         </div>
 
         <div className="seg" style={{ marginBottom: 18 }}>
@@ -424,27 +415,27 @@ export default function AddMealSheet({ date, onClose, onAdd }) {
 
         {/* Alcohol builder */}
         {mode === 'search' && alcItem && (
-          <AlcoholBuilder item={alcItem} onBack={() => setAlcItem(null)} onAdd={onAdd} onClose={onClose} type={type} />
+          <AlcoholBuilder item={alcItem} onBack={() => setAlcItem(null)} onAdd={emit} onClose={onClose} type={type} />
         )}
 
         {mode === 'search' && selected?.builder === 'protein' && (
-          <ProteinShakeBuilder selected={selected} prefs={prefs} setPref={setPref} onBack={clearFood} onAdd={onAdd} onClose={onClose} type={type} />
+          <ProteinShakeBuilder selected={selected} prefs={prefs} setPref={setPref} onBack={clearFood} onAdd={emit} onClose={onClose} type={type} />
         )}
 
         {mode === 'search' && selected?.builder === 'custom' && (
-          <CustomDrinkBuilder selected={selected} onBack={clearFood} onAdd={onAdd} onClose={onClose} addCustomFood={addCustomFood} type={type} />
+          <CustomDrinkBuilder selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} addCustomFood={addCustomFood} type={type} />
         )}
 
         {mode === 'search' && selected?.builder === 'constructor' && (
-          <ConstructorBuilder selected={selected} onBack={clearFood} onAdd={onAdd} onClose={onClose} addCustomFood={addCustomFood} customIngredients={customIngredients} addCustomIngredient={addCustomIngredient} type={type} />
+          <ConstructorBuilder selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} addCustomFood={addCustomFood} customIngredients={customIngredients} addCustomIngredient={addCustomIngredient} type={type} />
         )}
 
         {mode === 'search' && selected?.kind === 'composite' && !selected.builder && (
-          <CompositePortion selected={selected} onBack={clearFood} onAdd={onAdd} onClose={onClose} type={type} />
+          <CompositePortion selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} type={type} />
         )}
 
         {mode === 'search' && selected?.dairy && !selected.builder && (
-          <DairyPortion selected={selected} onBack={clearFood} onAdd={onAdd} onClose={onClose} type={type} recents={recents} />
+          <DairyPortion selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} type={type} recents={recents} />
         )}
 
         {mode === 'search' && selected && !selected.builder && selected.kind !== 'composite' && !selected.dairy && (
@@ -865,7 +856,7 @@ function ProteinShakeBuilder({ selected, prefs, setPref, onBack, onAdd, onClose,
     if (pp !== prefs.proteinPer100) setPref('proteinPer100', pp)
     if (pk !== prefs.powderKcalPer100) setPref('powderKcalPer100', pk)
     const name = base === 'milk' ? `Протеиновый шейк на молоке ${mMl} мл` : 'Протеиновый шейк на воде'
-    onAdd({ type, name, emoji: selected.emoji, grams: base === 'milk' ? mMl : null, unit: 'мл', ...res })
+    onAdd({ type, name, emoji: selected.emoji, cat: selected.cat, grams: base === 'milk' ? mMl : null, unit: 'мл', ...res })
     onClose()
   }
 
@@ -959,7 +950,7 @@ function CustomDrinkBuilder({ selected, onBack, onAdd, onClose, addCustomFood, t
       sugar: num(sugar100),
       source: 'custom',
     })
-    onAdd({ type, name: name.trim(), emoji: '🥤', grams: v, unit: 'мл', ...res })
+    onAdd({ type, name: name.trim(), emoji: '🥤', cat: 'drink', grams: v, unit: 'мл', ...res })
     onClose()
   }
 
@@ -1112,7 +1103,7 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
       recipe: { base: baseName, slices, items: items.map((i) => ({ name: i.name, count: i.count })) },
       source: 'custom',
     })
-    onAdd({ type, name: finalName, emoji: selected.emoji, grams: servings, unit, ...total })
+    onAdd({ type, name: finalName, emoji: selected.emoji, cat: selected.cat || 'dish', grams: servings, unit, ...total })
     onClose()
   }
 
@@ -1223,7 +1214,7 @@ function CompositePortion({ selected, onBack, onAdd, onClose, type }) {
   }
   const unit = selected.unit || 'шт'
   const add = () => {
-    onAdd({ type, name: selected.name, emoji: selected.emoji, grams: servings, unit, ...total })
+    onAdd({ type, name: selected.name, emoji: selected.emoji, cat: selected.cat, grams: servings, unit, ...total })
     onClose()
   }
   return (
@@ -1271,7 +1262,7 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, recents = [] }) 
 
   const add = () => {
     if (!valid) return
-    onAdd({ type, name: `${selected.name} ${fatN}%`, emoji: selected.emoji, grams: g, unit: 'г', ...res })
+    onAdd({ type, name: `${selected.name} ${fatN}%`, emoji: selected.emoji, cat: selected.cat, grams: g, unit: 'г', ...res })
     onClose()
   }
 

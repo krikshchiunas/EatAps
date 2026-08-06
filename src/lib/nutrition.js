@@ -1,3 +1,5 @@
+import { estimateSaturatedFat, classifyComplexCarb, estimateProteinQuality, PROTEIN_QUALITY_THRESHOLD } from './nutritionClassification.js'
+
 export const ACTIVITY = {
   sedentary: { factor: 1.2, label: 'Мало движения' },
   light: { factor: 1.375, label: 'Лёгкая активность' },
@@ -104,6 +106,67 @@ export function sumQuality(meals = []) {
 // Лимит свободных сахаров = 10% калорий / 4. Клетчатка — цель EFSA ~30 г.
 export const sugarLimit = (calories) => Math.round((calories * 0.1) / 4)
 export const fiberGoal = () => 30
+
+// Дневной ориентир по насыщенным жирам — ВОЗ: <10% калорий из насыщенных жиров
+// (9 ккал/г). Считается от цели по калориям, отдельно от общей нормы жиров.
+export const satFatLimit = (calories) => Math.round((calories * 0.1) / 9)
+
+const round1n = (n) => Math.round(n * 10) / 10
+
+// Свод по эвристическим показателям качества питания (насыщенные жиры, доля
+// «сложных» углеводов, белок высокого качества) — см. nutritionClassification.js.
+// confidence на каждый показатель: 'measured' (все продукты с реальными данными),
+// 'estimated' (классификация уверенная, но по эвристике), 'partial' (часть
+// продуктов не удалось классифицировать — часть суммы недооценена, а не «0»),
+// 'none' (в приёме нет продуктов с этим нутриентом вовсе).
+function aggConfidence(list) {
+  if (list.length === 0) return 'none'
+  if (list.every((c) => c === 'measured')) return 'measured'
+  if (list.some((c) => c === 'unknown')) return 'partial'
+  return 'estimated'
+}
+
+export function sumAdvanced(meals = []) {
+  const satConfidences = []
+  const carbConfidences = []
+  const proteinConfidences = []
+  let satFat = 0
+  let complexCarb = 0
+  let qualityProtein = 0
+  let totalProtein = 0
+
+  for (const m of meals) {
+    const fat = Number(m.fat) || 0
+    const carbs = Number(m.carbs) || 0
+    const protein = Number(m.protein) || 0
+    totalProtein += protein
+
+    const sf = estimateSaturatedFat(m)
+    satFat += sf.grams
+    if (fat > 0) satConfidences.push(sf.confidence)
+
+    const cc = classifyComplexCarb(m)
+    complexCarb += carbs * cc.share
+    if (carbs > 0) carbConfidences.push(cc.confidence)
+
+    if (protein > 0) {
+      const pq = estimateProteinQuality(m)
+      proteinConfidences.push(pq.confidence)
+      if (pq.score != null && pq.score >= PROTEIN_QUALITY_THRESHOLD) qualityProtein += protein
+    }
+  }
+
+  return {
+    satFat: round1n(satFat),
+    satFatConfidence: aggConfidence(satConfidences),
+    complexCarb: round1n(complexCarb),
+    complexCarbConfidence: aggConfidence(carbConfidences),
+    qualityProtein: round1n(qualityProtein),
+    totalProtein: round1n(totalProtein),
+    qualityProteinShare: totalProtein > 0 ? qualityProtein / totalProtein : null,
+    qualityProteinConfidence: aggConfidence(proteinConfidences),
+  }
+}
 
 // Итоговая оценка качества углеводов за день: good | ok | bad.
 export function carbGrade({ freeSugar, sugarLimit, fiber, fiberGoal, carbs }) {

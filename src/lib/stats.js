@@ -9,7 +9,7 @@
 // это «Оценка сахара» (приблизительно), а не достоверное количество свободных
 // сахаров; строгого сравнения с лимитом ВОЗ у сахара нет.
 // ─────────────────────────────────────────────────────────────────────────────
-import { sumDay, freeSugarShare } from './nutrition.js'
+import { sumDay, freeSugarShare, sumAdvanced, satFatLimit } from './nutrition.js'
 import { keyOf, fromKey, addDays } from './date.js'
 
 export const PERIODS = [
@@ -19,13 +19,29 @@ export const PERIODS = [
   { key: '1y', days: 365, label: '1 год', gran: 'month' },
 ]
 
-// Порядок и оформление нутриентов. estimate: значение приблизительное (сахар).
+// Порядок и оформление нутриентов. estimate: значение приблизительное/эвристическое
+// (не лабораторное измерение) — disclaimer поясняет это под графиком в StatsScreen.
 export const NUTRIENTS = [
   { key: 'kcal', label: 'Калории', short: 'Ккал', unit: 'ккал', color: 'var(--primary)' },
   { key: 'protein', label: 'Белки', short: 'Белки', unit: 'г', color: 'var(--good)' },
+  {
+    key: 'qualityProtein', label: 'Белок высокого качества', short: 'Кач. белок', unit: 'г', color: 'var(--good)', estimate: true,
+    disclaimer: 'Ориентировочная оценка качества источника белка по типу продукта (учитывается белок из продуктов с оценкой 7 из 10 и выше). Это не медицинский показатель и не лабораторные данные конкретного продукта.',
+  },
   { key: 'fat', label: 'Жиры', short: 'Жиры', unit: 'г', color: 'var(--warn)' },
+  {
+    key: 'satFat', label: 'Насыщенные жиры', short: 'Насыщ. жиры', unit: 'г', color: 'var(--warn)', invert: true, estimate: true,
+    disclaimer: 'Берутся из реальных данных продукта, если они указаны, иначе оцениваются по типу продукта (мясо, молочное, кондитерка и т.п.). Дневной ориентир — не более 10% калорий (рекомендация ВОЗ), отдельно от общей нормы жиров.',
+  },
   { key: 'carbs', label: 'Углеводы', short: 'Углеводы', unit: 'г', color: 'var(--accent)' },
-  { key: 'sugar', label: 'Оценка сахара', short: 'Сахар', unit: 'г', color: 'var(--danger)', invert: true, estimate: true },
+  {
+    key: 'complexCarb', label: 'Сложные углеводы', short: 'Слож. угл.', unit: 'г', color: 'var(--accent)', estimate: true,
+    disclaimer: 'Доля углеводов из круп, картофеля, бобовых и цельнозерновых продуктов — продуктовая классификация по типу продукта, а не медицинский показатель «полезных» углеводов. Сахар, сладости и напитки в неё не входят.',
+  },
+  {
+    key: 'sugar', label: 'Оценка сахара', short: 'Сахар', unit: 'г', color: 'var(--danger)', invert: true, estimate: true,
+    disclaimer: '≈ Приблизительная оценка: сахар рассчитан из углеводов там, где не указан отдельно. Это ориентир, а не точное количество свободных сахаров.',
+  },
 ]
 
 // Допуск попадания «в норму» (доля от цели). Калории строже, макросы мягче.
@@ -68,15 +84,26 @@ export function dayNutrients(meals = []) {
   const s = sumDay(meals)
   let sugar = 0
   for (const m of meals) sugar += mealSugar(m)
-  return { kcal: safeNum(s.kcal), protein: safeNum(s.protein), fat: safeNum(s.fat), carbs: safeNum(s.carbs), sugar: safeNum(sugar) }
+  const adv = sumAdvanced(meals)
+  return {
+    kcal: safeNum(s.kcal), protein: safeNum(s.protein), fat: safeNum(s.fat), carbs: safeNum(s.carbs),
+    sugar: safeNum(sugar),
+    satFat: safeNum(adv.satFat), complexCarb: safeNum(adv.complexCarb), qualityProtein: safeNum(adv.qualityProtein),
+  }
 }
 
 // Цель по нутриенту из профиля. Приводим к конечному числу > 0, иначе null
-// (аналитика покажет только факт). У сахара пользовательской цели нет вовсе —
-// не сравниваем оценку с нормой ВОЗ как с достоверными данными.
+// (аналитика покажет только факт). У сахара/сложных углеводов/качества белка
+// пользовательской цели нет вовсе — не сравниваем оценку с нормой как с
+// достоверными данными. У насыщенных жиров цель считается отдельно от общей
+// нормы жиров (см. satFatLimit).
 function targetFor(key, profile) {
   const t = profile?.targets
-  if (!t || key === 'sugar') return null
+  if (!t || key === 'sugar' || key === 'complexCarb' || key === 'qualityProtein') return null
+  if (key === 'satFat') {
+    const cal = Number(t.calories)
+    return Number.isFinite(cal) && cal > 0 ? satFatLimit(cal) : null
+  }
   const raw = key === 'kcal' ? t.calories : t[key]
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : null
@@ -85,7 +112,7 @@ function targetFor(key, profile) {
 // Статус дня/бакета по нутриенту относительно цели.
 export function statusOf(value, target, key) {
   if (target == null || value == null) return 'none'
-  if (key === 'sugar') return value > target ? 'over' : 'in' // меньше — лучше
+  if (key === 'sugar' || key === 'satFat') return value > target ? 'over' : 'in' // меньше — лучше
   const tol = TOL[key] ?? 0.12
   if (value < target * (1 - tol)) return 'under'
   if (value > target * (1 + tol)) return 'over'
@@ -254,7 +281,7 @@ function productStats(days, keys) {
   const groups = new Map()
   let totalMeals = 0
   let sugarEstimated = false // хоть один приём без реального поля sugar
-  const grand = { kcal: 0, protein: 0, fat: 0, carbs: 0, sugar: 0 }
+  const grand = { kcal: 0, protein: 0, fat: 0, carbs: 0, sugar: 0, satFat: 0, complexCarb: 0, qualityProtein: 0 }
 
   for (const k of keys) {
     const day = days[k]
@@ -278,6 +305,9 @@ function productStats(days, keys) {
           fat: 0,
           carbs: 0,
           sugar: 0,
+          satFat: 0,
+          complexCarb: 0,
+          qualityProtein: 0,
         }
         groups.set(norm, g)
       }
@@ -293,16 +323,23 @@ function productStats(days, keys) {
       const fat = Number(m.fat) || 0
       const carbs = Number(m.carbs) || 0
       const sugar = mealSugar(m)
+      const adv = sumAdvanced([m])
       g.kcal += kcal
       g.protein += protein
       g.fat += fat
       g.carbs += carbs
       g.sugar += sugar
+      g.satFat += adv.satFat
+      g.complexCarb += adv.complexCarb
+      g.qualityProtein += adv.qualityProtein
       grand.kcal += kcal
       grand.protein += protein
       grand.fat += fat
       grand.carbs += carbs
       grand.sugar += sugar
+      grand.satFat += adv.satFat
+      grand.complexCarb += adv.complexCarb
+      grand.qualityProtein += adv.qualityProtein
     }
   }
 
@@ -330,6 +367,9 @@ function productStats(days, keys) {
       fat: g.fat,
       carbs: g.carbs,
       sugar: g.sugar,
+      satFat: g.satFat,
+      complexCarb: g.complexCarb,
+      qualityProtein: g.qualityProtein,
     }
   })
 
@@ -355,8 +395,11 @@ function productStats(days, keys) {
     sources: {
       kcal: sourcesFor('kcal'),
       protein: sourcesFor('protein'),
+      qualityProtein: sourcesFor('qualityProtein'),
       fat: sourcesFor('fat'),
+      satFat: sourcesFor('satFat'),
       carbs: sourcesFor('carbs'),
+      complexCarb: sourcesFor('complexCarb'),
       sugar: sourcesFor('sugar'),
     },
   }

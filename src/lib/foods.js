@@ -495,12 +495,17 @@ export const FOODS = [...BUILDERS, ...variantFoods, ...dairyFoods, ...plainFoods
 
 export function scale(food, grams) {
   const k = grams / 100
-  return {
+  const out = {
     kcal: Math.round(food.kcal * k),
     protein: +(food.protein * k).toFixed(1),
     carbs: +(food.carbs * k).toFixed(1),
     fat: +(food.fat * k).toFixed(1),
   }
+  // Реальные сахар/насыщенные жиры (если известны на 100 г/мл источника) — донести
+  // до записи в приёме пищи, а не терять при масштабировании порции.
+  if (food.sugar != null) out.sugar = +(food.sugar * k).toFixed(1)
+  if (food.satFat != null) out.satFat = +(food.satFat * k).toFixed(1)
+  return out
 }
 
 const norm = (s) => s.toLowerCase().replace(/ё/g, 'е').trim()

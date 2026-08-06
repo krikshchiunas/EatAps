@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { supabase, supabaseEnabled, pullState, pushState, pullSubscription, subscribeToSubscription } from './lib/supabase.js'
 import { defaultSubscription, checkout as subCheckout, openBillingPortal as subPortal, subFromRow } from './lib/subscription.js'
+import { upsertSection, removeSection, swapCustomOrder, effectiveMealId } from './lib/meals.js'
 
 const KEY = 'eataps:v1'
 const META = 'eataps:sync'
@@ -53,7 +54,7 @@ function load() {
 }
 
 function blankDay() {
-  return { meals: [], mood: null, wellbeing: [], note: '' }
+  return { meals: [], mealSections: [], mood: null, wellbeing: [], note: '' }
 }
 
 const authApi = supabaseEnabled
@@ -278,33 +279,57 @@ export function StoreProvider({ children }) {
     })
   }, [])
 
-  const addMeal = useCallback((date, meal) => {
+  // Продукт внутри приёма пищи (day.meals — плоский список, принадлежность приёму
+  // считается через effectiveMealId — см. lib/meals.js). createdAt нужен для
+  // авто-времени приёма (время первого добавленного продукта).
+  const addFood = useCallback((date, food) => {
     setState((s) => {
       const day = s.days[date] || blankDay()
-      const days = { ...s.days, [date]: { ...day, meals: [...day.meals, { id: crypto.randomUUID(), ...meal }] } }
+      const entry = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...food }
+      const days = { ...s.days, [date]: { ...day, meals: [...day.meals, entry] } }
       const snap = {
-        name: meal.name,
-        emoji: meal.emoji || '🍽️',
-        unit: meal.unit || 'г',
-        grams: meal.grams ?? null,
-        kcal: meal.kcal,
-        protein: meal.protein,
-        carbs: meal.carbs,
-        fat: meal.fat,
+        name: food.name,
+        emoji: food.emoji || '🍽️',
+        unit: food.unit || 'г',
+        grams: food.grams ?? null,
+        kcal: food.kcal,
+        protein: food.protein,
+        carbs: food.carbs,
+        fat: food.fat,
       }
-      const prev = (s.recents || []).find((r) => r.name === meal.name)
-      const rest = (s.recents || []).filter((r) => r.name !== meal.name)
+      const prev = (s.recents || []).find((r) => r.name === food.name)
+      const rest = (s.recents || []).filter((r) => r.name !== food.name)
       const recents = [{ ...snap, count: (prev?.count || 0) + 1, ts: Date.now() }, ...rest].slice(0, 40)
       return { ...s, days, recents }
     })
   }, [])
 
-  const removeMeal = useCallback((date, id) => {
+  const removeFood = useCallback((date, id) => {
     editDay(date, (d) => ({ ...d, meals: d.meals.filter((m) => m.id !== id) }))
   }, [editDay])
 
-  const editMeal = useCallback((date, updatedMeal) => {
-    editDay(date, (d) => ({ ...d, meals: d.meals.map((m) => m.id === updatedMeal.id ? updatedMeal : m) }))
+  const editFood = useCallback((date, updatedFood) => {
+    editDay(date, (d) => ({ ...d, meals: d.meals.map((m) => m.id === updatedFood.id ? updatedFood : m) }))
+  }, [editDay])
+
+  // Создание/редактирование приёма пищи (время, showTime, переименование custom).
+  const upsertMealSection = useCallback((date, section) => {
+    editDay(date, (d) => ({ ...d, mealSections: upsertSection(d, section) }))
+  }, [editDay])
+
+  // Удаление ТОЛЬКО пользовательского приёма — вместе со всеми его продуктами
+  // (UI обязан спросить подтверждение до вызова, если продукты есть — см. п.9).
+  const deleteMealSection = useCallback((date, mealId) => {
+    editDay(date, (d) => ({
+      ...d,
+      mealSections: removeSection(d, mealId),
+      meals: d.meals.filter((m) => effectiveMealId(m) !== mealId),
+    }))
+  }, [editDay])
+
+  // Ручной порядок дополнительных приёмов — кнопки «выше/ниже» (dir: -1/+1).
+  const moveMealSection = useCallback((date, mealId, dir) => {
+    editDay(date, (d) => ({ ...d, mealSections: swapCustomOrder(d, mealId, dir) }))
   }, [editDay])
 
   const setMood = useCallback((date, mood) => {
@@ -390,9 +415,12 @@ export function StoreProvider({ children }) {
     dayOf: (date) => state.days[date] || blankDay(),
     setProfile,
     setTheme,
-    addMeal,
-    removeMeal,
-    editMeal,
+    addFood,
+    removeFood,
+    editFood,
+    upsertMealSection,
+    deleteMealSection,
+    moveMealSection,
     setMood,
     toggleWellbeing,
     addCustomFood,

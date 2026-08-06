@@ -270,8 +270,17 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   display: flex; align-items: center; gap: 14px;
   padding: 14px 0;
   border-bottom: 1px solid var(--border);
+  animation: meal-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .meal-item:last-child { border-bottom: none; }
+@keyframes meal-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Секция приёма пищи (завтрак/обед/ужин/перекус/свой) — компактнее обычной
+   карточки, чтобы список из 4+ приёмов не выглядел тяжёлым. */
+.meal-section { padding: 16px; }
 .meal-emoji {
   width: 44px; height: 44px; border-radius: 13px; flex: 0 0 auto;
   background: var(--primary-weak); display: grid; place-items: center; font-size: 20px;

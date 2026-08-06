@@ -3,6 +3,7 @@ import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
 import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief } from './lib/supabase.js'
 import { startScheduler, notifyIncomingMessage } from './lib/notifications.js'
+import { autoStandardMealId, labelForMealId, typeOfMealId } from './lib/meals.js'
 import Onboarding from './components/Onboarding.jsx'
 import DayScreen from './components/DayScreen.jsx'
 import HistoryScreen from './components/HistoryScreen.jsx'
@@ -17,10 +18,10 @@ import AITab from './components/AITab.jsx'
 
 export default function App() {
   const store = useStore()
-  const { profile, days, addMeal, recovery, clearRecovery, user } = store
+  const { profile, days, dayOf, addFood, recovery, clearRecovery, user } = store
   const [tab, setTab] = useState('day')
   const [date, setDate] = useState(keyOf())
-  const [sheet, setSheet] = useState(false)
+  const [sheet, setSheet] = useState(null) // null | { mealId, mealLabel }
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
   const [clipboard, setClipboard] = useState(null)
@@ -91,12 +92,16 @@ export default function App() {
 
   return (
     <div className="app">
-      {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={() => setSheet(true)} onOpenCalendar={() => setCalendarOpen(true)} onOpenStats={() => setStatsOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
+      {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={(mealId, mealLabel) => setSheet({ mealId, mealLabel })} onOpenCalendar={() => setCalendarOpen(true)} onOpenStats={() => setStatsOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
       {tab === 'ai' && <AITab />}
       {tab === 'friends' && <FriendsScreen unreadCounts={unreadCounts} onChatClosed={refreshUnread} setTab={setTab} />}
       {tab === 'profile' && <ProfileScreen />}
 
-      <BottomNav tab={tab} setTab={setTab} onAdd={() => { setTab('day'); setSheet(true) }} totalUnread={totalUnread} />
+      <BottomNav tab={tab} setTab={setTab} onAdd={() => {
+        setTab('day')
+        const mealId = autoStandardMealId(dayOf(date))
+        setSheet({ mealId, mealLabel: labelForMealId(dayOf(date), mealId) })
+      }} totalUnread={totalUnread} />
 
       {calendarOpen && (
         <PushScreen onClose={() => setCalendarOpen(false)}>
@@ -112,9 +117,11 @@ export default function App() {
 
       {sheet && (
         <AddMealSheet
-          date={date}
-          onClose={() => setSheet(false)}
-          onAdd={(meal) => addMeal(date, meal)}
+          mealId={sheet.mealId}
+          mealLabel={sheet.mealLabel}
+          mealType={typeOfMealId(sheet.mealId)}
+          onClose={() => setSheet(null)}
+          onAdd={(food) => addFood(date, food)}
         />
       )}
       {recoverySheet}

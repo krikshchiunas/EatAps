@@ -178,9 +178,9 @@ function NutrientSection({ nut, single }) {
 
       <ChartLegend nut={nut} />
 
-      {nut.estimate && (
+      {nut.estimate && nut.disclaimer && (
         <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '10px 0 0', lineHeight: 1.45 }}>
-          ≈ Приблизительная оценка: сахар рассчитан из углеводов там, где не указан отдельно. Это ориентир, а не точное количество свободных сахаров.
+          ≈ {nut.disclaimer}
         </p>
       )}
 
