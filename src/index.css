@@ -892,16 +892,29 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   box-shadow: none;
 }
 
-/* Лента целиком невыделяемая. Раньше user-select: none стоял только на .msg,
-   и при долгом нажатии браузер всё равно успевал начать выделение — текст
-   подсвечивался синим. Копирование живёт в контекст-меню, выделение не нужно. */
-.chat-list, .chat-list * {
+/* Весь экран чата невыделяемый, а не только лента.
+   Запрет на .chat-list не спасал: выделение начиналось в ШАПКЕ (имя, статус)
+   и протягивалось вниз. Текст сообщений в него не попадал (user-select
+   работал), но браузер всё равно закрашивал прямоугольники подсветки поверх
+   пузырей — это и было «странное синее место» в верхней части сообщения.
+   Копирование живёт в контекст-меню, выделение в чате не нужно нигде. */
+.chat-overlay, .chat-overlay * {
   -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none;
 }
-/* Страховка: если выделение всё же возникло (iOS умеет), оно невидимо. */
-.chat-list ::selection      { background: transparent; }
-.chat-list ::-moz-selection { background: transparent; }
+/* Поле ввода — исключение: там выделять и править нужно. */
+.chat-overlay .chat-textarea {
+  -webkit-user-select: text; user-select: text;
+  -webkit-touch-callout: default;
+}
+/* Страховка: если выделение всё же возникло (iOS умеет), оно невидимо.
+   Селектор без пробела нужен, чтобы правило накрыло и сам контейнер —
+   именно он рисовал самый крупный прямоугольник. */
+.chat-overlay::selection,      .chat-overlay ::selection      { background: transparent; }
+.chat-overlay::-moz-selection, .chat-overlay ::-moz-selection { background: transparent; }
+/* А в поле ввода подсветку возвращаем. */
+.chat-overlay .chat-textarea::selection      { background: var(--primary-weak); }
+.chat-overlay .chat-textarea::-moz-selection { background: var(--primary-weak); }
 
 /* ── Message row (swipe-to-reply container) ── */
 .msg-row {
