@@ -211,23 +211,74 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 }
 .bottomnav button.on { color: var(--primary); }
 .bottomnav .navicon { width: 24px; height: 24px; }
+/* ── Меню действий с другом (⋯ в карточке) ── */
 .friend-menu {
-  position: absolute; right: 8px; top: calc(100% - 4px);
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 16px; box-shadow: var(--shadow-float);
-  min-width: 190px; z-index: 20; overflow: hidden;
-  animation: screen-enter 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+  position: absolute; right: 10px; top: calc(100% - 2px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-float);
+  min-width: 218px; z-index: 20;
+  padding: 6px;
+  /* Раскрытие «из угла» — меню растёт от кнопки, а не из центра карточки. */
+  transform-origin: top right;
+  animation: friend-menu-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+/* Возле нижнего края экрана открываем вверх (dropUp в FriendsScreen). */
+.friend-menu.up {
+  top: auto; bottom: calc(100% - 2px);
+  transform-origin: bottom right;
+}
+@keyframes friend-menu-in {
+  from { opacity: 0; transform: scale(0.94) translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+.friend-menu.up { animation-name: friend-menu-in-up; }
+@keyframes friend-menu-in-up {
+  from { opacity: 0; transform: scale(0.94) translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .friend-menu, .friend-menu.up { animation: none; }
+}
+
 .friend-menu button {
   width: 100%; text-align: left;
-  padding: 13px 16px; font-size: 15px;
-  display: flex; align-items: center; gap: 10px;
-  border-bottom: 1px solid var(--border);
-  color: var(--ink);
-  transition: background 0.12s ease;
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 12px; border-radius: 13px;
+  font-size: 15px; font-weight: 500; color: var(--ink);
+  transition: background 0.14s ease, transform 0.1s ease;
 }
-.friend-menu button:last-of-type { border-bottom: none; }
-.friend-menu button:active { background: var(--surface-2); }
+.friend-menu button + button { margin-top: 2px; }
+.friend-menu button svg { flex: 0 0 auto; color: var(--ink-3); }
+.friend-menu button:active { background: var(--primary-weak); transform: scale(0.98); }
+.friend-menu button:active svg { color: var(--primary); }
+
+/* Разрушающее действие отделяем чертой и цветом — как в шторках чата. */
+.friend-menu button.danger { color: var(--danger); margin-top: 6px; position: relative; }
+.friend-menu button.danger svg { color: var(--danger); }
+.friend-menu button.danger::before {
+  content: ''; position: absolute; left: 12px; right: 12px; top: -4px;
+  height: 1px; background: var(--border);
+}
+.friend-menu button.danger:active { background: rgba(192, 104, 78, 0.12); }
+.friend-menu button.danger:active svg { color: var(--danger); }
+
+.friend-menu-err {
+  font-size: 12.5px; color: var(--danger);
+  padding: 6px 12px 4px; line-height: 1.4;
+}
+
+/* Кнопка ⋯ в карточке друга */
+.friend-more {
+  position: absolute; right: 8px; top: 50%;
+  transform: translateY(-50%);
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center;
+  color: var(--ink-3);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.friend-more:active, .friend-more.on { background: var(--primary-weak); color: var(--primary); }
 
 .nav-badge {
   position: absolute; top: 6px; right: calc(50% - 18px);

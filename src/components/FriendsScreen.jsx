@@ -46,7 +46,26 @@ export function Avatar({ src, name, size = 44 }) {
 }
 
 // ── Friend card dropdown menu ─────────────────────────────────────────────────
-function FriendMenu({ friend, isPinned, isMuted, onPin, onMute, onRemove, onClose, menuErr }) {
+// Иконка пункта: те же обводки и толщина, что в контекст-меню чата, чтобы меню
+// приложения выглядели одинаково.
+function MenuIco({ d }) {
+  return (
+    <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
+         strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {d.split(' M').map((seg, i) => <path key={i} d={(i ? 'M' : '') + seg} />)}
+    </svg>
+  )
+}
+
+const ICON = {
+  pin:   'M12 17v5 M8.5 3h7l-.7 6.2 2.6 3.1a1 1 0 0 1-.8 1.7H6.4a1 1 0 0 1-.8-1.7l2.6-3.1L7.5 3',
+  unpin: 'M12 17v5 M8.5 3h7l-.7 6.2 2.6 3.1a1 1 0 0 1-.8 1.7H6.4a1 1 0 0 1-.8-1.7l2.6-3.1L7.5 3 M3 3l18 18',
+  mute:  'M11 5 6 9H2v6h4l5 4V5z M23 9l-6 6 M17 9l6 6',
+  unmute:'M11 5 6 9H2v6h4l5 4V5z M16 8.5a5 5 0 0 1 0 7 M19 5.5a9 9 0 0 1 0 13',
+  remove:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M17 11h5',
+}
+
+function FriendMenu({ isPinned, isMuted, onPin, onMute, onRemove, onClose, menuErr, dropUp }) {
   const ref = useRef(null)
   useEffect(() => {
     const handle = (e) => { if (!ref.current?.contains(e.target)) onClose() }
@@ -55,11 +74,25 @@ function FriendMenu({ friend, isPinned, isMuted, onPin, onMute, onRemove, onClos
   }, [])
 
   return (
-    <div ref={ref} className="friend-menu" onClick={e => e.stopPropagation()}>
-      <button onClick={onPin}>{isPinned ? 'Открепить' : 'Закрепить'}</button>
-      <button onClick={onMute}>{isMuted ? 'Включить уведомления' : 'Заглушить'}</button>
-      <button onClick={onRemove} style={{ color: 'var(--danger)' }}>Удалить из друзей</button>
-      {menuErr && <div style={{ fontSize: 12, color: 'var(--danger)', padding: '4px 12px 8px' }}>{menuErr}</div>}
+    <div
+      ref={ref}
+      className={`friend-menu${dropUp ? ' up' : ''}`}
+      role="menu"
+      onClick={e => e.stopPropagation()}
+    >
+      <button role="menuitem" onClick={onPin}>
+        <MenuIco d={isPinned ? ICON.unpin : ICON.pin} />
+        {isPinned ? 'Открепить' : 'Закрепить'}
+      </button>
+      <button role="menuitem" onClick={onMute}>
+        <MenuIco d={isMuted ? ICON.unmute : ICON.mute} />
+        {isMuted ? 'Включить уведомления' : 'Заглушить'}
+      </button>
+      <button role="menuitem" className="danger" onClick={onRemove}>
+        <MenuIco d={ICON.remove} />
+        Удалить из друзей
+      </button>
+      {menuErr && <div className="friend-menu-err">{menuErr}</div>}
     </div>
   )
 }
@@ -77,6 +110,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const [query, setQuery] = useState('')
   const [chatFriend, setChatFriend] = useState(null)
   const [openMenu, setOpenMenu] = useState(null) // friend.id with open menu
+  const [dropUp, setDropUp] = useState(false)    // раскрывать меню вверх
   const [menuErr, setMenuErr] = useState(null)
   const [pinned, setPinned] = useState(getPinned)
   const [muted, setMuted] = useState(getMuted)
@@ -318,12 +352,16 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
 
             {/* ⋯ кнопка */}
             <button
-              className="iconbtn"
-              style={{
-                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                width: 34, height: 34, background: 'transparent', border: 'none',
+              className={`friend-more${isMenuOpen ? ' on' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuErr(null)
+                // Если до низа экрана меньше его высоты — раскрываем вверх,
+                // иначе у последних друзей в списке меню уезжало за край.
+                const r = e.currentTarget.getBoundingClientRect()
+                setDropUp(window.innerHeight - r.bottom < 210)
+                setOpenMenu(isMenuOpen ? null : f.id)
               }}
-              onClick={(e) => { e.stopPropagation(); setMenuErr(null); setOpenMenu(isMenuOpen ? null : f.id) }}
               aria-label="Действия"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
@@ -334,10 +372,10 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
             {/* Dropdown меню */}
             {isMenuOpen && (
               <FriendMenu
-                friend={f}
                 isPinned={isPinned}
                 isMuted={isMuted}
                 menuErr={menuErr}
+                dropUp={dropUp}
                 onPin={() => handlePin(f.id)}
                 onMute={() => handleMute(f.id)}
                 onRemove={() => handleRemove(f.rowId)}
