@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo } from 
 import { useStore } from '../store.jsx'
 import {
   listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage,
-  markChatRead, deleteChatMessage, listFriendships,
+  markChatRead, listFriendships,
   markMessagesRead, subscribeToReadReceipts, hideMessageLocally,
   createTypingChannel, watchPresence, fetchLastSeen,
 } from '../lib/supabase.js'
@@ -10,7 +10,7 @@ import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { setActiveChat } from '../lib/notifications.js'
-import { MEAL_TYPES } from '../lib/foods.js'
+import { MEAL_TYPES, mealMeta } from '../lib/foods.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 
@@ -357,8 +357,11 @@ export default function ChatView({ friend, onClose }) {
     try {
       let imageUrl = m.image_url && !m.image_url.startsWith('blob:') ? m.image_url : null
       if (p.file) imageUrl = await uploadChatImage(myId, p.file)
+      // meal_ref и forwarded_name обязательно переносим: без них повтор
+      // упавшей карточки еды уходил пустым и сервер отклонял его всегда.
       const res = await sendChatMessage({
         sender: myId, recipient: friend.id, text: p.text, imageUrl,
+        mealRef: m.meal_ref, forwardedName: m.forwarded_name,
         replyTo: m.reply_to, replySnapshot: m.reply_snapshot,
       })
       if (res.error) throw new Error(res.error)
@@ -373,16 +376,14 @@ export default function ChatView({ friend, onClose }) {
     catch { flash('Не удалось скопировать') }
   }, [flash])
 
-  // «Удалить у меня» — прячем локально. Своё неотправленное (temp-) и своё
-  // отправленное чистим и в БД: для автора это ожидаемое поведение. Чужое
-  // сообщение только скрываем — у собеседника оно остаётся.
-  const doDeleteForMe = useCallback(async (m) => {
+  // «Удалить у меня» — ТОЛЬКО локальное скрытие, БД не трогаем. Раньше для
+  // своих сообщений вызывался deleteChatMessage, и строка исчезала у обоих —
+  // это поведение пункта «Удалить у всех», а не того, что написано на кнопке.
+  // temp-сообщений в БД нет, для них достаточно убрать из списка.
+  const doDeleteForMe = useCallback((m) => {
     setMessages((cur) => cur.filter((x) => x.id !== m.id))
-    const isTemp = String(m.id).startsWith('temp-')
-    if (isTemp) return
-    hideMessageLocally(m.id)
-    if (m.sender === myId) await deleteChatMessage(m.id)
-  }, [myId])
+    if (!String(m.id).startsWith('temp-')) hideMessageLocally(m.id)
+  }, [])
 
   // Очистить переписку у себя: прячем локально всё, что сейчас загружено.
   // У собеседника история остаётся — как «удалить у меня» для одного сообщения.
@@ -505,10 +506,14 @@ export default function ChatView({ friend, onClose }) {
           {loading ? (
             <div className="chat-state"><span className="chat-spinner" /></div>
           ) : messages.length === 0 ? (
-            <div className="chat-empty">
-              <div className="chat-empty-emoji">👋</div>
-              <p>Сообщений пока нет.<br />Напишите первым!</p>
-            </div>
+            // Заглушку прячем, пока собеседник печатает: иначе экран
+            // одновременно говорит «сообщений нет» и «Х печатает».
+            peerTyping ? null : (
+              <div className="chat-empty">
+                <div className="chat-empty-emoji">👋</div>
+                <p>Сообщений пока нет.<br />Напишите первым!</p>
+              </div>
+            )
           ) : (
             <MessageList
               messages={messages} myId={myId} friendName={friendName}
@@ -696,8 +701,13 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, on
           </button>
         )}
         {m.meal_ref && <MealRefCard meal={m.meal_ref} onOpen={onOpenMeal} />}
+        {/* Открытие блокируем, только пока фото не на сервере: при 'sending'
+            в href лежит blob:, при 'failed' грузить нечего. Проверка на любой
+            truthy status ловила и 'sent' — свежее фото не открывалось до
+            перезагрузки чата. */}
         {m.image_url && (
-          <a href={m.image_url} target="_blank" rel="noreferrer" className="msg-img-wrap" onClick={(e) => { if (status) e.preventDefault() }}>
+          <a href={m.image_url} target="_blank" rel="noreferrer" className="msg-img-wrap"
+             onClick={(e) => { if (status === 'sending' || status === 'failed') e.preventDefault() }}>
             <img src={m.image_url} alt="" className="msg-img" onLoad={onImgLoad} draggable={false} />
           </a>
         )}
@@ -705,7 +715,10 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, on
         <div className="msg-meta">
           <span className="msg-time">{timeShort(m.created_at)}</span>
           {mine && status === 'sending' && <span className="msg-tick sending"><ForkTick /></span>}
-          {mine && !status && (
+          {/* Доставленным считаем и status: undefined (пришло с сервера), и
+              'sent' (только что отправили). Проверка на !status пропускала
+              'sent', и вилка не появлялась до перезагрузки чата. */}
+          {mine && (!status || status === 'sent') && (
             <span className={`msg-tick${m.read_at ? ' read' : ''}`} title={m.read_at ? 'Прочитано' : 'Отправлено'}>
               <ForkTick />
             </span>
@@ -944,10 +957,13 @@ function MealPickerSheet({ onClose, onPick }) {
     .sort((a, b) => (a < b ? 1 : -1))
     .slice(0, 7)
 
+  // Группируем через mealMeta, а не строгим m.type === t.key: у старых записей
+  // type мог отсутствовать, и такие приёмы не попадали ни в одну группу —
+  // отправить их было невозможно. mealMeta уводит неизвестный тип в «Перекус».
   const groupsOf = (key) => {
     const meals = days[key]?.meals || []
     return MEAL_TYPES
-      .map((t) => ({ ...t, items: meals.filter((m) => m.type === t.key) }))
+      .map((t) => ({ ...t, items: meals.filter((m) => mealMeta(m.type).key === t.key) }))
       .filter((g) => g.items.length > 0)
   }
 
