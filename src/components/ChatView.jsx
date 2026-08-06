@@ -10,7 +10,7 @@ import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { setActiveChat } from '../lib/notifications.js'
-import { MEAL_TYPES, mealMeta } from '../lib/foods.js'
+import { getMealSections, foodsForMeal } from '../lib/meals.js'
 import { mealCardFromGroup, normalizeMealCard } from '../lib/mealCard.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
@@ -965,18 +965,18 @@ function MealPickerSheet({ onClose, onPick }) {
     .sort((a, b) => (a < b ? 1 : -1))
     .slice(0, 7)
 
-  // Группируем через mealMeta, а не строгим m.type === t.key: у старых записей
-  // type мог отсутствовать, и такие приёмы не попадали ни в одну группу —
-  // отправить их было невозможно. mealMeta уводит неизвестный тип в «Перекус».
+  // Секции берём из meals.js, а не группируем по legacy-полю type: иначе
+  // пользовательские приёмы («Второй завтрак», «После тренировки») и «Без
+  // категории» просто не появились бы в списке и их нельзя было бы отправить.
   const groupsOf = (key) => {
-    const meals = days[key]?.meals || []
-    return MEAL_TYPES
-      .map((t) => ({ ...t, items: meals.filter((m) => mealMeta(m.type).key === t.key) }))
+    const day = days[key]
+    return getMealSections(day)
+      .map((s) => ({ section: s, items: foodsForMeal(day, s.id) }))
       .filter((g) => g.items.length > 0)
   }
 
   const pick = (key, group) => {
-    onPick(mealCardFromGroup({ typeKey: group.key, date: key, meals: group.items }))
+    onPick(mealCardFromGroup({ section: group.section, date: key, meals: group.items }))
     close()
   }
 
@@ -999,10 +999,10 @@ function MealPickerSheet({ onClose, onPick }) {
               <div key={key} className="mealpick-day">
                 <div className="mealpick-daylabel">{dayLabel(key + 'T12:00:00')}</div>
                 {groupsOf(key).map((g) => (
-                  <button key={g.key} className="mealpick-row" onClick={() => pick(key, g)}>
-                    <span className="mealpick-emoji">{g.emoji}</span>
+                  <button key={g.section.id} className="mealpick-row" onClick={() => pick(key, g)}>
+                    <span className="mealpick-emoji">{g.section.emoji}</span>
                     <span className="mealpick-meta">
-                      <span className="mealpick-name">{g.label}</span>
+                      <span className="mealpick-name">{g.section.label}</span>
                       <span className="mealpick-sub">
                         {g.items.map((m) => m.name).join(', ')}
                       </span>

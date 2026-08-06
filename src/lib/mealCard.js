@@ -35,13 +35,16 @@ function itemOf(m) {
   }
 }
 
-// Целый приём пищи (весь завтрак/обед/…) одной карточкой.
-export function mealCardFromGroup({ typeKey, date, meals }) {
-  const meta = mealMeta(typeKey)
+// Целый приём пищи (весь завтрак/обед/своя секция) одной карточкой.
+// Название и эмодзи берём из секции (см. lib/meals.js): у пользовательских
+// приёмов вроде «После тренировки» своего типа нет, и вывод из legacy-поля
+// type превратил бы их в «Перекус».
+export function mealCardFromGroup({ section, typeKey, date, meals }) {
+  const meta = section || mealMeta(typeKey)
   const t = totalsOf(meals)
   return {
     v: 2,
-    type: meta.key,
+    type: meta.type ?? meta.key ?? null,
     label: meta.label,
     emoji: meta.emoji,
     date: date || null,
