@@ -11,6 +11,7 @@ import { useScrollLock } from '../lib/useScrollLock.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { setActiveChat } from '../lib/notifications.js'
 import { MEAL_TYPES, mealMeta } from '../lib/foods.js'
+import { mealCardFromGroup, normalizeMealCard } from '../lib/mealCard.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 
@@ -51,8 +52,7 @@ function lastSeenLabel(iso) {
 function previewOf(m) {
   if (m.text) return m.text
   if (m.image_url) return '📷 Фото'
-  // v2 хранит название приёма в label, старый формат — в name.
-  if (m.meal_ref) return '🍽 ' + (m.meal_ref.label || m.meal_ref.name || 'Блюдо')
+  if (m.meal_ref) return '🍽 ' + (normalizeMealCard(m.meal_ref)?.label || 'Блюдо')
   return ''
 }
 // Ссылки в тексте → кликабельные, остальное — как есть.
@@ -634,25 +634,20 @@ function TypingBubble({ name }) {
   )
 }
 
-// Карточка приёма пищи внутри пузыря. v2 — полная (продукты + БЖУ), карточки
-// без версии остались от прежнего формата пересылки: рисуем их компактно,
-// чтобы старые сообщения не сломались.
-function MealRefCard({ meal, onOpen }) {
-  const legacy = !meal.v
-  if (legacy) {
-    return (
-      <div className="msg-meal">
-        <span style={{ fontSize: 20 }}>{meal.emoji || '🍽'}</span>
-        <div style={{ minWidth: 0 }}>
-          <div className="msg-meal-name">{meal.name}</div>
-          <div className="msg-meal-kcal">{meal.kcal} ккал</div>
-        </div>
-      </div>
-    )
-  }
+// Карточка приёма пищи внутри пузыря. Формат один — v2; записи старого формата
+// поднимаются нормализатором, поэтому отдельной ветки отрисовки больше нет.
+function MealRefCard({ meal: raw, onOpen }) {
+  const meal = normalizeMealCard(raw)
+  if (!meal) return null
   const items = meal.items || []
   const shown = items.slice(0, 3)
   const rest = items.length - shown.length
+  // У поднятых старых записей макросов нет — строку БЖУ тогда не рисуем,
+  // иначе вместо чисел было бы «null Б».
+  const hasMacros = meal.protein != null || meal.fat != null || meal.carbs != null
+  // Там же единственный продукт совпадает с заголовком — список из одной
+  // строки, дублирующей название, выглядел бы ошибкой.
+  const listRedundant = items.length === 1 && items[0].name === meal.label
   return (
     <button className="mealcard" onClick={() => onOpen?.(meal)}>
       <div className="mealcard-head">
@@ -664,21 +659,25 @@ function MealRefCard({ meal, onOpen }) {
         <span className="mealcard-kcal">{meal.kcal}<span className="mealcard-kcal-u">ккал</span></span>
       </div>
 
-      <ul className="mealcard-items">
-        {shown.map((it, i) => (
-          <li key={i}>
-            <span className="mealcard-item-name">{it.emoji ? it.emoji + ' ' : ''}{it.name}</span>
-            {it.grams ? <span className="mealcard-item-g">{it.grams} {it.unit || 'г'}</span> : null}
-          </li>
-        ))}
-        {rest > 0 && <li className="mealcard-more">и ещё {rest}</li>}
-      </ul>
+      {!listRedundant && (
+        <ul className="mealcard-items">
+          {shown.map((it, i) => (
+            <li key={i}>
+              <span className="mealcard-item-name">{it.emoji ? it.emoji + ' ' : ''}{it.name}</span>
+              {it.grams ? <span className="mealcard-item-g">{it.grams} {it.unit || 'г'}</span> : null}
+            </li>
+          ))}
+          {rest > 0 && <li className="mealcard-more">и ещё {rest}</li>}
+        </ul>
+      )}
 
-      <div className="mealcard-macros">
-        <span><b>{meal.protein}</b> Б</span>
-        <span><b>{meal.fat}</b> Ж</span>
-        <span><b>{meal.carbs}</b> У</span>
-      </div>
+      {hasMacros && (
+        <div className="mealcard-macros">
+          <span><b>{meal.protein}</b> Б</span>
+          <span><b>{meal.fat}</b> Ж</span>
+          <span><b>{meal.carbs}</b> У</span>
+        </div>
+      )}
     </button>
   )
 }
@@ -894,14 +893,16 @@ const CTX_ACTIONS = [
 ]
 
 // ── подробный просмотр карточки еды (тап по карточке в сообщении) ─────────────
-function MealCardSheet({ meal, onClose }) {
+function MealCardSheet({ meal: raw, onClose }) {
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+  const meal = normalizeMealCard(raw)
   const items = meal.items || []
   const macros = [
     { key: 'protein', label: 'Белки', v: meal.protein },
     { key: 'fat', label: 'Жиры', v: meal.fat },
     { key: 'carbs', label: 'Углеводы', v: meal.carbs },
   ]
+  const hasMacros = macros.some((m) => m.v != null)
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 88 }}>
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
@@ -918,15 +919,20 @@ function MealCardSheet({ meal, onClose }) {
           </div>
         </div>
 
-        <div className="mealsheet-macros">
-          {macros.map((m) => (
-            <div key={m.key} className="mealsheet-macro">
-              <div className="mealsheet-macro-v">{m.v}<span>г</span></div>
-              <div className="mealsheet-macro-l">{m.label}</div>
-            </div>
-          ))}
-        </div>
+        {hasMacros && (
+          <div className="mealsheet-macros">
+            {macros.map((m) => (
+              <div key={m.key} className="mealsheet-macro">
+                <div className="mealsheet-macro-v">{m.v ?? 0}<span>г</span></div>
+                <div className="mealsheet-macro-l">{m.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
+        {/* У поднятых старых записей состав — это сам заголовок; секцию прячем. */}
+        {!(items.length === 1 && items[0].name === meal.label) && (
+        <>
         <div className="mealsheet-listlabel">Состав</div>
         <ul className="mealsheet-list">
           {items.map((it, i) => (
@@ -939,6 +945,8 @@ function MealCardSheet({ meal, onClose }) {
             </li>
           ))}
         </ul>
+        </>
+        )}
       </div>
     </div>
   )
@@ -968,31 +976,7 @@ function MealPickerSheet({ onClose, onPick }) {
   }
 
   const pick = (key, group) => {
-    const totals = group.items.reduce(
-      (a, m) => ({
-        kcal: a.kcal + (+m.kcal || 0),
-        protein: a.protein + (+m.protein || 0),
-        carbs: a.carbs + (+m.carbs || 0),
-        fat: a.fat + (+m.fat || 0),
-      }),
-      { kcal: 0, protein: 0, carbs: 0, fat: 0 },
-    )
-    onPick({
-      v: 2,                       // версия схемы: v1 (старые) рисуем прежним видом
-      type: group.key,
-      label: group.label,
-      emoji: group.emoji,
-      date: key,
-      items: group.items.map((m) => ({
-        name: m.name, emoji: m.emoji || null,
-        grams: m.grams ?? null, unit: m.unit || 'г',
-        kcal: Math.round(+m.kcal || 0),
-      })),
-      kcal: Math.round(totals.kcal),
-      protein: Math.round(totals.protein),
-      carbs: Math.round(totals.carbs),
-      fat: Math.round(totals.fat),
-    })
+    onPick(mealCardFromGroup({ typeKey: group.key, date: key, meals: group.items }))
     close()
   }
 

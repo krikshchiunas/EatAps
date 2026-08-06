@@ -949,17 +949,6 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 /* Forwarded label */
 .msg-forward { font-size: 12px; font-style: italic; opacity: 0.7; margin-bottom: 3px; }
 
-/* Meal reference card */
-.msg-meal {
-  display: flex; align-items: center; gap: 9px;
-  border-radius: 10px; padding: 7px 9px; margin-bottom: 5px;
-  border-left: 3px solid var(--primary);
-}
-.msg.mine .msg-meal   { background: var(--bubble-mine-soft); }
-.msg.theirs .msg-meal { background: var(--bubble-theirs-soft); }
-.msg-meal-name { font-weight: 600; font-size: 13px; }
-.msg-meal-kcal { font-size: 11px; opacity: 0.75; }
-
 /* ── «Печатает…» ── */
 .typing-row { animation: typing-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both; }
 @keyframes typing-in {

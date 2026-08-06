@@ -4,6 +4,7 @@ import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
 import { sumDay } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
+import { mealCardFromMeal } from '../lib/mealCard.js'
 import { Avatar } from './FriendsScreen.jsx'
 import { useStore } from '../store.jsx'
 
@@ -42,7 +43,7 @@ function DotsMenu({ onMute, onRemove, onClose }) {
 
 const QUICK_REACTIONS = ['👍', '❤️', '🔥', '😂', '😮', '💪']
 
-function MealReactSheet({ meal, friend, myId, onClose }) {
+function MealReactSheet({ meal, mealDate, friend, myId, onClose }) {
   const [picked, setPicked] = useState(null)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
@@ -58,7 +59,10 @@ function MealReactSheet({ meal, friend, myId, onClose }) {
       sender: myId,
       recipient: friend.id,
       text: message,
-      mealRef: { emoji: meal.emoji || '🍽️', name: meal.name, kcal: meal.kcal },
+      // Единый формат карточки (v2) — тот же, что у «отправить приём пищи».
+      // Раньше здесь строился плоский {name, emoji, kcal}, из-за чего в чате
+      // жили две несовместимые карточки и две ветки отрисовки.
+      mealRef: mealCardFromMeal(meal, mealDate),
     })
     setSending(false)
     if (res.error) { setErr(res.error); return }
@@ -360,6 +364,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
     {reactingMeal && (
       <MealReactSheet
         meal={reactingMeal}
+        mealDate={date}
         friend={friend}
         myId={myId}
         onClose={() => setReactingMeal(null)}
