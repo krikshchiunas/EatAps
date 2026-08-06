@@ -2,10 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
-import {
-  getMealSections, foodsForMeal, resolvedTime, newCustomSection,
-  effectiveMealId, stdId, STANDARD_TYPES, OTHER_ID,
-} from '../lib/meals.js'
+import { getMealSections, foodsForMeal, resolvedTime, newCustomSection } from '../lib/meals.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import MealSectionSheet from './MealSectionSheet.jsx'
 import Ring from './Ring.jsx'
@@ -13,7 +10,6 @@ import MacroBar from './MacroBar.jsx'
 
 const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
 const EASING = 'cubic-bezier(0.32, 0.72, 0, 1)'
-const STANDARD_IDS = new Set(STANDARD_TYPES.map(stdId))
 
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, onOpenStats, clipboard, setClipboard }) {
   const store = useStore()
@@ -280,22 +276,6 @@ function DayBody({
   const carbsLeft = carbGoal - totals.carbs
 
   const sections = getMealSections(day)
-  const yesterday = dayOf(addDays(date, -1))
-  const canRepeatYesterday = day.meals.length === 0 && yesterday.meals.length > 0
-
-  const repeatYesterday = () => {
-    for (const f of yesterday.meals) {
-      const id = effectiveMealId(f)
-      const targetId = STANDARD_IDS.has(id) ? id : OTHER_ID
-      addFood(date, {
-        mealId: targetId,
-        type: STANDARD_IDS.has(id) ? f.type : undefined,
-        name: f.name, emoji: f.emoji, cat: f.cat, grams: f.grams, unit: f.unit,
-        kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat,
-        sugar: f.sugar, satFat: f.satFat,
-      })
-    }
-  }
 
   return (
     <div className="day-body" style={interactive ? undefined : { pointerEvents: 'none' }}>
@@ -323,12 +303,6 @@ function DayBody({
         <div className="h2" style={{ fontSize: 17 }}>Приёмы пищи</div>
       </div>
 
-      {canRepeatYesterday && (
-        <button className="btn soft" style={{ height: 42, fontSize: 14, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} onClick={repeatYesterday}>
-          <span>↺</span><span>Повторить вчера ({yesterday.meals.length})</span>
-        </button>
-      )}
-
       {sections.map((section, i) => (
         <MealSectionCard
           key={section.id}
@@ -353,8 +327,8 @@ function DayBody({
       </button>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <div className="row gap16" style={{ alignItems: 'flex-start' }}>
-          <div style={{ flex: 1 }}>
+        <div className="row gap10" style={{ alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <MacroBar label="Белки" value={totals.protein} max={proteinGoal} />
             <SubMetricRow
               label="Белок выс. качества"
@@ -363,7 +337,7 @@ function DayBody({
               explain="Ориентировочная оценка качества источника белка (полноценность и усвояемость) — от 1 до 10 по типу продукта. Показан белок из продуктов с оценкой 7+ и его доля от общего белка. Оценка приблизительная, зависит от источника продукта — это не медицинский диагноз и не абсолютная оценка рациона."
             />
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <MacroBar label="Углеводы" value={totals.carbs} max={carbGoal} color="var(--accent)" />
             <SubMetricRow
               label="Сложные углеводы"
@@ -372,7 +346,7 @@ function DayBody({
               explain="Доля углеводов из круп, картофеля, бобовых и цельнозерновых продуктов — продуктовая классификация по типу продукта, а не медицинский показатель «полезных» углеводов. Сахар, сладости, десерты и напитки в неё не входят."
             />
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <MacroBar label="Жиры" value={totals.fat} max={fatGoal} color="var(--warn)" />
             <SubMetricRow
               label="Насыщ. жиры"
@@ -471,13 +445,11 @@ function MealSectionCard({
 function SubMetricRow({ label, valueText, sub, tone, explain }) {
   const [open, setOpen] = useState(false)
   return (
-    <div style={{ marginTop: 10 }}>
+    <div style={{ marginTop: 10, minWidth: 0 }}>
       <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', textAlign: 'left' }}>
-        <div className="row between" style={{ alignItems: 'baseline' }}>
-          <span style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 550 }}>{label}</span>
-          <span className="tabular" style={{ fontSize: 11.5, color: tone || 'var(--ink-3)' }}>{valueText}</span>
-        </div>
-        {sub && <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2 }}>{sub}</div>}
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+        <div className="tabular" style={{ fontSize: 11.5, color: tone || 'var(--ink-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{valueText}</div>
+        {sub && <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
       </button>
       {open && <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6, lineHeight: 1.4 }}>{explain}</p>}
     </div>

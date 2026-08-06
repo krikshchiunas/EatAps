@@ -279,7 +279,7 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 
 .row { display: flex; align-items: center; }
 .between { justify-content: space-between; }
-.gap8 { gap: 8px; } .gap12 { gap: 12px; } .gap16 { gap: 16px; }
+.gap8 { gap: 8px; } .gap10 { gap: 10px; } .gap12 { gap: 12px; } .gap16 { gap: 16px; }
 .wrap { flex-wrap: wrap; }
 .stack > * + * { margin-top: 14px; }
 
