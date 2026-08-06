@@ -939,7 +939,7 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .chat-overlay .chat-textarea::selection      { background: var(--primary-weak) !important; }
 .chat-overlay .chat-textarea::-moz-selection { background: var(--primary-weak) !important; }
 
-/* ── Message row (swipe-to-reply container) ── */
+/* ── Message row (swipe-to-open-menu container) ── */
 .msg-row {
   position: relative; display: flex;
   margin-top: 9px;
@@ -947,7 +947,7 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .msg-row.grouped { margin-top: 2px; }
 .msg-row.mine    { justify-content: flex-end; }
 .msg-row.theirs  { justify-content: flex-start; }
-.msg-reply-hint {
+.msg-action-hint {
   position: absolute; right: 8px; top: 50%;
   transform: translateY(-50%) scale(0.5);
   width: 34px; height: 34px; border-radius: 50%;
@@ -956,7 +956,7 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   opacity: 0; transition: opacity 0.15s ease, transform 0.15s ease;
   pointer-events: none;
 }
-.msg-row.will-reply .msg-reply-hint { opacity: 1; transform: translateY(-50%) scale(1); }
+.msg-row.will-open-menu .msg-action-hint { opacity: 1; transform: translateY(-50%) scale(1); }
 
 /* Подсветка на время контекст-меню. Ставится/снимается ТОЛЬКО эффектом от
    menuMsg — см. ChatView, иначе состояние залипало после закрытия шторки. */

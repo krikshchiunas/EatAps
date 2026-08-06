@@ -423,62 +423,57 @@ export default function ChatView({ friend, onClose }) {
     flash('Переписка очищена у вас')
   }, [flash])
 
-  // ── delegated gestures on the list: swipe-left → reply, long-press → menu ──
+  // ── delegated gestures on the list: свайп влево — единственный способ
+  // открыть меню действий. Долгое нажатие раньше открывало то же меню по
+  // таймеру — убрано полностью: при зажатии сообщения теперь не происходит
+  // ровно ничего (ни меню, ни подсветки, ни haptic). contextmenu всё ещё
+  // блокируем — это отдельно гасит нативное меню ОС (share sheet на iOS,
+  // «сохранить изображение» на Android), которое к нашему жесту отношения
+  // не имеет и не отключается вместе с ним.
   useEffect(() => {
     const el = listRef.current
     if (!el) return
-    let g = null, lpTimer = null
+    let g = null
 
     const rowOf = (t) => t.closest?.('[data-mid]')
-    const clearLp = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null } }
 
     const onStart = (e) => {
       const row = rowOf(e.target)
       if (!row) { g = null; return }
       const t = e.touches[0]
-      g = { row, bubble: row.querySelector('.msg'), mid: row.dataset.mid, x: t.clientX, y: t.clientY, decided: false, mode: null, moved: false }
-      clearLp()
-      lpTimer = setTimeout(() => {
-        if (g && !g.moved) {
-          const m = messagesRef.current.find((x) => String(x.id) === g.mid)
-          if (m) { haptic(18); row.classList.remove('swiping', 'will-reply'); if (g.bubble) g.bubble.style.transform = ''; setMenuMsg(m); g = null }
-        }
-      }, 480)
+      g = { row, bubble: row.querySelector('.msg'), mid: row.dataset.mid, x: t.clientX, y: t.clientY, decided: false, mode: null }
     }
     const onMove = (e) => {
       if (!g) return
       const t = e.touches[0]
       const dx = t.clientX - g.x, dy = t.clientY - g.y
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) g.moved = true
       if (!g.decided) {
         if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
         // Владеем только явным горизонтальным ВЛЕВО. Иначе — скролл / back-жест.
         g.mode = (dx < 0 && Math.abs(dx) > Math.abs(dy) * 1.3) ? 'swipe' : 'none'
         g.decided = true
-        if (g.mode !== 'swipe') { clearLp(); g = null; return }
-        clearLp()
+        if (g.mode !== 'swipe') { g = null; return }
         g.row.classList.add('swiping')
       }
       if (g.mode === 'swipe' && g.bubble) {
         e.preventDefault()
         const off = Math.max(-84, dx * 0.9) // тянем влево с лёгким сопротивлением
         g.bubble.style.transform = `translateX(${off}px)`
-        g.row.classList.toggle('will-reply', off <= -56)
+        g.row.classList.toggle('will-open-menu', off <= -56)
       }
     }
     const onEnd = () => {
-      clearLp()
       if (!g) return
       const row = g.row, bubble = g.bubble, mid = g.mid, mode = g.mode
       g = null
       if (mode !== 'swipe') return
-      const triggered = row.classList.contains('will-reply')
-      row.classList.remove('swiping', 'will-reply')
+      const triggered = row.classList.contains('will-open-menu')
+      row.classList.remove('swiping', 'will-open-menu')
       if (bubble) bubble.style.transform = ''
       if (triggered) {
         haptic(14)
         const m = messagesRef.current.find((x) => String(x.id) === mid)
-        if (m) startReply(m)
+        if (m) setMenuMsg(m)
       }
     }
 
@@ -489,14 +484,13 @@ export default function ChatView({ friend, onClose }) {
     const noCtx = (e) => e.preventDefault()
     el.addEventListener('contextmenu', noCtx)
     return () => {
-      clearLp()
       el.removeEventListener('touchstart', onStart)
       el.removeEventListener('touchmove', onMove)
       el.removeEventListener('touchend', onEnd)
       el.removeEventListener('touchcancel', onEnd)
       el.removeEventListener('contextmenu', noCtx)
     }
-  }, [startReply])
+  }, [])
 
   return (
     <>
@@ -725,8 +719,13 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, on
   const status = m.status // sending | failed | undefined(=sent)
   return (
     <div className={`msg-row ${mine ? 'mine' : 'theirs'}${grouped ? ' grouped' : ''}`} data-mid={m.id}>
-      <span className="msg-reply-hint" aria-hidden>
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14L4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 5 5v3" /></svg>
+      {/* Иконка «⋯» — свайп влево теперь открывает меню действий целиком
+          (Ответить/Копировать/Переслать/Удалить у меня), а не сразу отвечает,
+          поэтому стрелка ответа заменена на многоточие. */}
+      <span className="msg-action-hint" aria-hidden>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+          <circle cx="6" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="18" cy="12" r="1.8" />
+        </svg>
       </span>
       <div className={`msg ${mine ? 'mine' : 'theirs'}${tail ? ' tail' : ''}`}>
         {m.forwarded_name && (
