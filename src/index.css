@@ -892,6 +892,17 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   box-shadow: none;
 }
 
+/* Лента целиком невыделяемая. Раньше user-select: none стоял только на .msg,
+   и при долгом нажатии браузер всё равно успевал начать выделение — текст
+   подсвечивался синим. Копирование живёт в контекст-меню, выделение не нужно. */
+.chat-list, .chat-list * {
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+}
+/* Страховка: если выделение всё же возникло (iOS умеет), оно невидимо. */
+.chat-list ::selection      { background: transparent; }
+.chat-list ::-moz-selection { background: transparent; }
+
 /* ── Message row (swipe-to-reply container) ── */
 .msg-row {
   position: relative; display: flex;
@@ -1198,23 +1209,49 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 }
 
 /* ── Context sheet (long-press) ── */
-.ctx-sheet { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+.ctx-sheet { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
 .ctx-preview {
-  background: var(--surface-2); border-radius: 12px;
-  padding: 12px 14px; margin-bottom: 12px;
-  font-size: 14px; color: var(--ink-2);
+  background: var(--surface-2); border-radius: 14px;
+  border-left: 3px solid var(--primary);
+  padding: 11px 14px; margin-bottom: 10px;
+  font-size: 14px; color: var(--ink-2); line-height: 1.45;
   max-height: 88px; overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
 }
+
+/* Пункты — «пилюли» с иконками, как в меню друга: одна визуальная логика
+   для всех меню приложения. Разделителей между строками нет. */
 .ctx-item {
   width: 100%; text-align: left;
-  display: flex; align-items: center; gap: 14px;
-  padding: 15px 6px; font-size: 16px; color: var(--ink);
-  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 13px;
+  padding: 13px 12px; border-radius: 14px;
+  font-size: 16px; font-weight: 500; color: var(--ink);
+  transition: background 0.14s ease, transform 0.1s ease;
+  /* Лесенка: каждый следующий пункт стартует чуть позже — эффект всплытия. */
+  animation: ctx-item-in 0.19s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 26ms + 40ms);
 }
-.ctx-item:last-child { border-bottom: none; }
-.ctx-item:active { background: var(--surface-2); }
-.ctx-item.danger { color: var(--danger); }
+@keyframes ctx-item-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+.ctx-item + .ctx-item { margin-top: 2px; }
+.ctx-item svg { flex: 0 0 auto; color: var(--ink-3); }
+.ctx-item:active { background: var(--primary-weak); transform: scale(0.985); }
+.ctx-item:active svg { color: var(--primary); }
+
+.ctx-item.danger { color: var(--danger); margin-top: 6px; position: relative; }
+.ctx-item.danger svg { color: var(--danger); }
+.ctx-item.danger::before {
+  content: ''; position: absolute; left: 12px; right: 12px; top: -4px;
+  height: 1px; background: var(--border);
+}
+.ctx-item.danger:active { background: rgba(192, 104, 78, 0.12); }
+.ctx-item.danger:active svg { color: var(--danger); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ctx-item { animation: none; }
+}
 
 /* ── Выбор приёма пищи для отправки ── */
 .mealpick-scroll { max-height: 56vh; overflow-y: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; padding: 0 4px; }

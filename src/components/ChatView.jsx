@@ -1074,17 +1074,21 @@ function ChatMenuSheet({ onClose, ...handlers }) {
 }
 
 function ContextSheet({ m, mine, onClose, ...handlers }) {
-  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+  // Открывается по долгому нажатию — обычные 340 мс тут читаются как лаг.
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose, { openMs: 190 })
   const ctx = { m, mine }
+  const items = CTX_ACTIONS.filter((a) => !a.show || a.show(ctx))
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 80 }}>
       <div className="sheet ctx-sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="ctx-preview">{previewOf(m)}</div>
-        {CTX_ACTIONS.filter((a) => !a.show || a.show(ctx)).map((a) => (
+        {items.map((a, i) => (
           <button
             key={a.key}
             className={`ctx-item${a.danger ? ' danger' : ''}`}
+            // Небольшая лесенка: пункты «всплывают» следом за шторкой.
+            style={{ '--i': i }}
             onClick={() => { a.run(handlers); close() }}
           >
             <Ico d={a.icon} /> {a.label}

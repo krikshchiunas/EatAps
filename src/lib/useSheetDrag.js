@@ -20,7 +20,10 @@ import { useScrollLock } from './useScrollLock.js'
 const EASING = 'cubic-bezier(0.22, 1, 0.36, 1)'
 const OPEN_MS = 340
 
-export function useSheetDrag(onClose, { closeDist = 110, closeVel = 0.4 } = {}) {
+// openMs — длительность выезда. По умолчанию общая для приложения (OPEN_MS);
+// контекст-меню сообщения передаёт меньшее значение: оно открывается по долгому
+// нажатию, и обычная скорость там ощущается как задержка.
+export function useSheetDrag(onClose, { closeDist = 110, closeVel = 0.4, openMs = OPEN_MS } = {}) {
   useScrollLock()
   const sheetRef = useRef(null)
   const backRef = useRef(null)
@@ -89,9 +92,9 @@ export function useSheetDrag(onClose, { closeDist = 110, closeVel = 0.4 } = {}) 
     s.style.transform = `translate3d(0,${h}px,0)`
     if (b) b.style.opacity = '0'
     posRef.current = h
-    const a = s.animate([{ transform: `translate3d(0,${h}px,0)` }, { transform: 'translate3d(0,0,0)' }], { duration: OPEN_MS, easing: EASING, fill: 'forwards' })
+    const a = s.animate([{ transform: `translate3d(0,${h}px,0)` }, { transform: 'translate3d(0,0,0)' }], { duration: openMs, easing: EASING, fill: 'forwards' })
     let ba
-    if (b) ba = b.animate([{ opacity: 0 }, { opacity: 1 }], { duration: OPEN_MS, easing: EASING, fill: 'forwards' })
+    if (b) ba = b.animate([{ opacity: 0 }, { opacity: 1 }], { duration: openMs, easing: EASING, fill: 'forwards' })
     a.onfinish = () => {
       s.style.transform = 'translate3d(0,0,0)'
       if (b) b.style.opacity = '1'
