@@ -160,16 +160,26 @@ export function startScheduler(getState) {
 let activeChatUserId = null
 export function setActiveChat(userId) { activeChatUserId = userId || null }
 
-// Показать уведомление о новом сообщении. Уникальный tag на каждое сообщение —
-// чтобы новые не затирали старые в шторке уведомлений. Заголовок — имя друга,
-// иконка — его аватарка (если есть).
-export function notifyIncomingMessage({ senderId, senderName, senderAvatar, text, messageId }) {
+// Русская плюрализация: 1 сообщение, 2 сообщения, 5 сообщений.
+function pluralize(n, one, few, many) {
+  const n100 = n % 100
+  if (n100 >= 11 && n100 <= 14) return many
+  const n10 = n % 10
+  if (n10 === 1) return one
+  if (n10 >= 2 && n10 <= 4) return few
+  return many
+}
+
+// Пуш о новых сообщениях. Один тег на отправителя — при новом сообщении
+// уведомление обновляется, счётчик растёт, а не появляется отдельная плашка.
+// Заголовок всегда «EatAps», в теле — имя и число, иконка — аватарка отправителя.
+export function notifyIncomingMessage({ senderId, senderName, senderAvatar, unreadCount, messageId }) {
   if (Notification.permission !== 'granted') return
   if (senderId && senderId === activeChatUserId) return
-  const body = text?.trim()
-    ? text.length > 120 ? text.slice(0, 117) + '…' : text
-    : '📷 Фото'
-  const tag = messageId ? `eataps-chat-${messageId}` : `eataps-chat-${Date.now()}`
-  const title = (senderName && senderName.trim()) || 'Новое сообщение'
-  show(title, body, tag, senderAvatar || null)
+  const n = Math.max(1, Number(unreadCount) || 1)
+  const name = (senderName && senderName.trim()) || 'Пользователь'
+  const word = pluralize(n, 'сообщение', 'сообщения', 'сообщений')
+  const body = `${name} отправил вам ${n} ${word}`
+  const tag = senderId ? `eataps-chat-${senderId}` : `eataps-chat-${messageId || Date.now()}`
+  show('EatAps', body, tag, senderAvatar || null)
 }

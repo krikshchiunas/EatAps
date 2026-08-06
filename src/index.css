@@ -19,6 +19,16 @@
   --shadow-card: 0 1px 2px rgba(31, 49, 43, 0.04), 0 8px 24px rgba(31, 49, 43, 0.05);
   --shadow-float: 0 6px 20px rgba(31, 49, 43, 0.16);
   --nav-bg: rgba(255, 255, 255, 0.86);
+
+  /* Чат: морской синий из логотипа — им горит «вилка прочтения». */
+  --sea: #2554B0;
+  /* Пузыри: мои — светло-серые, собеседника — тёмные (почти чёрные). */
+  --bubble-mine: #E7EBEA;
+  --bubble-mine-ink: #1B2A25;
+  --bubble-mine-soft: rgba(31, 49, 43, 0.07);
+  --bubble-theirs: #2B3330;
+  --bubble-theirs-ink: #EFF3F1;
+  --bubble-theirs-soft: rgba(255, 255, 255, 0.10);
   color-scheme: light;
 }
 
@@ -43,6 +53,16 @@
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 10px 28px rgba(0, 0, 0, 0.28);
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.44);
   --nav-bg: rgba(38, 46, 40, 0.86);
+
+  /* Тёмная тема: синий осветляем — на тёмном #2554B0 «проваливается». */
+  --sea: #7BA6F0;
+  /* Мои остаются светлыми (как в светлой теме), чужие — темнее фона чата. */
+  --bubble-mine: #DCE3E0;
+  --bubble-mine-ink: #16201C;
+  --bubble-mine-soft: rgba(22, 32, 28, 0.09);
+  --bubble-theirs: #121815;
+  --bubble-theirs-ink: #E6EDE7;
+  --bubble-theirs-soft: rgba(255, 255, 255, 0.09);
   color-scheme: dark;
 }
 
@@ -717,30 +737,65 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 
 /* ── Header ── */
 .chat-header {
-  display: flex; align-items: center; gap: 6px;
-  padding: calc(env(safe-area-inset-top) + 8px) 10px 8px;
+  display: flex; align-items: center; gap: 2px;
+  padding: calc(env(safe-area-inset-top) + 7px) 6px 7px;
   background: var(--nav-bg);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(22px);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
+  animation: chat-head-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.chat-back {
+@keyframes chat-head-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.chat-back, .chat-more {
   width: 40px; height: 40px; flex: 0 0 auto;
-  display: grid; place-items: center; color: var(--primary);
-  border-radius: 12px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  transition: background 0.15s ease, transform 0.12s ease;
 }
-.chat-back:active { background: var(--primary-weak); }
+.chat-back { color: var(--primary); }
+.chat-more { color: var(--ink-2); }
+.chat-back:active, .chat-more:active { background: var(--primary-weak); transform: scale(0.92); }
+
 .chat-peer {
-  display: flex; align-items: center; gap: 10px;
-  min-width: 0; flex: 1; text-align: left; padding: 4px 6px; border-radius: 12px;
+  display: flex; align-items: center; gap: 11px;
+  min-width: 0; flex: 1; text-align: left;
+  padding: 3px 6px; border-radius: 14px;
+  transition: background 0.15s ease;
 }
 .chat-peer:active { background: var(--surface-2); }
+/* Тонкое кольцо вокруг аватара — читается и на светлом, и на тёмном хедере. */
+.chat-peer-ava {
+  flex: 0 0 auto; display: grid; place-items: center;
+  border-radius: 50%; box-shadow: 0 0 0 2px var(--primary-weak);
+  position: relative;
+}
+/* Точка «в сети». Обводка цветом шапки, иначе на тёмном аватаре сливается. */
+.chat-peer-ava.online::after {
+  content: ''; position: absolute; right: -1px; bottom: -1px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #34C759; border: 2.5px solid var(--surface);
+  animation: online-pop 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+[data-theme="dark"] .chat-peer-ava.online::after { border-color: #262E28; }
+@keyframes online-pop { from { transform: scale(0); } to { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .chat-peer-ava.online::after { animation: none; } }
+
+.chat-peer-sub.online { color: var(--primary-strong); font-weight: 600; }
+.chat-peer-sub.typing { color: var(--primary-strong); font-weight: 600; }
+.chat-peer-meta { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .chat-peer-name {
-  font-weight: 650; font-size: 16px; letter-spacing: -0.2px;
+  font-weight: 680; font-size: 16.5px; letter-spacing: -0.25px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.chat-peer-sub { font-size: 12px; color: var(--ink-3); margin-top: -1px; }
+.chat-peer-sub {
+  font-size: 12px; color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* ── Message list ── */
 .chat-list {
@@ -767,17 +822,24 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .chat-empty-emoji { font-size: 40px; }
 .chat-empty p { font-size: 14.5px; line-height: 1.5; }
 
-/* Date separator — floating pill */
+/* Date separator — центрированная пилюля с зелёной обводкой */
 .chat-day {
-  align-self: center;
-  font-size: 12px; font-weight: 600; letter-spacing: 0.1px;
-  color: #fff; background: rgba(0, 0, 0, 0.30);
-  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-  padding: 4px 12px; border-radius: 999px;
-  margin: 14px auto 8px;
+  display: block; width: fit-content;
+  margin: 20px auto 12px;
+  font-size: 12px; font-weight: 650; letter-spacing: 0.2px;
+  color: var(--primary-strong);
+  background: var(--surface);
+  border: 1.5px solid var(--primary);
+  padding: 5px 14px; border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(31, 49, 43, 0.06);
   pointer-events: none; user-select: none;
 }
-[data-theme="dark"] .chat-day { background: rgba(255,255,255,0.13); color: var(--ink-2); }
+[data-theme="dark"] .chat-day {
+  color: var(--primary-strong);
+  background: var(--surface);
+  border-color: var(--primary);
+  box-shadow: none;
+}
 
 /* ── Message row (swipe-to-reply container) ── */
 .msg-row {
@@ -798,47 +860,76 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 }
 .msg-row.will-reply .msg-reply-hint { opacity: 1; transform: translateY(-50%) scale(1); }
 
+/* Подсветка на время контекст-меню. Ставится/снимается ТОЛЬКО эффектом от
+   menuMsg — см. ChatView, иначе состояние залипало после закрытия шторки. */
+.msg-row.selected .msg {
+  transform: scale(1.02);
+  box-shadow: 0 0 0 2.5px var(--primary), 0 4px 14px rgba(31, 49, 43, 0.16);
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-row.selected .msg { transform: none; }
+}
+
 /* ── Bubble ── */
 .msg {
-  max-width: 78%;
-  padding: 7px 11px 6px;
+  max-width: 76%;
+  padding: 10px 14px 8px;
   position: relative;
   word-break: break-word; overflow-wrap: anywhere;
   -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none;
   transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: msg-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .msg { animation: none; } }
 .msg-row.swiping .msg { transition: none; }
-.msg.mine {
-  background: var(--primary); color: #fff;
-  border-radius: 18px 18px 16px 18px;
-  box-shadow: 0 1px 1.5px rgba(0,0,0,0.14);
-}
-.msg.mine.tail { border-radius: 18px 18px 5px 18px; }
-[data-theme="dark"] .msg.mine { color: #171D19; }
-.msg.theirs {
-  background: var(--surface); color: var(--ink);
-  border: 1px solid var(--border);
-  border-radius: 18px 18px 18px 16px;
-  box-shadow: 0 1px 1.5px rgba(0,0,0,0.05);
-}
-.msg.theirs.tail { border-radius: 18px 18px 18px 5px; }
 
-.msg-text { font-size: 15px; line-height: 1.4; white-space: pre-wrap; }
+.msg.mine {
+  background: var(--bubble-mine); color: var(--bubble-mine-ink);
+  border-radius: 20px 20px 18px 20px;
+  box-shadow: 0 1px 2px rgba(31, 49, 43, 0.08);
+}
+.msg.mine.tail { border-radius: 20px 20px 6px 20px; }
+
+.msg.theirs {
+  background: var(--bubble-theirs); color: var(--bubble-theirs-ink);
+  border-radius: 20px 20px 20px 18px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.msg.theirs.tail { border-radius: 20px 20px 20px 6px; }
+
+.msg-text { font-size: 15.5px; line-height: 1.45; white-space: pre-wrap; }
 .msg-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.msg.theirs .msg-link { color: var(--primary-strong); }
+.msg.mine .msg-link   { color: var(--sea); }
+.msg.theirs .msg-link { color: #9DC0F5; }
 
 .msg-meta {
   display: flex; justify-content: flex-end; align-items: center;
-  gap: 4px; margin-top: 2px; height: 13px;
+  gap: 5px; margin-top: 4px; height: 14px;
 }
-.msg-time { font-size: 11px; opacity: 0.6; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.msg-tick { font-size: 10px; opacity: 0.6; }
+.msg-time { font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Вилка прочтения: серая = доставлено, морская синяя = собеседник прочитал. */
+.msg-tick {
+  display: inline-flex; align-items: center;
+  color: currentColor; opacity: 0.42;
+  transition: color 0.28s ease, opacity 0.28s ease;
+}
+.msg-tick.sending { opacity: 0.25; }
+.msg-tick.read { color: var(--sea); opacity: 1; }
+.msg.theirs .msg-tick.read { color: #7BA6F0; }
+@media (prefers-reduced-motion: reduce) { .msg-tick { transition: none; } }
+
 .msg-fail {
-  font-size: 11px; font-weight: 600; color: #fff;
-  background: rgba(0,0,0,0.18); padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+  color: var(--danger); background: rgba(192, 104, 78, 0.16);
+  padding: 1px 7px; border-radius: 999px;
 }
-.msg.theirs .msg-fail { color: var(--danger); background: rgba(192,104,78,0.14); }
+.msg.theirs .msg-fail { color: #F0A88E; background: rgba(240, 168, 142, 0.16); }
 
 /* Reply quote inside bubble */
 .msg-quote {
@@ -847,8 +938,8 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   border-radius: 8px; padding: 3px 9px; margin-bottom: 5px;
   border-left: 3px solid;
 }
-.msg.mine .msg-quote { background: rgba(255,255,255,0.16); border-left-color: rgba(255,255,255,0.75); }
-.msg.theirs .msg-quote { background: var(--surface-2); border-left-color: var(--primary); }
+.msg.mine .msg-quote   { background: var(--bubble-mine-soft);   border-left-color: var(--primary); }
+.msg.theirs .msg-quote { background: var(--bubble-theirs-soft); border-left-color: var(--primary); }
 .msg-quote-name { font-size: 12px; font-weight: 700; }
 .msg-quote-text {
   font-size: 12.5px; opacity: 0.85; max-width: 220px;
@@ -864,10 +955,85 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   border-radius: 10px; padding: 7px 9px; margin-bottom: 5px;
   border-left: 3px solid var(--primary);
 }
-.msg.mine .msg-meal { background: rgba(255,255,255,0.15); }
-.msg.theirs .msg-meal { background: var(--surface-2); }
+.msg.mine .msg-meal   { background: var(--bubble-mine-soft); }
+.msg.theirs .msg-meal { background: var(--bubble-theirs-soft); }
 .msg-meal-name { font-weight: 600; font-size: 13px; }
 .msg-meal-kcal { font-size: 11px; opacity: 0.75; }
+
+/* ── «Печатает…» ── */
+.typing-row { animation: typing-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes typing-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.typing-bubble {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; animation: none;
+}
+.typing-name { font-size: 13px; opacity: 0.75; }
+.typing-dots { display: inline-flex; align-items: center; gap: 3px; }
+.typing-dots i {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor; opacity: 0.5;
+  animation: typing-dot 1.15s infinite ease-in-out;
+}
+.typing-dots i:nth-child(2) { animation-delay: 0.16s; }
+.typing-dots i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes typing-dot {
+  0%, 60%, 100% { transform: translateY(0);    opacity: 0.4; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-row { animation: none; }
+  .typing-dots i { animation: none; opacity: 0.6; }
+}
+
+/* ── Карточка приёма пищи в сообщении (meal_ref v2) ── */
+.mealcard {
+  display: block; width: 100%; text-align: left;
+  border-radius: 14px; padding: 10px 11px 9px; margin-bottom: 6px;
+  background: var(--bubble-theirs-soft);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 3px solid var(--primary);
+  color: inherit;
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+.msg.mine .mealcard {
+  background: var(--bubble-mine-soft);
+  border-color: rgba(31, 49, 43, 0.10);
+  border-left-color: var(--primary);
+}
+.mealcard:active { transform: scale(0.985); }
+
+.mealcard-head { display: flex; align-items: center; gap: 9px; }
+.mealcard-emoji { font-size: 22px; line-height: 1; flex: 0 0 auto; }
+.mealcard-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.mealcard-label { font-weight: 700; font-size: 14px; letter-spacing: -0.1px; }
+.mealcard-when { font-size: 11.5px; opacity: 0.62; }
+.mealcard-kcal {
+  flex: 0 0 auto; font-weight: 750; font-size: 16px;
+  font-variant-numeric: tabular-nums; color: var(--primary);
+  display: flex; align-items: baseline; gap: 2px;
+}
+.msg.theirs .mealcard-kcal { color: #9DBBA3; }
+.mealcard-kcal-u { font-size: 10.5px; font-weight: 600; opacity: 0.7; }
+
+.mealcard-items { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 3px; }
+.mealcard-items li {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12.5px; opacity: 0.86;
+}
+.mealcard-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mealcard-item-g { flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: 0.72; font-size: 11.5px; }
+.mealcard-more { font-size: 11.5px; opacity: 0.6; font-style: italic; }
+
+.mealcard-macros {
+  display: flex; gap: 12px; margin-top: 9px;
+  padding-top: 8px; border-top: 1px solid currentColor;
+  border-top-color: color-mix(in srgb, currentColor 14%, transparent);
+  font-size: 12px; opacity: 0.9;
+}
+.mealcard-macros b { font-weight: 750; font-variant-numeric: tabular-nums; }
 
 /* Photo */
 .msg-img-wrap { display: block; margin: -1px -3px 4px; }
@@ -905,26 +1071,63 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   border-top: 1px solid var(--border);
 }
 .chat-composer-row { display: flex; align-items: flex-end; gap: 8px; }
-.chat-attach, .chat-send {
-  width: 40px; height: 40px; flex: 0 0 auto;
-  display: grid; place-items: center; border-radius: 50%;
+
+/* Поле-«пилюля». Кнопки вложений лежат ВНУТРИ него: добавление новых
+   (приём пищи, файл, голосовое) расширяет .chat-tools и не трогает раскладку. */
+.chat-inputwrap {
+  flex: 1; min-width: 0;
+  display: flex; align-items: flex-end; gap: 2px;
+  padding: 4px 4px 4px 6px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: 22px;
+  transition: border-color 0.18s ease, background 0.18s ease;
 }
-.chat-attach { color: var(--ink-3); }
-.chat-attach:active { background: var(--surface-2); }
-.chat-send { color: var(--ink-3); transition: color 0.15s ease, background 0.15s ease, transform 0.12s ease; }
-.chat-send.on { color: #fff; background: var(--primary); }
-[data-theme="dark"] .chat-send.on { color: #171D19; }
-.chat-send.on:active { transform: scale(0.9); }
-.chat-send:disabled { opacity: 1; }
+.chat-inputwrap:focus-within {
+  border-color: var(--primary);
+  background: var(--surface);
+}
+.chat-tools { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.chat-tool {
+  width: 34px; height: 34px; flex: 0 0 auto;
+  display: grid; place-items: center; border-radius: 50%;
+  color: var(--ink-3);
+  transition: color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+}
+.chat-tool:active { background: var(--primary-weak); color: var(--primary); transform: scale(0.9); }
+
 .chat-textarea {
   flex: 1; min-width: 0;
-  min-height: 40px; max-height: 120px;
-  padding: 9px 14px; border-radius: 20px;
-  background: var(--surface-2); border: 1px solid var(--border);
-  font-size: 15px; line-height: 1.35; color: var(--ink);
+  min-height: 34px; max-height: 132px;
+  padding: 7px 8px 7px 4px;
+  background: transparent; border: none;
+  font-size: 15.5px; line-height: 1.4; color: var(--ink);
   resize: none; overflow-y: auto;
+  transition: height 0.12s ease;
 }
-.chat-textarea:focus { outline: none; border-color: var(--primary); background: var(--surface); }
+.chat-textarea:focus { outline: none; }
+.chat-textarea::placeholder { color: var(--ink-3); }
+
+/* Кнопка отправки: серая и «сжатая», пока нечего слать — вырастает при вводе. */
+.chat-send {
+  width: 42px; height: 42px; flex: 0 0 auto;
+  display: grid; place-items: center; border-radius: 50%;
+  color: var(--ink-3); background: var(--surface-2);
+  transform: scale(0.86);
+  transition: color 0.18s ease, background 0.18s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.chat-send.on {
+  color: #fff; background: var(--primary);
+  transform: scale(1);
+  box-shadow: 0 2px 8px rgba(79, 131, 117, 0.35);
+}
+[data-theme="dark"] .chat-send.on { color: #171D19; box-shadow: none; }
+.chat-send.on:active { transform: scale(0.88); }
+.chat-send:disabled { opacity: 1; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-send { transition: color 0.15s ease, background 0.15s ease; transform: none; }
+  .chat-send.on { transform: none; }
+}
 
 /* Reply bar above composer */
 .chat-replybar {
@@ -972,6 +1175,75 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .ctx-item:last-child { border-bottom: none; }
 .ctx-item:active { background: var(--surface-2); }
 .ctx-item.danger { color: var(--danger); }
+
+/* ── Выбор приёма пищи для отправки ── */
+.mealpick-scroll { max-height: 56vh; overflow-y: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; padding: 0 4px; }
+.mealpick-day + .mealpick-day { margin-top: 14px; }
+.mealpick-daylabel {
+  font-size: 12px; font-weight: 700; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px;
+}
+.mealpick-row {
+  width: 100%; display: flex; align-items: center; gap: 11px;
+  padding: 11px 10px; text-align: left;
+  background: var(--surface-2); border-radius: 14px;
+  border: 1px solid var(--border);
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+.mealpick-row + .mealpick-row { margin-top: 6px; }
+.mealpick-row:active { background: var(--primary-weak); transform: scale(0.99); }
+.mealpick-emoji { font-size: 22px; flex: 0 0 auto; }
+.mealpick-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
+.mealpick-name { font-weight: 650; font-size: 15px; }
+.mealpick-sub {
+  font-size: 12.5px; color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mealpick-kcal {
+  flex: 0 0 auto; font-weight: 750; font-size: 15px;
+  color: var(--primary-strong); font-variant-numeric: tabular-nums;
+}
+.mealpick-kcal-u { font-size: 11px; font-weight: 600; opacity: 0.75; }
+
+/* ── Подробный просмотр карточки еды ── */
+.mealsheet-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.mealsheet-emoji { font-size: 34px; line-height: 1; flex: 0 0 auto; }
+.mealsheet-title { font-size: 19px; font-weight: 700; letter-spacing: -0.3px; }
+.mealsheet-when { font-size: 13px; color: var(--ink-3); margin-top: 1px; }
+.mealsheet-kcal { text-align: right; flex: 0 0 auto; }
+.mealsheet-kcal b {
+  display: block; font-size: 24px; font-weight: 780;
+  color: var(--primary-strong); font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.mealsheet-kcal span { font-size: 11.5px; color: var(--ink-3); font-weight: 600; }
+
+.mealsheet-macros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 18px; }
+.mealsheet-macro {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 14px; padding: 11px 8px; text-align: center;
+}
+.mealsheet-macro-v { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.mealsheet-macro-v span { font-size: 12px; font-weight: 600; opacity: 0.55; margin-left: 1px; }
+.mealsheet-macro-l { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+
+.mealsheet-listlabel {
+  font-size: 12px; font-weight: 700; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 8px;
+}
+.mealsheet-list {
+  list-style: none; margin: 0 0 8px; padding: 0;
+  max-height: 40vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.mealsheet-list li {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 9px 2px; border-bottom: 1px solid var(--border);
+  font-size: 14.5px;
+}
+.mealsheet-list li:last-child { border-bottom: none; }
+.mealsheet-item-name { flex: 1; min-width: 0; }
+.mealsheet-item-right { flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; }
+.mealsheet-item-g { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.mealsheet-item-k { font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
 
 /* ── Forward picker ── */
 .fwd-row {

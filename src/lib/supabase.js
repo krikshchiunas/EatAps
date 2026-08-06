@@ -254,6 +254,24 @@ export function markChatRead(friendId) {
   localStorage.setItem(CHAT_READ_KEY, JSON.stringify(map))
 }
 
+// ── «Удалить у меня» ──────────────────────────────────────────────────────────
+// Сообщение остаётся в БД (у собеседника оно на месте), но скрыто на этом
+// устройстве. Храним список id локально; при загрузке истории фильтруем.
+// Отдельно от «удалить у всех» (DELETE в БД) — то придёт позже.
+const CHAT_HIDDEN_KEY = 'eataps:chatHidden'
+
+export function getHiddenMessageIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(CHAT_HIDDEN_KEY) || '[]')) } catch { return new Set() }
+}
+
+export function hideMessageLocally(id) {
+  const set = getHiddenMessageIds()
+  set.add(String(id))
+  // Держим список ограниченным, чтобы localStorage не разрастался бесконечно.
+  const arr = [...set].slice(-2000)
+  try { localStorage.setItem(CHAT_HIDDEN_KEY, JSON.stringify(arr)) } catch {}
+}
+
 // Возвращает { [senderId]: count } — только сообщения моложе 30 дней.
 export async function fetchUnreadCounts(myId) {
   if (!supabase || !myId) return {}
@@ -288,7 +306,31 @@ export function subscribeToIncoming(myId, onNew) {
   return () => supabase.removeChannel(channel)
 }
 
-const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at'
+const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at, read_at'
+
+// Отметить прочитанными все входящие от собеседника (серверная функция —
+// одним запросом, без гонок). Локальная метка остаётся для офлайн-бейджа.
+export async function markMessagesRead(senderId) {
+  if (!supabase || !senderId) return
+  try { await supabase.rpc('mark_messages_read', { p_sender: senderId }) } catch {}
+}
+
+// Подписка на прочтение МОИХ сообщений собеседником: ловим UPDATE, где
+// sender = я. Нужен replica identity full на messages (см. schema.sql).
+export function subscribeToReadReceipts(myId, friendId, onRead) {
+  if (!supabase || !myId) return () => {}
+  const channel = supabase
+    .channel(`reads:${myId}:${friendId}:${Date.now()}`)
+    .on('postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender=eq.${myId}` },
+      (payload) => {
+        const row = payload.new
+        if (row?.recipient === friendId && row.read_at) onRead(row)
+      },
+    )
+    .subscribe()
+  return () => supabase.removeChannel(channel)
+}
 
 export async function sendChatMessage({ sender, recipient, text, imageUrl, mealRef, replyTo, replySnapshot, forwardedName }) {
   if (!supabase) return { error: 'Нет подключения' }
@@ -323,7 +365,76 @@ export async function listMessagesWith(myId, friendId, limit = 300) {
     .order('created_at', { ascending: true })
     .limit(limit)
   if (error) throw error
-  return data || []
+  // Скрытые «у меня» не показываем — в БД они остаются для собеседника.
+  const hidden = getHiddenMessageIds()
+  return (data || []).filter((m) => !hidden.has(String(m.id)))
+}
+
+// ── Присутствие (онлайн/офлайн) ───────────────────────────────────────────────
+// У каждого пользователя свой канал presence:user:{id}. Хозяин канала себя
+// в нём «трекает», наблюдатели просто подключаются и читают состояние. Так
+// присутствие видно только тем, кто спросил, а не всем сразу — в отличие от
+// одного общего канала на всё приложение.
+
+export function startPresence(myId) {
+  if (!supabase || !myId) return () => {}
+  const channel = supabase.channel(`presence:user:${myId}`, {
+    config: { presence: { key: myId } },
+  })
+  channel.subscribe((status) => {
+    if (status === 'SUBSCRIBED') channel.track({ at: Date.now() }).catch(() => {})
+  })
+  return () => supabase.removeChannel(channel)
+}
+
+export function watchPresence(userId, onChange) {
+  if (!supabase || !userId) return () => {}
+  const channel = supabase.channel(`presence:user:${userId}`)
+  const read = () => {
+    const metas = channel.presenceState?.()?.[userId]
+    onChange(Array.isArray(metas) && metas.length > 0)
+  }
+  channel
+    .on('presence', { event: 'sync' }, read)
+    .on('presence', { event: 'join' }, read)
+    .on('presence', { event: 'leave' }, read)
+    .subscribe((status) => { if (status === 'SUBSCRIBED') read() })
+  return () => supabase.removeChannel(channel)
+}
+
+// Отметка «был(а) в сети». Тихо ничего не делает, если миграция ещё не
+// прогнана — статус тогда просто не показывается.
+export async function touchLastSeen() {
+  if (!supabase) return
+  try { await supabase.rpc('touch_last_seen') } catch {}
+}
+
+export async function fetchLastSeen(userId) {
+  if (!supabase || !userId) return null
+  const { data, error } = await supabase
+    .from('app_state').select('last_seen').eq('user_id', userId).maybeSingle()
+  if (error) return null // колонки нет — деградируем молча
+  return data?.last_seen || null
+}
+
+// ── Индикатор «печатает…» ─────────────────────────────────────────────────────
+// Broadcast-канал (не postgres_changes): события эфемерные, в БД их писать
+// незачем. Имя канала одинаковое с обеих сторон — сортируем пару id, иначе
+// собеседники окажутся в разных каналах и не услышат друг друга.
+export function createTypingChannel(myId, friendId, onTyping) {
+  if (!supabase || !myId || !friendId) return { sendTyping: () => {}, unsubscribe: () => {} }
+  const pair = [myId, friendId].sort().join('_')
+  const channel = supabase
+    .channel(`typing:${pair}`, { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'typing' }, ({ payload }) => {
+      if (payload?.from === friendId) onTyping(payload.typing !== false)
+    })
+    .subscribe()
+
+  const sendTyping = (typing) => {
+    try { channel.send({ type: 'broadcast', event: 'typing', payload: { from: myId, typing } }) } catch {}
+  }
+  return { sendTyping, unsubscribe: () => supabase.removeChannel(channel) }
 }
 
 // Realtime-подписка на новые входящие сообщения от конкретного друга.

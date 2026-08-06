@@ -2,12 +2,15 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo } from 
 import { useStore } from '../store.jsx'
 import {
   listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage,
-  markChatRead, deleteChatMessage, listFriendships,
+  markChatRead, listFriendships,
+  markMessagesRead, subscribeToReadReceipts, hideMessageLocally,
+  createTypingChannel, watchPresence, fetchLastSeen,
 } from '../lib/supabase.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { setActiveChat } from '../lib/notifications.js'
+import { MEAL_TYPES, mealMeta } from '../lib/foods.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 
@@ -30,10 +33,26 @@ function dayLabel(iso) {
   if (d.toDateString() === yest.toDateString()) return 'Вчера'
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
 }
+// «Был(а) в сети»: свежие отметки — человеческим языком, старые — датой.
+// Пол собеседника нам неизвестен, поэтому нейтральное «Был(а)».
+function lastSeenLabel(iso) {
+  if (!iso) return ''
+  const then = new Date(iso)
+  const mins = Math.floor((Date.now() - then.getTime()) / 60000)
+  if (mins < 1) return 'Был(а) только что'
+  if (mins < 60) return `Был(а) ${mins} мин назад`
+  const today = new Date()
+  if (then.toDateString() === today.toDateString()) return `Был(а) в ${timeShort(iso)}`
+  const yest = new Date(); yest.setDate(today.getDate() - 1)
+  if (then.toDateString() === yest.toDateString()) return `Был(а) вчера в ${timeShort(iso)}`
+  return `Был(а) ${then.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`
+}
+
 function previewOf(m) {
   if (m.text) return m.text
   if (m.image_url) return '📷 Фото'
-  if (m.meal_ref) return '🍽 ' + (m.meal_ref.name || 'Блюдо')
+  // v2 хранит название приёма в label, старый формат — в name.
+  if (m.meal_ref) return '🍽 ' + (m.meal_ref.label || m.meal_ref.name || 'Блюдо')
   return ''
 }
 // Ссылки в тексте → кликабельные, остальное — как есть.
@@ -61,6 +80,12 @@ export default function ChatView({ friend, onClose }) {
   const [toast, setToast] = useState(null)
   const [showJump, setShowJump] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)   // меню действий чата (⋯)
+  const [mealPick, setMealPick] = useState(false)   // шторка выбора приёма пищи
+  const [mealCard, setMealCard] = useState(null)    // раскрытая карточка еды
+  const [peerTyping, setPeerTyping] = useState(false)
+  const [peerOnline, setPeerOnline] = useState(false)
+  const [peerLastSeen, setPeerLastSeen] = useState(null)
 
   const listRef = useRef(null)
   const atBottomRef = useRef(true)
@@ -131,6 +156,7 @@ export default function ChatView({ friend, onClose }) {
   // Загрузка истории + realtime.
   useEffect(() => {
     markChatRead(friend.id)
+    markMessagesRead(friend.id)
     let cancelled = false
     ;(async () => {
       try {
@@ -145,13 +171,99 @@ export default function ChatView({ friend, onClose }) {
 
     const unsub = subscribeToChat(myId, friend.id, (m) => {
       markChatRead(friend.id)
+      // Чат открыт — сразу отмечаем входящее прочитанным (собеседник увидит вилку).
+      markMessagesRead(friend.id)
       setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]))
       if (atBottomRef.current) requestAnimationFrame(() => pinBottom(true))
       else setShowJump(true)
     })
-    return () => { cancelled = true; unsub() }
+
+    // Собеседник прочитал моё сообщение → перекрашиваем вилку.
+    const unsubReads = subscribeToReadReceipts(myId, friend.id, (row) => {
+      setMessages((cur) => cur.map((x) => (x.id === row.id ? { ...x, read_at: row.read_at } : x)))
+    })
+
+    return () => { cancelled = true; unsub(); unsubReads() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myId, friend.id])
+
+  // «Печатает…»: канал живёт весь чат. Гасим индикатор по таймауту — если
+  // собеседник свернул вкладку, события просто перестают приходить и «печатает»
+  // иначе висело бы вечно.
+  // Присутствие собеседника. Ушёл офлайн — подтягиваем «был(а) в сети»,
+  // чтобы шапка не схлопывалась в пустоту.
+  useEffect(() => {
+    let cancelled = false
+    const stop = watchPresence(friend.id, (online) => {
+      if (cancelled) return
+      setPeerOnline(online)
+      if (!online) fetchLastSeen(friend.id).then((t) => { if (!cancelled) setPeerLastSeen(t) })
+    })
+    fetchLastSeen(friend.id).then((t) => { if (!cancelled) setPeerLastSeen(t) })
+    return () => { cancelled = true; stop() }
+  }, [friend.id])
+
+  const typingRef = useRef({ sendTyping: () => {} })
+  // Ссылка ДОЛЖНА быть стабильной. Если пересоздавать её на каждый рендер,
+  // Composer пересоздаёт свои колбэки, его cleanup принимает это за уход из
+  // чата и шлёт ложное «перестал печатать» — у собеседника индикатор мигал,
+  // а лента дёргалась на каждом мигании.
+  const sendTyping = useCallback((t) => typingRef.current.sendTyping(t), [])
+
+  useEffect(() => {
+    let hideTimer = null   // страховка: собеседник свернул вкладку
+    let graceTimer = null  // пауза перед скрытием
+    const ch = createTypingChannel(myId, friend.id, (typing) => {
+      clearTimeout(graceTimer)
+      clearTimeout(hideTimer)
+      if (typing) {
+        setPeerTyping(true)
+        hideTimer = setTimeout(() => setPeerTyping(false), 5000)
+      } else {
+        // Между словами прилетает false. Без паузы пузырь мигал бы, каждый
+        // раз меняя высоту ленты.
+        graceTimer = setTimeout(() => setPeerTyping(false), 1200)
+      }
+    })
+    typingRef.current = ch
+    return () => {
+      clearTimeout(hideTimer); clearTimeout(graceTimer)
+      ch.unsubscribe(); setPeerTyping(false)
+    }
+  }, [myId, friend.id])
+
+  // Прокрутка — только в момент ПОЯВЛЕНИЯ индикатора и только плавная.
+  // pinBottom(true) делал мгновенный прыжок И smooth-скролл одновременно —
+  // вот это и выглядело как тряска.
+  const prevTypingRef = useRef(false)
+  useEffect(() => {
+    const appeared = peerTyping && !prevTypingRef.current
+    prevTypingRef.current = peerTyping
+    if (!appeared || !atBottomRef.current) return
+    const el = listRef.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [peerTyping])
+
+  // Подсветка сообщения на время контекст-меню. Раньше подсветка ставилась
+  // жестом и снималась вручную в разных ветках — при некоторых путях (меню
+  // открылось, палец ушёл за пределы строки) класс оставался и сообщение
+  // «залипало» выделенным. Теперь состояние ведётся ОДНИМ эффектом от menuMsg:
+  // открылось — подсветили, закрылось — сняли со всех строк, что бы ни было.
+  useEffect(() => {
+    const root = listRef.current
+    if (!root) return
+    const clearAll = () => {
+      root.querySelectorAll('.msg-row.selected').forEach((el) => el.classList.remove('selected'))
+      // Снимаем и нативное выделение текста / фокус — на iOS они переживают
+      // закрытие шторки и оставляют серый прямоугольник поверх пузыря.
+      try { window.getSelection()?.removeAllRanges() } catch {}
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    }
+    if (!menuMsg) { clearAll(); return }
+    clearAll()
+    root.querySelector(`[data-mid="${menuMsg.id}"]`)?.classList.add('selected')
+    return clearAll
+  }, [menuMsg])
 
   // Отслеживаем «у низа ли пользователь».
   const onScroll = useCallback(() => {
@@ -213,6 +325,27 @@ export default function ChatView({ friend, onClose }) {
     }
   }, [reply, myId, friend.id])
 
+  // Отправка карточки приёма пищи — оптимистично, как обычное сообщение.
+  const sendMeal = useCallback(async (mealRef) => {
+    const tempId = 'temp-' + (crypto.randomUUID?.() || Date.now() + Math.random())
+    const temp = {
+      id: tempId, sender: myId, recipient: friend.id,
+      text: null, image_url: null, meal_ref: mealRef,
+      reply_to: null, reply_snapshot: null, forwarded_name: null,
+      created_at: new Date().toISOString(), status: 'sending',
+    }
+    setMessages((cur) => [...cur, temp])
+    atBottomRef.current = true
+    requestAnimationFrame(() => pinBottom(true))
+    try {
+      const res = await sendChatMessage({ sender: myId, recipient: friend.id, mealRef })
+      if (res.error) throw new Error(res.error)
+      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...res.ok, status: undefined } : m)))
+    } catch {
+      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)))
+    }
+  }, [myId, friend.id])
+
   const retry = useCallback(async (m) => {
     const p = m._payload || { text: m.text, file: null }
     setMessages((cur) => cur.filter((x) => x.id !== m.id))
@@ -224,8 +357,11 @@ export default function ChatView({ friend, onClose }) {
     try {
       let imageUrl = m.image_url && !m.image_url.startsWith('blob:') ? m.image_url : null
       if (p.file) imageUrl = await uploadChatImage(myId, p.file)
+      // meal_ref и forwarded_name обязательно переносим: без них повтор
+      // упавшей карточки еды уходил пустым и сервер отклонял его всегда.
       const res = await sendChatMessage({
         sender: myId, recipient: friend.id, text: p.text, imageUrl,
+        mealRef: m.meal_ref, forwardedName: m.forwarded_name,
         replyTo: m.reply_to, replySnapshot: m.reply_snapshot,
       })
       if (res.error) throw new Error(res.error)
@@ -240,10 +376,23 @@ export default function ChatView({ friend, onClose }) {
     catch { flash('Не удалось скопировать') }
   }, [flash])
 
-  const doDelete = useCallback(async (m) => {
+  // «Удалить у меня» — ТОЛЬКО локальное скрытие, БД не трогаем. Раньше для
+  // своих сообщений вызывался deleteChatMessage, и строка исчезала у обоих —
+  // это поведение пункта «Удалить у всех», а не того, что написано на кнопке.
+  // temp-сообщений в БД нет, для них достаточно убрать из списка.
+  const doDeleteForMe = useCallback((m) => {
     setMessages((cur) => cur.filter((x) => x.id !== m.id))
-    if (!String(m.id).startsWith('temp-')) await deleteChatMessage(m.id)
+    if (!String(m.id).startsWith('temp-')) hideMessageLocally(m.id)
   }, [])
+
+  // Очистить переписку у себя: прячем локально всё, что сейчас загружено.
+  // У собеседника история остаётся — как «удалить у меня» для одного сообщения.
+  const clearChatForMe = useCallback(() => {
+    const ids = messagesRef.current.map((m) => m.id).filter((id) => !String(id).startsWith('temp-'))
+    ids.forEach(hideMessageLocally)
+    setMessages([])
+    flash('Переписка очищена у вас')
+  }, [flash])
 
   // ── delegated gestures on the list: swipe-left → reply, long-press → menu ──
   useEffect(() => {
@@ -329,11 +478,27 @@ export default function ChatView({ friend, onClose }) {
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
           <button className="chat-peer" onClick={() => setProfileOpen(true)}>
-            <Avatar src={friend.avatar} name={friendName} size={38} />
-            <div style={{ minWidth: 0 }}>
-              <div className="chat-peer-name">{friendName}</div>
-              <div className="chat-peer-sub">профиль ›</div>
-            </div>
+            <span className={`chat-peer-ava${peerOnline ? ' online' : ''}`}>
+              <Avatar src={friend.avatar} name={friendName} size={40} />
+            </span>
+            <span className="chat-peer-meta">
+              <span className="chat-peer-name">{friendName}</span>
+              {/* Приоритет: печатает → в сети → был(а) → запасной вариант */}
+              {peerTyping ? (
+                <span className="chat-peer-sub typing">печатает…</span>
+              ) : peerOnline ? (
+                <span className="chat-peer-sub online">в сети</span>
+              ) : peerLastSeen ? (
+                <span className="chat-peer-sub">{lastSeenLabel(peerLastSeen)}</span>
+              ) : (
+                <span className="chat-peer-sub">Открыть профиль</span>
+              )}
+            </span>
+          </button>
+          <button className="chat-more" onClick={() => setMenuOpen(true)} aria-label="Действия">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden>
+              <circle cx="12" cy="5" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="12" cy="19" r="1.9" />
+            </svg>
           </button>
         </header>
 
@@ -341,16 +506,22 @@ export default function ChatView({ friend, onClose }) {
           {loading ? (
             <div className="chat-state"><span className="chat-spinner" /></div>
           ) : messages.length === 0 ? (
-            <div className="chat-empty">
-              <div className="chat-empty-emoji">👋</div>
-              <p>Сообщений пока нет.<br />Напишите первым!</p>
-            </div>
+            // Заглушку прячем, пока собеседник печатает: иначе экран
+            // одновременно говорит «сообщений нет» и «Х печатает».
+            peerTyping ? null : (
+              <div className="chat-empty">
+                <div className="chat-empty-emoji">👋</div>
+                <p>Сообщений пока нет.<br />Напишите первым!</p>
+              </div>
+            )
           ) : (
             <MessageList
               messages={messages} myId={myId} friendName={friendName}
               onQuoteTap={jumpTo} onImgLoad={onImgLoad} onRetry={retry}
+              onOpenMeal={setMealCard}
             />
           )}
+          {peerTyping && <TypingBubble name={friendName} />}
         </div>
 
         {showJump && (
@@ -359,7 +530,13 @@ export default function ChatView({ friend, onClose }) {
           </button>
         )}
 
-        <Composer reply={reply} onCancelReply={() => setReply(null)} onSend={doSend} />
+        <Composer
+          reply={reply}
+          onCancelReply={() => setReply(null)}
+          onSend={doSend}
+          onPickMeal={() => setMealPick(true)}
+          onTyping={sendTyping}
+        />
       </div>
 
       {menuMsg && (
@@ -369,8 +546,24 @@ export default function ChatView({ friend, onClose }) {
           onReply={() => startReply(menuMsg)}
           onCopy={() => doCopy(menuMsg)}
           onForward={() => setForwardMsg(menuMsg)}
-          onDelete={() => doDelete(menuMsg)}
+          onDeleteForMe={() => doDeleteForMe(menuMsg)}
           onRetry={() => retry(menuMsg)}
+        />
+      )}
+
+      {mealPick && (
+        <MealPickerSheet onClose={() => setMealPick(false)} onPick={sendMeal} />
+      )}
+
+      {mealCard && (
+        <MealCardSheet meal={mealCard} onClose={() => setMealCard(null)} />
+      )}
+
+      {menuOpen && (
+        <ChatMenuSheet
+          onClose={() => setMenuOpen(false)}
+          onProfile={() => setProfileOpen(true)}
+          onClearForMe={clearChatForMe}
         />
       )}
 
@@ -393,7 +586,7 @@ export default function ChatView({ friend, onClose }) {
 }
 
 // ── message list (memoized — не перерисовывается при вводе текста) ─────────────
-const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry }) {
+const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
   return messages.map((m, i) => {
     const mine = m.sender === myId
     const prev = messages[i - 1]
@@ -406,14 +599,91 @@ const MessageList = memo(function MessageList({ messages, myId, friendName, onQu
         {showDay && <div className="chat-day">{dayLabel(m.created_at)}</div>}
         <MessageRow
           m={m} mine={mine} tail={!sameAsNext} grouped={sameAsPrev}
-          friendName={friendName} onQuoteTap={onQuoteTap} onImgLoad={onImgLoad} onRetry={onRetry}
+          friendName={friendName} onQuoteTap={onQuoteTap} onImgLoad={onImgLoad}
+          onRetry={onRetry} onOpenMeal={onOpenMeal}
         />
       </div>
     )
   })
 })
 
-function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry }) {
+// Индикатор доставки/прочтения — вилка. Серая = отправлено, морская синяя =
+// собеседник прочитал. Цвет задаётся через currentColor в CSS (.msg-tick.read).
+function ForkTick() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+         strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M7 2.5v6.2" />
+      <path d="M11 2.5v6.2" />
+      <path d="M15 2.5v6.2" />
+      <path d="M5.4 8.7h11.2a1 1 0 0 1 .9 1.4c-.7 1.6-2.1 2.6-3.8 2.8l-1 .1v8a1.6 1.6 0 0 1-3.2 0v-8l-1-.1c-1.7-.2-3.1-1.2-3.8-2.8a1 1 0 0 1 .9-1.4z" />
+    </svg>
+  )
+}
+
+// «Печатает…» — отдельный пузырь в конце ленты, стилизован под сообщение
+// собеседника, чтобы не выбиваться из потока.
+function TypingBubble({ name }) {
+  return (
+    <div className="msg-row theirs typing-row">
+      <div className="msg theirs tail typing-bubble">
+        <span className="typing-name">{name} печатает</span>
+        <span className="typing-dots" aria-hidden><i /><i /><i /></span>
+      </div>
+    </div>
+  )
+}
+
+// Карточка приёма пищи внутри пузыря. v2 — полная (продукты + БЖУ), карточки
+// без версии остались от прежнего формата пересылки: рисуем их компактно,
+// чтобы старые сообщения не сломались.
+function MealRefCard({ meal, onOpen }) {
+  const legacy = !meal.v
+  if (legacy) {
+    return (
+      <div className="msg-meal">
+        <span style={{ fontSize: 20 }}>{meal.emoji || '🍽'}</span>
+        <div style={{ minWidth: 0 }}>
+          <div className="msg-meal-name">{meal.name}</div>
+          <div className="msg-meal-kcal">{meal.kcal} ккал</div>
+        </div>
+      </div>
+    )
+  }
+  const items = meal.items || []
+  const shown = items.slice(0, 3)
+  const rest = items.length - shown.length
+  return (
+    <button className="mealcard" onClick={() => onOpen?.(meal)}>
+      <div className="mealcard-head">
+        <span className="mealcard-emoji">{meal.emoji || '🍽'}</span>
+        <span className="mealcard-title">
+          <span className="mealcard-label">{meal.label}</span>
+          <span className="mealcard-when">{meal.date ? dayLabel(meal.date + 'T12:00:00') : ''}</span>
+        </span>
+        <span className="mealcard-kcal">{meal.kcal}<span className="mealcard-kcal-u">ккал</span></span>
+      </div>
+
+      <ul className="mealcard-items">
+        {shown.map((it, i) => (
+          <li key={i}>
+            <span className="mealcard-item-name">{it.emoji ? it.emoji + ' ' : ''}{it.name}</span>
+            {it.grams ? <span className="mealcard-item-g">{it.grams} {it.unit || 'г'}</span> : null}
+          </li>
+        ))}
+        {rest > 0 && <li className="mealcard-more">и ещё {rest}</li>}
+      </ul>
+
+      <div className="mealcard-macros">
+        <span><b>{meal.protein}</b> Б</span>
+        <span><b>{meal.fat}</b> Ж</span>
+        <span><b>{meal.carbs}</b> У</span>
+      </div>
+    </button>
+  )
+}
+
+function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
   const status = m.status // sending | failed | undefined(=sent)
   return (
     <div className={`msg-row ${mine ? 'mine' : 'theirs'}${grouped ? ' grouped' : ''}`} data-mid={m.id}>
@@ -430,25 +700,29 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry }) 
             <span className="msg-quote-text">{m.reply_snapshot.image ? '📷 ' : ''}{m.reply_snapshot.text || 'Фото'}</span>
           </button>
         )}
-        {m.meal_ref && (
-          <div className="msg-meal">
-            <span style={{ fontSize: 20 }}>{m.meal_ref.emoji || '🍽'}</span>
-            <div style={{ minWidth: 0 }}>
-              <div className="msg-meal-name">{m.meal_ref.name}</div>
-              <div className="msg-meal-kcal">{m.meal_ref.kcal} ккал</div>
-            </div>
-          </div>
-        )}
+        {m.meal_ref && <MealRefCard meal={m.meal_ref} onOpen={onOpenMeal} />}
+        {/* Открытие блокируем, только пока фото не на сервере: при 'sending'
+            в href лежит blob:, при 'failed' грузить нечего. Проверка на любой
+            truthy status ловила и 'sent' — свежее фото не открывалось до
+            перезагрузки чата. */}
         {m.image_url && (
-          <a href={m.image_url} target="_blank" rel="noreferrer" className="msg-img-wrap" onClick={(e) => { if (status) e.preventDefault() }}>
+          <a href={m.image_url} target="_blank" rel="noreferrer" className="msg-img-wrap"
+             onClick={(e) => { if (status === 'sending' || status === 'failed') e.preventDefault() }}>
             <img src={m.image_url} alt="" className="msg-img" onLoad={onImgLoad} draggable={false} />
           </a>
         )}
         {m.text && <div className="msg-text">{renderText(m.text)}</div>}
         <div className="msg-meta">
           <span className="msg-time">{timeShort(m.created_at)}</span>
-          {mine && status === 'sending' && <span className="msg-tick">⏳</span>}
-          {mine && !status && <span className="msg-tick">✓</span>}
+          {mine && status === 'sending' && <span className="msg-tick sending"><ForkTick /></span>}
+          {/* Доставленным считаем и status: undefined (пришло с сервера), и
+              'sent' (только что отправили). Проверка на !status пропускала
+              'sent', и вилка не появлялась до перезагрузки чата. */}
+          {mine && (!status || status === 'sent') && (
+            <span className={`msg-tick${m.read_at ? ' read' : ''}`} title={m.read_at ? 'Прочитано' : 'Отправлено'}>
+              <ForkTick />
+            </span>
+          )}
           {mine && status === 'failed' && (
             <button className="msg-fail" onClick={() => onRetry(m)} title="Повторить">! повторить</button>
           )}
@@ -459,11 +733,39 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry }) 
 }
 
 // ── composer (изолированный ввод: печать не трогает список) ────────────────────
-function Composer({ reply, onCancelReply, onSend }) {
+function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
   const [text, setText] = useState('')
   const [photo, setPhoto] = useState(null)
   const taRef = useRef(null)
   const fileRef = useRef(null)
+
+  // Троттлим «печатает»: шлём не чаще раза в 2с, гасим через 2.5с тишины.
+  // Иначе на каждый символ уходил бы бродкаст.
+  const typingRef = useRef({ lastSent: 0, stopTimer: null, active: false })
+  const pingTyping = useCallback(() => {
+    const t = typingRef.current
+    const now = Date.now()
+    if (!t.active || now - t.lastSent > 2000) {
+      t.active = true
+      t.lastSent = now
+      onTyping?.(true)
+    }
+    clearTimeout(t.stopTimer)
+    t.stopTimer = setTimeout(() => { t.active = false; onTyping?.(false) }, 2500)
+  }, [onTyping])
+
+  const stopTyping = useCallback(() => {
+    const t = typingRef.current
+    clearTimeout(t.stopTimer)
+    if (t.active) { t.active = false; onTyping?.(false) }
+  }, [onTyping])
+
+  // Гасим ТОЛЬКО при реальном размонтировании. Зависимость от stopTyping
+  // заставляла cleanup срабатывать на каждый рендер и слать ложное
+  // «перестал печатать» — из-за этого лента тряслась.
+  const stopRef = useRef(stopTyping)
+  stopRef.current = stopTyping
+  useEffect(() => () => stopRef.current(), [])
 
   const grow = () => {
     const el = taRef.current
@@ -477,6 +779,7 @@ function Composer({ reply, onCancelReply, onSend }) {
 
   const submit = () => {
     if (!canSend) return
+    stopTyping()
     onSend({ text: text.trim(), file: photo?.file || null })
     setText('')
     if (photo?.url) URL.revokeObjectURL(photo.url)
@@ -513,24 +816,37 @@ function Composer({ reply, onCancelReply, onSend }) {
           <button onClick={() => { URL.revokeObjectURL(photo.url); setPhoto(null) }} aria-label="Убрать фото">✕</button>
         </div>
       )}
+      {/* Поле-«пилюля»: кнопки вложений живут ВНУТРИ него — так добавление
+          новых (приём пищи, файл, голосовое) не ломает раскладку строки. */}
       <div className="chat-composer-row">
-        <button className="chat-attach" onClick={() => fileRef.current?.click()} aria-label="Фото">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="5" width="18" height="15" rx="3.5" /><circle cx="12" cy="12.5" r="3.4" /><path d="M8 5 9.4 3h5.2L16 5" />
-          </svg>
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
-        <textarea
-          ref={taRef}
-          className="chat-textarea"
-          placeholder="Сообщение…"
-          value={text}
-          rows={1}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKey}
-        />
+        <div className="chat-inputwrap">
+          <div className="chat-tools">
+            <button className="chat-tool" onClick={() => fileRef.current?.click()} aria-label="Отправить фото">
+              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="18" height="15" rx="3.5" /><circle cx="12" cy="12.5" r="3.4" /><path d="M8 5 9.4 3h5.2L16 5" />
+              </svg>
+            </button>
+            <button className="chat-tool" onClick={onPickMeal} aria-label="Отправить приём пищи">
+              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 3v7.2a2.2 2.2 0 0 0 4.4 0V3" /><path d="M7.2 10.4V21" />
+                <path d="M16.5 3c-1.4 1.6-2 3.6-2 5.6 0 1.7.7 3 2 3.4V21" />
+              </svg>
+            </button>
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
+          <textarea
+            ref={taRef}
+            className="chat-textarea"
+            placeholder="Сообщение…"
+            value={text}
+            rows={1}
+            onChange={(e) => { setText(e.target.value); if (e.target.value.trim()) pingTyping(); else stopTyping() }}
+            onKeyDown={onKey}
+            onBlur={stopTyping}
+          />
+        </div>
         <button className={`chat-send${canSend ? ' on' : ''}`} onClick={submit} disabled={!canSend} aria-label="Отправить">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M3.4 20.4l17.6-8.4a.5.5 0 0 0 0-.9L3.4 3.6a.5.5 0 0 0-.7.6l2.3 6.9c.1.2.3.4.5.4l8.9 1.5-8.9 1.5c-.2 0-.4.2-.5.4l-2.3 6.9a.5.5 0 0 0 .7.6z" /></svg>
+          <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor"><path d="M3.4 20.4l17.6-8.4a.5.5 0 0 0 0-.9L3.4 3.6a.5.5 0 0 0-.7.6l2.3 6.9c.1.2.3.4.5.4l8.9 1.5-8.9 1.5c-.2 0-.4.2-.5.4l-2.3 6.9a.5.5 0 0 0 .7.6z" /></svg>
         </button>
       </div>
     </div>
@@ -538,34 +854,246 @@ function Composer({ reply, onCancelReply, onSend }) {
 }
 
 // ── context sheet (long-press) ────────────────────────────────────────────────
-function ContextSheet({ m, mine, onClose, onReply, onCopy, onForward, onDelete, onRetry }) {
+// Пункты описаны декларативно: чтобы добавить новый (реакции, «удалить у всех»,
+// закрепить…), достаточно дописать объект в массив — рендер и закрытие общие.
+// `show` получает контекст { m, mine } и решает, показывать ли пункт.
+const CTX_ACTIONS = [
+  {
+    key: 'reply',
+    label: 'Ответить',
+    icon: 'M9 14L4 9l5-5 M4 9h11a5 5 0 0 1 5 5v3',
+    run: (h) => h.onReply(),
+  },
+  {
+    key: 'copy',
+    label: 'Копировать',
+    icon: 'M9 9h11v11H9z M5 15V4h11',
+    show: ({ m }) => !!m.text,
+    run: (h) => h.onCopy(),
+  },
+  {
+    key: 'forward',
+    label: 'Переслать',
+    icon: 'M15 5l7 7-7 7 M22 12H4a2 2 0 0 0-2 2v3',
+    run: (h) => h.onForward(),
+  },
+  {
+    key: 'retry',
+    label: 'Повторить отправку',
+    icon: 'M21 12a9 9 0 1 1-3-6.7 M21 4v4h-4',
+    show: ({ m, mine }) => mine && m.status === 'failed',
+    run: (h) => h.onRetry(),
+  },
+  {
+    key: 'delete-me',
+    label: 'Удалить у меня',
+    icon: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+    danger: true,
+    run: (h) => h.onDeleteForMe(),
+  },
+]
+
+// ── подробный просмотр карточки еды (тап по карточке в сообщении) ─────────────
+function MealCardSheet({ meal, onClose }) {
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+  const items = meal.items || []
+  const macros = [
+    { key: 'protein', label: 'Белки', v: meal.protein },
+    { key: 'fat', label: 'Жиры', v: meal.fat },
+    { key: 'carbs', label: 'Углеводы', v: meal.carbs },
+  ]
+  return (
+    <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 88 }}>
+      <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
+
+        <div className="mealsheet-head">
+          <span className="mealsheet-emoji">{meal.emoji || '🍽'}</span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="mealsheet-title">{meal.label}</div>
+            <div className="mealsheet-when">{meal.date ? dayLabel(meal.date + 'T12:00:00') : ''}</div>
+          </div>
+          <div className="mealsheet-kcal">
+            <b>{meal.kcal}</b><span>ккал</span>
+          </div>
+        </div>
+
+        <div className="mealsheet-macros">
+          {macros.map((m) => (
+            <div key={m.key} className="mealsheet-macro">
+              <div className="mealsheet-macro-v">{m.v}<span>г</span></div>
+              <div className="mealsheet-macro-l">{m.label}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mealsheet-listlabel">Состав</div>
+        <ul className="mealsheet-list">
+          {items.map((it, i) => (
+            <li key={i}>
+              <span className="mealsheet-item-name">{it.emoji ? it.emoji + ' ' : ''}{it.name}</span>
+              <span className="mealsheet-item-right">
+                {it.grams ? <span className="mealsheet-item-g">{it.grams} {it.unit || 'г'}</span> : null}
+                <span className="mealsheet-item-k">{it.kcal} ккал</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+// ── выбор приёма пищи для отправки ────────────────────────────────────────────
+// Показываем дни с записями (сегодня и назад), внутри — группы по типам приёма.
+// Отправляем группу целиком: тогда в карточке осмыслен «список продуктов».
+function MealPickerSheet({ onClose, onPick }) {
+  const { days } = useStore()
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+
+  // Дни с едой, свежие сверху, максимум неделя — дальше пролистывать неудобно.
+  const dayKeys = Object.keys(days || {})
+    .filter((k) => (days[k]?.meals || []).length > 0)
+    .sort((a, b) => (a < b ? 1 : -1))
+    .slice(0, 7)
+
+  // Группируем через mealMeta, а не строгим m.type === t.key: у старых записей
+  // type мог отсутствовать, и такие приёмы не попадали ни в одну группу —
+  // отправить их было невозможно. mealMeta уводит неизвестный тип в «Перекус».
+  const groupsOf = (key) => {
+    const meals = days[key]?.meals || []
+    return MEAL_TYPES
+      .map((t) => ({ ...t, items: meals.filter((m) => mealMeta(m.type).key === t.key) }))
+      .filter((g) => g.items.length > 0)
+  }
+
+  const pick = (key, group) => {
+    const totals = group.items.reduce(
+      (a, m) => ({
+        kcal: a.kcal + (+m.kcal || 0),
+        protein: a.protein + (+m.protein || 0),
+        carbs: a.carbs + (+m.carbs || 0),
+        fat: a.fat + (+m.fat || 0),
+      }),
+      { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+    )
+    onPick({
+      v: 2,                       // версия схемы: v1 (старые) рисуем прежним видом
+      type: group.key,
+      label: group.label,
+      emoji: group.emoji,
+      date: key,
+      items: group.items.map((m) => ({
+        name: m.name, emoji: m.emoji || null,
+        grams: m.grams ?? null, unit: m.unit || 'г',
+        kcal: Math.round(+m.kcal || 0),
+      })),
+      kcal: Math.round(totals.kcal),
+      protein: Math.round(totals.protein),
+      carbs: Math.round(totals.carbs),
+      fat: Math.round(totals.fat),
+    })
+    close()
+  }
+
+  return (
+    <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 85 }}>
+      <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <h2 className="h2" style={{ fontSize: 18 }}>Отправить приём пищи</h2>
+          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+        </div>
+
+        {dayKeys.length === 0 ? (
+          <p className="muted" style={{ fontSize: 14, padding: '10px 0 16px' }}>
+            Пока нечего отправить — сначала запишите приём пищи в дневник.
+          </p>
+        ) : (
+          <div className="mealpick-scroll">
+            {dayKeys.map((key) => (
+              <div key={key} className="mealpick-day">
+                <div className="mealpick-daylabel">{dayLabel(key + 'T12:00:00')}</div>
+                {groupsOf(key).map((g) => (
+                  <button key={g.key} className="mealpick-row" onClick={() => pick(key, g)}>
+                    <span className="mealpick-emoji">{g.emoji}</span>
+                    <span className="mealpick-meta">
+                      <span className="mealpick-name">{g.label}</span>
+                      <span className="mealpick-sub">
+                        {g.items.map((m) => m.name).join(', ')}
+                      </span>
+                    </span>
+                    <span className="mealpick-kcal">
+                      {Math.round(g.items.reduce((s, m) => s + (+m.kcal || 0), 0))}
+                      <span className="mealpick-kcal-u"> ккал</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── меню чата (⋯ в хедере) ────────────────────────────────────────────────────
+// Тоже декларативное — место под «Поиск», «Отключить уведомления», настройки
+// группы. Пока только то, что реально работает.
+const CHAT_ACTIONS = [
+  {
+    key: 'profile',
+    label: 'Профиль друга',
+    icon: 'M12 12a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4z M4.5 20.5a7.5 7.5 0 0 1 15 0',
+    run: (h) => h.onProfile(),
+  },
+  {
+    key: 'clear',
+    label: 'Очистить переписку у меня',
+    icon: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+    danger: true,
+    run: (h) => h.onClearForMe(),
+  },
+]
+
+function ChatMenuSheet({ onClose, ...handlers }) {
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 80 }}>
       <div className="sheet ctx-sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
+        {CHAT_ACTIONS.map((a) => (
+          <button
+            key={a.key}
+            className={`ctx-item${a.danger ? ' danger' : ''}`}
+            onClick={() => { a.run(handlers); close() }}
+          >
+            <Ico d={a.icon} /> {a.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ContextSheet({ m, mine, onClose, ...handlers }) {
+  const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
+  const ctx = { m, mine }
+  return (
+    <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 80 }}>
+      <div className="sheet ctx-sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
+        <div className="grabber" />
         <div className="ctx-preview">{previewOf(m)}</div>
-        <button className="ctx-item" onClick={() => { onReply(); close() }}>
-          <Ico d="M9 14L4 9l5-5 M4 9h11a5 5 0 0 1 5 5v3" /> Ответить
-        </button>
-        {m.text && (
-          <button className="ctx-item" onClick={() => { onCopy(); close() }}>
-            <Ico d="M9 9h11v11H9z M5 15V4h11" /> Копировать
+        {CTX_ACTIONS.filter((a) => !a.show || a.show(ctx)).map((a) => (
+          <button
+            key={a.key}
+            className={`ctx-item${a.danger ? ' danger' : ''}`}
+            onClick={() => { a.run(handlers); close() }}
+          >
+            <Ico d={a.icon} /> {a.label}
           </button>
-        )}
-        <button className="ctx-item" onClick={() => { onForward(); close() }}>
-          <Ico d="M15 5l7 7-7 7 M22 12H4a2 2 0 0 0-2 2v3" /> Переслать
-        </button>
-        {mine && m.status === 'failed' && (
-          <button className="ctx-item" onClick={() => { onRetry(); close() }}>
-            <Ico d="M21 12a9 9 0 1 1-3-6.7 M21 4v4h-4" /> Повторить отправку
-          </button>
-        )}
-        {mine && (
-          <button className="ctx-item danger" onClick={() => { onDelete(); close() }}>
-            <Ico d="M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13" /> Удалить
-          </button>
-        )}
+        ))}
       </div>
     </div>
   )
