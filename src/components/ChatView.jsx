@@ -14,6 +14,7 @@ import { getMealSections, foodsForMeal } from '../lib/meals.js'
 import { mealCardFromGroup, normalizeMealCard } from '../lib/mealCard.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
+import ConfirmDialog from './ConfirmDialog.jsx'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
@@ -83,6 +84,7 @@ export default function ChatView({ friend, onClose }) {
   const [menuOpen, setMenuOpen] = useState(false)   // меню действий чата (⋯)
   const [mealPick, setMealPick] = useState(false)   // шторка выбора приёма пищи
   const [mealCard, setMealCard] = useState(null)    // раскрытая карточка еды
+  const [confirmClear, setConfirmClear] = useState(false) // подтверждение очистки чата
   const [peerTyping, setPeerTyping] = useState(false)
   const [peerOnline, setPeerOnline] = useState(false)
   const [peerLastSeen, setPeerLastSeen] = useState(null)
@@ -563,7 +565,17 @@ export default function ChatView({ friend, onClose }) {
         <ChatMenuSheet
           onClose={() => setMenuOpen(false)}
           onProfile={() => setProfileOpen(true)}
-          onClearForMe={clearChatForMe}
+          onClearForMe={() => setConfirmClear(true)}
+        />
+      )}
+
+      {/* Без капчи: действие обратимо для собеседника — у него переписка
+          остаётся, и это не удаление аккаунта. Хватает «Да / Нет». */}
+      {confirmClear && (
+        <ConfirmDialog
+          text="Вы уверены, что хотите удалить чат?"
+          onYes={() => { setConfirmClear(false); clearChatForMe() }}
+          onNo={() => setConfirmClear(false)}
         />
       )}
 

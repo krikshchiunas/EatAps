@@ -6,6 +6,7 @@ import { deleteAccount } from '../lib/supabase.js'
 import { notificationsSupported, notificationPermission, requestNotificationPermission } from '../lib/notifications.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import LegalSheet from './LegalSheet.jsx'
+import ConfirmDialog from './ConfirmDialog.jsx'
 // Ленивая загрузка: AuthSheet тянет тяжёлый Web3-стек (AppKit). Грузим его
 // только когда пользователь открывает вход — ядро приложения остаётся лёгким
 // и надёжно работает офлайн. lazyWithReload самолечит сбой загрузки чанка.
@@ -194,8 +195,10 @@ export default function ProfileScreen() {
         </button>
       )}
 
+      {/* captcha — необратимые действия: защита от случайного тапа. */}
       {confirm === 'reset' && (
         <ConfirmDialog
+          captcha
           text="Вы уверены, что хотите удалить нашу историю?"
           onYes={() => { setConfirm(null); resetAll() }}
           onNo={() => setConfirm(null)}
@@ -203,6 +206,7 @@ export default function ProfileScreen() {
       )}
       {confirm === 'delete' && (
         <ConfirmDialog
+          captcha
           text="Вы уверены, что хотите удалить EatAps и больше не знать, что едят ваши друзья?"
           onYes={() => { setConfirm(null); delAccount() }}
           onNo={() => setConfirm(null)}
@@ -287,70 +291,3 @@ function NotificationsCard() {
   )
 }
 
-function ConfirmDialog({ text, onYes, onNo }) {
-  const [step, setStep] = useState('confirm') // 'confirm' | 'captcha'
-  const [code] = useState(() => String(Math.floor(1000 + Math.random() * 9000)))
-  const [input, setInput] = useState('')
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,0.45)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '0 24px',
-    }} onClick={onNo}>
-      <div style={{
-        background: 'var(--surface)',
-        borderRadius: 20,
-        padding: '28px 24px 20px',
-        maxWidth: 360,
-        width: '100%',
-        boxShadow: 'var(--shadow-float)',
-      }} onClick={e => e.stopPropagation()}>
-        {step === 'confirm' ? (
-          <>
-            <p style={{ fontSize: 16, lineHeight: 1.5, color: 'var(--ink)', marginBottom: 24, textAlign: 'center' }}>{text}</p>
-            <div className="row gap12">
-              <button className="btn ghost" style={{ flex: 1 }} onClick={onNo}>Нет</button>
-              <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }} onClick={() => setStep('captcha')}>Да</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 16, textAlign: 'center', lineHeight: 1.5 }}>
-              Введите код для подтверждения
-            </p>
-            <div style={{
-              fontSize: 32, fontWeight: 700, letterSpacing: 10,
-              textAlign: 'center', color: 'var(--ink)',
-              background: 'var(--surface-2)', borderRadius: 12,
-              padding: '12px 0', marginBottom: 16,
-              userSelect: 'none',
-            }}>{code}</div>
-            <input
-              autoFocus
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="Введите код"
-              inputMode="numeric"
-              maxLength={4}
-              style={{
-                width: '100%', boxSizing: 'border-box',
-                padding: '10px 14px', borderRadius: 12,
-                border: `1.5px solid ${input && input !== code.slice(0, input.length) ? 'var(--danger)' : 'var(--border)'}`,
-                background: 'var(--surface-2)', color: 'var(--ink)',
-                fontSize: 20, fontWeight: 600, letterSpacing: 6,
-                textAlign: 'center', outline: 'none', marginBottom: 16,
-              }}
-              onKeyDown={e => { if (e.key === 'Enter' && input === code) onYes() }}
-            />
-            <div className="row gap12">
-              <button className="btn ghost" style={{ flex: 1 }} onClick={onNo}>Отмена</button>
-              <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }} disabled={input !== code} onClick={onYes}>Подтвердить</button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
