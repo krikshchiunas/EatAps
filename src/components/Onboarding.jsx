@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS, computeTargets } from '../lib/nutrition.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
+import { hasAnyAccountCache } from '../lib/localCache.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import Ring from './Ring.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
@@ -14,7 +15,7 @@ const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const STEPS = ['name', 'sex', 'body', 'activity', 'goal', 'result']
 
 export default function Onboarding() {
-  const { setProfile, supabaseEnabled, session, syncStatus } = useStore()
+  const { setProfile, supabaseEnabled, signedIn } = useStore()
   const [phase, setPhase] = useState('welcome') // welcome | survey
   const [step, setStep] = useState(0)
   const [intent, setIntent] = useState('guest') // guest | account
@@ -51,18 +52,21 @@ export default function Onboarding() {
     })
   }
 
-  // Пользователь выбрал «Войти» и вошёл в существующий аккаунт. Если в облаке
-  // уже есть профиль — App сам переключится на приложение (profile != null,
-  // этот компонент размонтируется). Если облако пустое (аккаунт есть, а анкету
-  // не заполняли) — синхронизация завершится, а мы всё ещё здесь → ведём в опросник.
+  // Пользователь вошёл в существующий аккаунт. Если в облаке уже есть профиль —
+  // App сам переключится на приложение (profile != null, этот компонент
+  // размонтируется). Если облако пустое (аккаунт есть, а анкету не заполняли) —
+  // мы всё ещё здесь → ведём в опросник.
+  //
+  // Ждать синхронизации тут больше не нужно: App вообще не рендерит онбординг,
+  // пока состояние аккаунта не определено. Раньше эта проверка по syncStatus и
+  // была источником мигания «приветствие → опросник → приложение».
   useEffect(() => {
-    if (phase !== 'welcome' || !session) return
-    if (syncStatus === 'idle' || syncStatus === 'syncing') return // ждём завершения синка
+    if (phase !== 'welcome' || !signedIn) return
     setAuth(null)
     setIntent('account')
     setStep(0)
     setPhase('survey')
-  }, [phase, session, syncStatus])
+  }, [phase, signedIn])
 
   const startSurvey = (chosen) => {
     setIntent(chosen)
@@ -71,7 +75,7 @@ export default function Onboarding() {
   }
 
   // После опросника при регистрации нужно завести аккаунт.
-  const needsRegister = intent === 'account' && supabaseEnabled && !session
+  const needsRegister = intent === 'account' && supabaseEnabled && !signedIn
 
   if (phase === 'welcome') {
     return (
@@ -86,9 +90,9 @@ export default function Onboarding() {
             </p>
 
             <div className="stack" style={{ maxWidth: 340, margin: '0 auto' }}>
-              {supabaseEnabled && session ? (
-                // Уже вошли — тянем данные из облака; кнопки тут только запутают.
-                <p className="muted" style={{ fontSize: 15, padding: '12px 0' }}>Входим в аккаунт…</p>
+              {supabaseEnabled && signedIn ? (
+                // Уже вошли — данные загружены, сейчас переведём в опросник.
+                <p className="muted" style={{ fontSize: 15, padding: '12px 0' }}>Открываем аккаунт…</p>
               ) : supabaseEnabled ? (
                 <>
                   <button className="btn" onClick={() => startSurvey('account')}>Зарегистрироваться</button>
@@ -104,6 +108,12 @@ export default function Onboarding() {
                 <button className="btn" onClick={() => startSurvey('guest')}>Начать</button>
               )}
             </div>
+
+            {supabaseEnabled && !signedIn && hasAnyAccountCache() && (
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 18, maxWidth: 320, marginInline: 'auto' }}>
+                На этом устройстве остались данные аккаунта. Войдите — история и цели вернутся.
+              </p>
+            )}
 
             <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 20 }}>
               {supabaseEnabled

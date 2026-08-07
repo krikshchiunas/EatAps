@@ -15,13 +15,25 @@ npm run dev
 
 1. Создайте проект на https://supabase.com
 2. **SQL Editor** → вставьте содержимое [`supabase/schema.sql`](supabase/schema.sql) → **Run**. Это создаст таблицу `app_state` с защитой доступа (RLS).
-3. **Project Settings → API** → скопируйте `Project URL` и `anon public` ключ.
-4. Локально: создайте `.env.local` (см. `.env.example`):
+3. **SQL Editor** → следом выполните миграции по порядку. Оба файла обязательны
+   и их можно прогонять повторно:
+   - [`migrations/2026-08-06_account_sync.sql`](supabase/migrations/2026-08-06_account_sync.sql) —
+     версионирование состояния (`revision` + запись только через `save_app_state`),
+     `presence` вместо `app_state.last_seen`, Realtime для `app_state`. Без него
+     правки, сделанные на двух устройствах одновременно, затирают друг друга.
+   - [`migrations/2026-08-07_friend_privacy.sql`](supabase/migrations/2026-08-07_friend_privacy.sql) —
+     друг получает только то, что показано на экране (имя, фото, био, любимые
+     места, норма калорий, дневник), а не всю строку состояния с весом, ростом
+     и возрастом. Плюс самолечение публичного ID.
+4. **SQL Editor** → [`supabase/verify.sql`](supabase/verify.sql) — самопроверка,
+   30 пунктов, только чтение. Все строки должны быть ✔.
+5. **Project Settings → API** → скопируйте `Project URL` и `anon public` ключ.
+6. Локально: создайте `.env.local` (см. `.env.example`):
    ```
    VITE_SUPABASE_URL=https://xxxx.supabase.co
    VITE_SUPABASE_ANON_KEY=eyJ...
    ```
-5. `npm run dev` — в разделе «Профиль» появится вход.
+7. `npm run dev` — в разделе «Профиль» появится вход.
 
 ### Настройка входов (по желанию)
 

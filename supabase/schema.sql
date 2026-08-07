@@ -2,6 +2,14 @@
 -- Run this once in your Supabase project: SQL Editor → paste → Run.
 -- Safe to re-run: it only adds what's missing and replaces policies.
 -- Local-first model: the whole app state is stored as one JSON blob per user.
+--
+-- ВАЖНО: сразу после этого файла выполните
+--   supabase/migrations/2026-08-06_account_sync.sql
+-- Он добавляет версионирование состояния (revision + compare-and-swap),
+-- переносит «был(а) в сети» в отдельную таблицу presence и закрывает прямую
+-- запись в app_state. Без него синхронизация между устройствами работает по
+-- старой схеме «кто последний записал, тот и прав» и теряет чужие правки.
+-- Порядок обязателен: schema.sql → migrations/2026-08-06_account_sync.sql.
 
 -- ---------------- Tables ----------------
 
@@ -56,24 +64,32 @@ drop policy if exists "own state delete" on public.app_state;
 create policy "own state delete" on public.app_state
   for delete using (auth.uid() = user_id);
 
--- «Был(а) в сети» — живёт в app_state, потому что его select-политика уже
--- разрешает друзьям читать чужую строку. Отдельная таблица потребовала бы
--- дублировать эту же логику доступа.
+-- «Был(а) в сети». Исторически жило в app_state; миграция account_sync
+-- переносит отметку в отдельную таблицу presence, чтобы heartbeat раз в минуту
+-- не трогал строку состояния и не рассылал по Realtime весь блоб.
 alter table public.app_state add column if not exists last_seen timestamptz;
 
--- Обновляем отдельной функцией, а НЕ через pushState: иначе каждый heartbeat
--- трогал бы updated_at и ломал last-write-wins при синхронизации состояния.
-create or replace function public.touch_last_seen()
-returns void
-language sql
-security definer
-set search_path = public
-as $$
-  update public.app_state set last_seen = now() where user_id = auth.uid();
-$$;
-
-revoke all on function public.touch_last_seen() from public, anon;
-grant execute on function public.touch_last_seen() to authenticated;
+-- Легаси-версию функции создаём ТОЛЬКО если миграция ещё не прогонялась.
+-- Иначе повторный запуск этого файла после миграции откатил бы функцию на
+-- старую колонку и тихо сломал «был(а) в сети» — порядок запуска файлов не
+-- должен иметь значения.
+do $$
+begin
+  if to_regclass('public.presence') is null then
+    execute $fn$
+      create or replace function public.touch_last_seen()
+      returns void
+      language sql
+      security definer
+      set search_path = public
+      as $body$
+        update public.app_state set last_seen = now() where user_id = auth.uid();
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.touch_last_seen() from public, anon';
+    execute 'grant execute on function public.touch_last_seen() to authenticated';
+  end if;
+end $$;
 
 -- ---------------- friendships policies ----------------
 

@@ -9,6 +9,7 @@ import {
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import { normalizeError } from '../lib/authErrors.js'
 import { setActiveChat } from '../lib/notifications.js'
 import { getMealSections, foodsForMeal } from '../lib/meals.js'
 import { mealCardFromGroup, normalizeMealCard } from '../lib/mealCard.js'
@@ -194,7 +195,7 @@ export default function ChatView({ friend, onClose }) {
         setMessages(rows)
         setLoading(false)
       } catch (e) {
-        if (!cancelled) { flash(e.message || 'Не удалось загрузить'); setLoading(false) }
+        if (!cancelled) { flash(normalizeError(e).message); setLoading(false) }
       }
     })()
 

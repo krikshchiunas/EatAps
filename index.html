@@ -26,9 +26,117 @@
     <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/splash/apple-splash-1242x2208.png" />
     <link rel="apple-touch-startup-image" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/splash/apple-splash-640x1136.png" />
     <title>EatAps</title>
+
+    <!--
+      Страховка от «белого экрана».
+
+      Если основной скрипт не загрузился или упал до первого рендера, показать
+      нечего и человек видит пустую страницу без единой подсказки. На айфоне это
+      случается чаще всего: установленное на главный экран приложение держит
+      старую версию в кэше service worker, и после деплоя ссылки на файлы в ней
+      указывают в никуда.
+
+      Этот блок намеренно написан на ES5 и без единой зависимости: он обязан
+      работать ровно в тех браузерах, где падает всё остальное, включая те, где
+      <script type="module"> просто игнорируется.
+    -->
+    <script>
+      (function () {
+        var shown = false;
+        var reason = '';
+
+        function mounted() {
+          var r = document.getElementById('root');
+          return !!(r && r.firstChild);
+        }
+
+        function esc(s) {
+          return String(s == null ? '' : s)
+            .replace(/[<>&]/g, function (c) { return c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;'; })
+            .slice(0, 300);
+        }
+
+        function device() {
+          var m = navigator.userAgent.match(/OS (\d+)[._](\d+)/);
+          var std = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+          return (m ? 'iOS ' + m[1] + '.' + m[2] : '') + (std ? ' · с главного экрана' : '');
+        }
+
+        function recover() {
+          var go = function () { window.location.reload(); };
+          var jobs = [];
+          try {
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+                return Promise.all(rs.map(function (r) { return r.unregister(); }));
+              }));
+            }
+          } catch (e) {}
+          try {
+            if (window.caches && window.caches.keys) {
+              jobs.push(window.caches.keys().then(function (ks) {
+                return Promise.all(ks.map(function (k) { return window.caches.delete(k); }));
+              }));
+            }
+          } catch (e) {}
+          if (!jobs.length || !window.Promise) return go();
+          var t = setTimeout(go, 3000); // не залипаем, если что-то не ответит
+          Promise.all(jobs).then(function () { clearTimeout(t); go(); }, function () { clearTimeout(t); go(); });
+        }
+
+        function show() {
+          if (shown || mounted()) return;
+          var root = document.getElementById('root');
+          if (!root) return;
+          shown = true;
+          root.innerHTML =
+            '<div style="max-width:420px;margin:0 auto;padding:14vh 24px 24px;font:16px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;color:#1F312B">' +
+              '<div style="font-size:22px;font-weight:700;letter-spacing:-0.4px;margin-bottom:10px">EatAps не запустился</div>' +
+              '<p style="color:#566B63;margin:0 0 22px">Скорее всего на устройстве осталась старая версия приложения. ' +
+              'Кнопка ниже очистит её и загрузит свежую. <b>Ваши записи о питании не удалятся</b> — они сохранены отдельно.</p>' +
+              '<button id="eataps-recover" style="width:100%;padding:15px;border:0;border-radius:16px;background:#4F8375;color:#fff;font-size:17px;font-weight:600;font-family:inherit">Обновить приложение</button>' +
+              '<p style="margin:18px 0 0;font-size:12px;color:#8A9C94;word-break:break-word">' + esc(reason) + (device() ? ' · ' + device() : '') + '</p>' +
+              '<p style="margin:8px 0 0;font-size:12px;color:#8A9C94">Если не помогло — покажите эту строку разработчику.</p>' +
+            '</div>';
+          var b = document.getElementById('eataps-recover');
+          if (b) b.onclick = recover;
+        }
+
+        // Не загрузился файл приложения — диагноз однозначный, показываем сразу.
+        window.addEventListener('error', function (e) {
+          var t = e && e.target;
+          if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+            reason = 'не загрузился ' + (t.src || t.href || 'файл приложения');
+            show();
+          } else if (e && e.message) {
+            // Ошибка выполнения: запоминаем и проверяем чуть позже — приложение
+            // могло отрисоваться, несмотря на неё.
+            reason = e.message;
+            setTimeout(show, 1500);
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e && e.reason;
+          if (!reason) reason = 'сбой при запуске: ' + ((r && r.message) || r || '');
+        });
+
+        // Ничего не упало, но и не отрисовалось — например, браузер не понимает
+        // <script type="module"> и просто его пропустил.
+        setTimeout(function () {
+          if (!reason) reason = 'приложение не отрисовалось за 12 секунд';
+          show();
+        }, 12000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="max-width:420px;margin:0 auto;padding:14vh 24px;font:16px/1.5 -apple-system,sans-serif;color:#1F312B">
+        Для работы EatAps нужен включённый JavaScript.
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { pullFriendState, removeFriendship, sendChatMessage } from '../lib/supabase.js'
+import { normalizeError } from '../lib/authErrors.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
 import { sumDay } from '../lib/nutrition.js'
@@ -169,7 +170,9 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
         const res = await pullFriendState(friend.id)
         if (!cancelled) setState(res?.state || { days: {}, profile: null })
       } catch (e) {
-        if (!cancelled) setErr(e.message || 'Не удалось загрузить')
+        // Сырой текст Supabase наружу не показываем: там встречаются имена
+        // таблиц и формулировки политик доступа.
+        if (!cancelled) setErr(normalizeError(e).message)
       }
     })()
     return () => { cancelled = true }

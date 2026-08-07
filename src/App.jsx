@@ -5,6 +5,8 @@ import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief, startPresence, 
 import { startScheduler, notifyIncomingMessage } from './lib/notifications.js'
 import { autoStandardMealId, labelForMealId, typeOfMealId } from './lib/meals.js'
 import Onboarding from './components/Onboarding.jsx'
+import BootScreen from './components/BootScreen.jsx'
+import SyncIndicator from './components/SyncIndicator.jsx'
 import DayScreen from './components/DayScreen.jsx'
 import HistoryScreen from './components/HistoryScreen.jsx'
 import StatsScreen from './components/StatsScreen.jsx'
@@ -18,8 +20,9 @@ import AITab from './components/AITab.jsx'
 
 export default function App() {
   const store = useStore()
-  const { profile, days, dayOf, addFood, recovery, clearRecovery, user } = store
+  const { profile, days, dayOf, addFood, recovery, booting, user } = store
   const [tab, setTab] = useState('day')
+  const [slowBoot, setSlowBoot] = useState(false)
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(null) // null | { mealId, mealLabel }
   const [calendarOpen, setCalendarOpen] = useState(false)
@@ -97,14 +100,27 @@ export default function App() {
 
   const totalUnread = Object.values(unreadCounts).reduce((s, n) => s + n, 0)
 
-  // Ссылка «сброс пароля» из письма — форма нового пароля поверх всего.
-  const recoverySheet = recovery ? <ResetPasswordSheet onClose={clearRecovery} /> : null
+  // Затянувшаяся загрузка — меняем текст, чтобы человек понимал, что происходит,
+  // а не смотрел в бесконечный спиннер без объяснений.
+  useEffect(() => {
+    if (!booting) { setSlowBoot(false); return }
+    const t = setTimeout(() => setSlowBoot(true), 2500)
+    return () => clearTimeout(t)
+  }, [booting])
+
+  // Ссылка «сброс пароля» из письма. Это отдельный режим, а не оверлей поверх
+  // приложения: пока пароль не сменён, восстановительная сессия не считается
+  // обычным входом и данные аккаунта не грузятся.
+  if (recovery) return <ResetPasswordSheet />
+
+  // Пока неизвестно, есть ли сессия и чьи данные локально, не рендерим ничего
+  // из приложения — ни онбординг, ни главный экран с дефолтами.
+  if (booting) return <BootScreen slow={slowBoot} />
 
   if (!profile) {
     return (
       <div className="app">
         <Onboarding />
-        {recoverySheet}
       </div>
     )
   }
@@ -149,7 +165,7 @@ export default function App() {
           onAdd={(food) => addFood(date, food)}
         />
       )}
-      {recoverySheet}
+      <SyncIndicator />
     </div>
   )
 }

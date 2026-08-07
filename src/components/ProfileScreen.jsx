@@ -1,5 +1,6 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useStore } from '../store.jsx'
+import { SYNC } from '../lib/syncEngine.js'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 import { deleteAccount } from '../lib/supabase.js'
@@ -18,17 +19,45 @@ const THEMES = [
   { key: 'dark', label: 'Тёмная' },
 ]
 
-const SYNC_LABEL = { idle: '', syncing: 'Синхронизация…', synced: 'Синхронизировано', error: 'Ошибка синхронизации' }
+// Человеческие подписи состояния синхронизации. «Ошибка» отдельно от «нет
+// сети»: это разные ситуации и разные ожидания у пользователя.
+const SYNC_LABEL = {
+  [SYNC.IDLE]: 'В облаке',
+  [SYNC.SYNCING]: 'Сохраняем…',
+  [SYNC.SYNCED]: '☁ Синхронизировано',
+  [SYNC.LOCAL]: 'Сохранено на устройстве — отправим при первой возможности',
+  [SYNC.OFFLINE]: 'Нет сети — изменения сохранены на устройстве',
+  [SYNC.CONFLICT]: 'Сводим изменения с других устройств',
+  [SYNC.ERROR]: 'Не удалось синхронизировать',
+}
+const SYNC_ALARM = new Set([SYNC.ERROR])
 
 export default function ProfileScreen() {
   const store = useStore()
-  const { profile, theme, setTheme, resetAll, supabaseEnabled, user, syncStatus, auth } = store
+  const { profile, resolvedTheme, setTheme, resetAll, supabaseEnabled, user, syncStatus, signOut, stopSync, retrySync, offline } = store
   const t = profile.targets
   const [authOpen, setAuthOpen] = useState(false)
   const [myProfileOpen, setMyProfileOpen] = useState(false)
   const [legal, setLegal] = useState(null) // null | 'impressum' | 'privacy'
   const [busy, setBusy] = useState(false)
-  const [confirm, setConfirm] = useState(null) // null | 'reset' | 'delete'
+  const [confirm, setConfirm] = useState(null) // null | 'reset' | 'delete' | 'signout-global'
+  const [signingOut, setSigningOut] = useState(false)
+  const [signOutNote, setSignOutNote] = useState(null)
+
+  // Выход с этого устройства — обычное, обратимое действие: остальные телефоны
+  // и вкладки продолжают работать. Глобальный выход спрашивает подтверждение,
+  // потому что он затрагивает устройства, которых сейчас нет перед глазами.
+  const doSignOut = async (scope) => {
+    setSigningOut(true)
+    setSignOutNote(null)
+    const res = await signOut({ scope })
+    setSigningOut(false)
+    if (res?.pendingChanges) {
+      setSignOutNote('Часть изменений не успела уйти в облако — они сохранены на этом устройстве и отправятся при следующем входе.')
+    } else if (res?.error) {
+      setSignOutNote(res.error.message)
+    }
+  }
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle | sending | sent | error
@@ -79,17 +108,21 @@ export default function ProfileScreen() {
   // DSGVO: право на удаление — стираем данные из облака, аккаунт и локально.
   const delAccount = async () => {
     setBusy(true)
-    const res = await deleteAccount()
-    try {
-      await auth.signOut()
-    } catch {}
+    setSignOutNote(null)
+    // Сначала глушим синхронизацию: отложенное сохранение, сработавшее уже
+    // после удаления, попыталось бы заново создать только что стёртую строку.
+    stopSync()
+    const res = await deleteAccount(user?.id)
+    // Аккаунта больше нет — выходим сразу на всех устройствах, иначе на
+    // соседнем телефоне остался бы работающий интерфейс без данных.
+    // discard: досылать нечего и некуда.
+    await signOut({ scope: 'global', discard: true })
     setBusy(false)
     if (res?.error && !res.partial) {
-      alert('Локальные данные удалены. Онлайн-часть удалить не удалось: ' + res.error)
+      setSignOutNote('Данные на этом устройстве удалены, но стереть их в облаке не получилось. Попробуйте ещё раз, когда появится связь.')
     } else if (res?.partial) {
-      alert('Данные из облака удалены. Сам вход (аккаунт) удалите в поддержке, если требуется.')
+      setSignOutNote('Данные из облака удалены. Сам вход (аккаунт) удалите через поддержку, если требуется.')
     }
-    resetAll()
   }
 
   return (
@@ -111,9 +144,14 @@ export default function ProfileScreen() {
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.name || user.email || user.phone}</div>
-                  <div style={{ fontSize: 13, color: syncStatus === 'error' ? 'var(--danger)' : 'var(--ink-3)' }}>
-                    {syncStatus === 'synced' ? '☁ ' : ''}{SYNC_LABEL[syncStatus] || 'В облаке'}
+                  <div style={{ fontSize: 13, color: SYNC_ALARM.has(syncStatus) ? 'var(--danger)' : 'var(--ink-3)' }}>
+                    {SYNC_LABEL[syncStatus] || 'В облаке'}
                   </div>
+                  {(syncStatus === SYNC.ERROR || (offline && syncStatus !== SYNC.SYNCING)) && (
+                    <button style={{ fontSize: 13, color: 'var(--primary)', fontWeight: 600, marginTop: 2 }} onClick={retrySync}>
+                      Повторить синхронизацию
+                    </button>
+                  )}
                 </div>
               </div>
               <button className="btn" onClick={() => setMyProfileOpen(true)}>Мой профиль</button>
@@ -149,7 +187,7 @@ export default function ProfileScreen() {
         <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Оформление</div>
         <div className="seg">
           {THEMES.map((th) => (
-            <button key={th.key} className={theme === th.key ? 'on' : ''} onClick={() => setTheme(th.key)}>{th.label}</button>
+            <button key={th.key} className={resolvedTheme === th.key ? 'on' : ''} onClick={() => setTheme(th.key)}>{th.label}</button>
           ))}
         </div>
       </div>
@@ -182,7 +220,27 @@ export default function ProfileScreen() {
       </div>
 
       {supabaseEnabled && user && (
-        <button className="btn ghost" style={{ marginTop: 14 }} onClick={() => auth.signOut()}>Выйти из аккаунта</button>
+        <div className="card" style={{ marginTop: 14 }}>
+          <div className="h2" style={{ fontSize: 17, marginBottom: 4 }}>Сеансы</div>
+          <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
+            Аккаунт можно держать открытым на нескольких устройствах сразу. Обычный выход
+            закрывает сеанс только здесь.
+          </p>
+          <button className="btn ghost" disabled={signingOut} onClick={() => doSignOut('local')}>
+            {signingOut ? 'Выходим…' : 'Выйти на этом устройстве'}
+          </button>
+          <button
+            className="btn ghost"
+            style={{ marginTop: 10, color: 'var(--danger)', borderColor: 'var(--border-strong)' }}
+            disabled={signingOut}
+            onClick={() => setConfirm('signout-global')}
+          >
+            Выйти на всех устройствах
+          </button>
+          {signOutNote && (
+            <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 12 }}>{signOutNote}</p>
+          )}
+        </div>
       )}
 
       <button className="btn ghost" style={{ marginTop: 12, color: 'var(--danger)', borderColor: 'var(--border-strong)' }} onClick={reset}>
@@ -209,6 +267,13 @@ export default function ProfileScreen() {
           captcha
           text="Вы уверены, что хотите удалить EatAps и больше не знать, что едят ваши друзья?"
           onYes={() => { setConfirm(null); delAccount() }}
+          onNo={() => setConfirm(null)}
+        />
+      )}
+      {confirm === 'signout-global' && (
+        <ConfirmDialog
+          text="Закрыть сеанс на всех устройствах? Придётся войти заново везде, где вы пользуетесь EatAps."
+          onYes={() => { setConfirm(null); doSignOut('global') }}
           onNo={() => setConfirm(null)}
         />
       )}

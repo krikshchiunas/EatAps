@@ -1,60 +1,84 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
-import { supabase, supabaseEnabled, pullState, pushState, pullSubscription, subscribeToSubscription } from './lib/supabase.js'
+import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from 'react'
+import { StoreCtx, useStore } from './lib/storeContext.js'
+import {
+  supabase, supabaseEnabled, pullState, saveAppState, subscribeToAppState,
+  pullSubscription, subscribeToSubscription, removeAllRealtimeChannels,
+} from './lib/supabase.js'
 import { defaultSubscription, checkout as subCheckout, openBillingPortal as subPortal, subFromRow } from './lib/subscription.js'
 import { upsertSection, removeSection, swapCustomOrder, effectiveMealId } from './lib/meals.js'
+import { createClock } from './lib/hlc.js'
+import { getDeviceId } from './lib/deviceId.js'
+import {
+  emptyMeta, blankDay, pickSyncable, normalizeState, mergeState, sameSyncable, clearedState,
+  addTombstone, setDayFieldTs, setPrefTs,
+  tombMeal, tombSection, tombCustomFood, tombCustomIngredient,
+} from './lib/syncModel.js'
+import { createSyncEngine, SYNC } from './lib/syncEngine.js'
+import { PHASE, authReducer, initialAuthState, isBooting, isSignedIn, canSync } from './lib/authState.js'
+import { GUEST, clearCache, clockStorage, migrateLegacyCache, readCache, writeCache } from './lib/localCache.js'
+import { normalizeError } from './lib/authErrors.js'
+import { onAuthSignal, postAuthSignal } from './lib/tabBus.js'
+import { setUpdateSafetyCheck } from './lib/swUpdate.js'
+import { log, shortId } from './lib/log.js'
 
-const KEY = 'eataps:v1'
-const META = 'eataps:sync'
-const LASTUID = 'eataps:lastUid' // чьи данные лежат локально (uid последней синхронизации)
-const StoreCtx = createContext(null)
+// useStore живёт в lib/storeContext.js, но импортируется отовсюду как
+// `from '../store.jsx'` — реэкспортируем, чтобы не трогать все компоненты.
+export { useStore }
 
-const empty = { profile: null, theme: 'system', days: {}, customFoods: [], customIngredients: [], recents: [], prefs: {}, subscription: defaultSubscription() }
+// Пустое состояние. theme = null означает «пользователь не выбирал» — тогда
+// берём системную тему. Раньше системная фиксировалась в состояние при первом
+// запуске и уезжала в облако, из-за чего смена темы на одном устройстве
+// прилетала на все остальные.
+const empty = {
+  profile: null,
+  theme: null,
+  days: {},
+  customFoods: [],
+  customIngredients: [],
+  recents: [],
+  prefs: {},
+  meta: emptyMeta(),
+  subscription: defaultSubscription(),
+}
 
-// Тема: «система» больше не хранится как режим — при первом запуске берём
-// текущую настройку телефона и фиксируем как 'light'/'dark'. Дальше пользователь
-// меняет вручную в профиле. 'system' и мусор нормализуются в конкретный режим.
+// ── Тема ─────────────────────────────────────────────────────────────────────
+const THEME_MIRROR = 'eataps:theme' // отдельный ключ только ради первой отрисовки
+
 function systemTheme() {
-  return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-function normalizeTheme(t) {
-  return t === 'light' || t === 'dark' ? t : systemTheme()
-}
-
-// Слияние при входе в СУЩЕСТВУЮЩИЙ аккаунт, когда локальные данные — не его
-// (гость, другой аккаунт, свежий опросник). Облако — источник истины для
-// профиля (ник, фото, цели); локальные дни/еда/недавние ДОЛИВАЮТСЯ, но никогда
-// не перетирают облачные. Это защита от «вошёл — и облако затёрлось дефолтом».
-export function mergeCloudOverLocal(cloud, local) {
-  const uniqByName = (primary = [], extra = []) => {
-    const seen = new Set(primary.map((x) => (x.name || '').toLowerCase()))
-    return [...primary, ...extra.filter((x) => !seen.has((x.name || '').toLowerCase()))]
-  }
-  return {
-    ...local,
-    ...cloud,
-    profile: cloud.profile || local.profile,
-    theme: normalizeTheme(cloud.theme || local.theme),
-    days: { ...local.days, ...cloud.days },
-    customFoods: uniqByName(cloud.customFoods, local.customFoods),
-    customIngredients: uniqByName(cloud.customIngredients, local.customIngredients),
-    recents: uniqByName(cloud.recents, local.recents).slice(0, 40),
-    prefs: { ...local.prefs, ...cloud.prefs },
-  }
-}
-
-function load() {
+function readThemeMirror() {
   try {
-    const raw = localStorage.getItem(KEY)
-    const base = raw ? { ...empty, ...JSON.parse(raw) } : empty
-    return { ...base, theme: normalizeTheme(base.theme) } // мигрируем legacy 'system' → конкретный режим
-  } catch {
-    return { ...empty, theme: systemTheme() }
-  }
+    const v = localStorage.getItem(THEME_MIRROR)
+    return v === 'light' || v === 'dark' ? v : null
+  } catch { return null }
 }
 
-function blankDay() {
-  return { meals: [], mealSections: [], mood: null, wellbeing: [], note: '' }
+export function effectiveTheme(theme) {
+  return theme === 'light' || theme === 'dark' ? theme : systemTheme()
+}
+
+// Тему ставим до первого рендера: иначе тёмная тема моргает белым, пока грузится
+// состояние аккаунта.
+if (typeof document !== 'undefined') {
+  document.documentElement.setAttribute('data-theme', effectiveTheme(readThemeMirror()))
+}
+
+// ── Часы устройства ──────────────────────────────────────────────────────────
+// Один экземпляр на всё приложение: метки должны монотонно расти независимо от
+// того, кто вошёл и сколько раз пересобрался React-дерево.
+const clock = createClock({
+  deviceId: typeof window === 'undefined' ? '00000000' : getDeviceId(),
+  load: clockStorage.load,
+  save: clockStorage.save,
+})
+
+// ── Транспорт для движка синхронизации ───────────────────────────────────────
+const transport = {
+  pull: (uid) => pullState(uid),
+  save: (state, baseRevision) => saveAppState(state, baseRevision),
+  subscribe: (uid, cb) => subscribeToAppState(uid, cb),
 }
 
 const authApi = supabaseEnabled
@@ -74,152 +98,282 @@ const authApi = supabaseEnabled
       signInWeb3: (chain, wallet) => supabase.auth.signInWithWeb3({ chain, statement: 'Sign in to EatAps', wallet }),
       resetPassword: (email) => supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
       updatePassword: (password) => supabase.auth.updateUser({ password }),
-      // LASTUID при выходе НЕ трогаем: это метка «чьи данные лежат локально».
-      // Она нужна, чтобы при входе другого человека на этом устройстве его
-      // облако не смешалось с чужими локальными днями (см. reconcile ниже).
-      // scope 'local' — выход только с ЭТОГО устройства; по умолчанию Supabase
-      // разлогинивает все устройства сразу.
-      signOut: () => supabase.auth.signOut({ scope: 'local' }),
     }
   : null
 
 export function StoreProvider({ children }) {
-  const [state, setState] = useState(load)
-  const [session, setSession] = useState(null)
-  const [syncStatus, setSyncStatus] = useState('idle') // idle | syncing | synced | error
-  const [recovery, setRecovery] = useState(false) // пришли по ссылке сброса пароля
+  const [auth, dispatch] = useReducer(authReducer, undefined, initialAuthState)
+  const [state, setState] = useState(empty)
+  const [syncStatus, setSyncStatus] = useState(SYNC.IDLE)
+  // Счётчик для ручного перезапуска загрузки данных аккаунта.
+  const [dataNonce, setDataNonce] = useState(0)
+
+  const uid = auth.userId
+  const recovering = auth.recovering
+  const phase = auth.phase
 
   const stateRef = useRef(state)
   stateRef.current = state
-  const bootRef = useRef(false)
-  const suppressPush = useRef(false)
-  const pushTimer = useRef(null)
-  // Пока reconcile при входе не завершился успешно, авто-push запрещён:
-  // иначе при сбое сверки можно затереть облако локальными данными.
-  const reconciledRef = useRef(false)
-  const [syncTick, setSyncTick] = useState(0) // ручной перезапуск reconcile
+  const engineRef = useRef(null)
+  const engineOwnerRef = useRef(null) // uid, для которого движок реально запущен
+  const authRef = useRef(auth)
+  authRef.current = auth
 
-  // persist locally + track local change time
+  // ── 1. Загрузка: единственный источник событий авторизации ────────────────
+  // Ни одного параллельного getSession(): supabase-js сам присылает
+  // INITIAL_SESSION с восстановленной сессией. Два источника раньше гонялись,
+  // и более медленный затирал более свежий результат.
   useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state))
-      if (bootRef.current) localStorage.setItem(META, String(Date.now()))
-      else bootRef.current = true
-    } catch {}
-  }, [state])
+    if (!supabaseEnabled) {
+      migrateLegacyCache()
+      dispatch({ type: 'INITIAL_SESSION', session: null })
+      return
+    }
 
-  // theme — тема всегда конкретная ('light'/'dark'); систему больше не «следим»
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', normalizeTheme(state.theme))
-  }, [state.theme])
+    migrateLegacyCache()
+    let alive = true
 
-  // auth boot + subscription. PASSWORD_RECOVERY = пользователь пришёл по
-  // ссылке «сброс пароля» — App покажет форму нового пароля.
-  useEffect(() => {
-    if (!supabaseEnabled) return
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data } = supabase.auth.onAuthStateChange((event, s) => {
-      setSession(s)
-      if (event === 'PASSWORD_RECOVERY') setRecovery(true)
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!alive) return
+      log.auth(event, { user: shortId(session?.user?.id) })
+      switch (event) {
+        case 'INITIAL_SESSION': dispatch({ type: 'INITIAL_SESSION', session }); break
+        case 'SIGNED_IN': dispatch({ type: 'SIGNED_IN', session }); break
+        case 'TOKEN_REFRESHED': dispatch({ type: 'TOKEN_REFRESHED', session }); break
+        case 'USER_UPDATED': dispatch({ type: 'USER_UPDATED', session }); break
+        case 'PASSWORD_RECOVERY': dispatch({ type: 'PASSWORD_RECOVERY', session }); break
+        case 'SIGNED_OUT': dispatch({ type: 'SIGNED_OUT' }); break
+        default: break
+      }
     })
-    return () => data.subscription.unsubscribe()
+
+    // Страховка: если INITIAL_SESSION почему-то не пришёл (недоступное
+    // хранилище, зависший запрос), не оставляем приложение в вечной загрузке.
+    const guard = setTimeout(async () => {
+      if (!alive || authRef.current.phase !== PHASE.INITIALIZING) return
+      let session = null
+      try { session = (await supabase.auth.getSession()).data.session } catch {}
+      if (alive) dispatch({ type: 'INIT_TIMEOUT', session })
+    }, 6000)
+
+    return () => {
+      alive = false
+      clearTimeout(guard)
+      data.subscription.unsubscribe()
+    }
   }, [])
 
-  // on login → reconcile cloud vs local.
-  // Четыре случая по владельцу локальных данных (LASTUID):
-  // 1. Локальные данные — ЭТОГО аккаунта → честный last-write-wins по времени.
-  // 2. Локальные данные — ДРУГОГО аккаунта → не смешиваем: облако полностью
-  //    заменяет локальное (чужие дни не должны утечь в этот аккаунт).
-  //    Если облако пустое — начинаем с чистого листа (онбординг).
-  // 3. Локальные данные гостевые (LASTUID пуст), в облаке есть профиль →
-  //    облако главнее, гостевые дни/еда ДОЛИВАЮТСЯ и уходят в облако.
-  // 4. Гостевые данные, облако пустое (новый аккаунт) → заливаем локальное.
-  const uid = session?.user?.id
+  // ── 2. Гость: состояние живёт в отдельном локальном кэше ──────────────────
   useEffect(() => {
-    if (!supabaseEnabled || !uid) return
-    let cancelled = false
-    reconciledRef.current = false
-    ;(async () => {
-      setSyncStatus('syncing')
-      try {
-        const cloud = await pullState(uid)
-        const localTs = Number(localStorage.getItem(META) || 0)
-        const lastUid = localStorage.getItem(LASTUID)
-        const sameUser = lastUid === uid
-        const foreignLocal = Boolean(lastUid) && !sameUser
+    if (phase !== PHASE.ANONYMOUS) return
+    const cached = readCache(GUEST)
+    setState((s) => ({
+      ...empty,
+      theme: readThemeMirror(),           // оформление — настройка устройства, выход её не сбрасывает
+      ...(cached ? normalizeState(cached.state) : null),
+      subscription: s.subscription,
+    }))
+    setSyncStatus(SYNC.IDLE)
+  }, [phase])
 
-        if (sameUser) {
-          if (cloud && Date.parse(cloud.updatedAt) > localTs) {
-            suppressPush.current = true
-            setState({ ...empty, ...cloud.state })
-            localStorage.setItem(META, String(Date.parse(cloud.updatedAt)))
-          } else {
-            const ts = await pushState(uid, stateRef.current)
-            localStorage.setItem(META, String(Date.parse(ts)))
-          }
-        } else if (foreignLocal) {
-          // Устройство с данными другого аккаунта: берём только облако.
-          suppressPush.current = true
-          if (cloud) {
-            setState({ ...empty, ...cloud.state, theme: normalizeTheme(cloud.state?.theme) })
-            localStorage.setItem(META, String(Date.parse(cloud.updatedAt)))
-          } else {
-            setState({ ...empty, theme: normalizeTheme(stateRef.current.theme) })
-            localStorage.setItem(META, '0')
-          }
-        } else if (cloud && cloud.state?.profile) {
-          // Гостевые данные + существующий аккаунт: доливаем гостевое в облако.
-          const merged = mergeCloudOverLocal({ ...empty, ...cloud.state }, stateRef.current)
-          suppressPush.current = true
-          setState(merged)
-          const ts = await pushState(uid, merged)
-          localStorage.setItem(META, String(Date.parse(ts)))
-        } else {
-          const ts = await pushState(uid, stateRef.current)
-          localStorage.setItem(META, String(Date.parse(ts)))
-        }
-        localStorage.setItem(LASTUID, uid)
-        reconciledRef.current = true
-        if (!cancelled) setSyncStatus('synced')
-      } catch {
-        if (!cancelled) setSyncStatus('error')
-      }
-    })()
+  // ── 3. Аккаунт: один движок синхронизации на пользователя ─────────────────
+  // Эффект пересоздаётся только при смене uid / выходе из recovery / ручном
+  // повторе. Смена фазы (loading → ready) движок НЕ трогает — иначе он
+  // останавливался бы сразу после успешного старта.
+  useEffect(() => {
+    if (!supabaseEnabled || !uid || recovering) return
+
+    let alive = true
+    const ownerAtStart = uid
+
+    // Чей кэш берём за основу. Свой — если он есть. Если человек только что
+    // зарегистрировался/вошёл впервые на этом устройстве, «усыновляем»
+    // гостевые данные (заполненная анкета, дневник до регистрации).
+    const own = readCache(ownerAtStart)
+    const guest = own ? null : readCache(GUEST)
+    const seed = own?.state || guest?.state || null
+
+    // Показываем кэш немедленно: приложение работает офлайн и не мигает
+    // пустыми экранами, пока идёт запрос к серверу.
+    setState((s) => ({ ...empty, ...(seed ? normalizeState(seed) : null), subscription: s.subscription }))
+
+    const engine = createSyncEngine({
+      userId: ownerAtStart,
+      transport,
+      clock,
+      cache: {
+        read: () => readCache(ownerAtStart),
+        write: (rec) => writeCache(ownerAtStart, rec),
+        clear: () => clearCache(ownerAtStart),
+      },
+      onState: (next) => {
+        if (!alive) return
+        setState((s) => ({ ...s, ...next }))
+      },
+      onStatus: (st) => { if (alive) setSyncStatus(st) },
+      onFatal: (err) => {
+        // Единственный автоматический выход — мёртвый refresh token. Всё
+        // остальное (сеть, RLS, конфликт) выходом из аккаунта не лечится.
+        if (!alive) return
+        log.error('auth', 'сессия недействительна — выходим локально', err)
+        supabase.auth.signOut({ scope: 'local' }).catch(() => {})
+        dispatch({ type: 'SESSION_INVALID', error: err })
+      },
+    })
+
+    engineRef.current = engine
+    engineOwnerRef.current = ownerAtStart
+
+    engine.start(seed || empty).then((res) => {
+      if (!alive) return
+      if (guest) clearCache(GUEST) // гостевые данные усыновлены — на устройстве их больше нет
+      if (!res?.fatal) dispatch({ type: 'DATA_LOADED', userId: ownerAtStart })
+      if (res?.offline) dispatch({ type: 'DATA_OFFLINE', userId: ownerAtStart })
+    })
+
     return () => {
-      cancelled = true
+      alive = false
+      engine.stop()
+      if (engineRef.current === engine) {
+        engineRef.current = null
+        engineOwnerRef.current = null
+      }
     }
-  }, [uid, syncTick])
+  }, [uid, recovering, dataNonce])
 
-  // Подписка Stripe: первичный pull после логина + realtime на изменения.
+  // ── 4. Любое изменение состояния уходит в конвейер ────────────────────────
+  // Один вызов, без флагов «это не пользовательское изменение»: движок сам
+  // сравнивает состояние с уже известным и не отправляет то, что не менялось.
+  // Поэтому гидратация с сервера не порождает обратную запись.
   useEffect(() => {
-    if (!supabaseEnabled || !uid) return
-    let cancelled = false
+    if (!canSync(authRef.current)) return
+    if (engineOwnerRef.current !== uid) return
+    engineRef.current?.push(state)
+  }, [state, uid, phase])
+
+  useEffect(() => {
+    if (phase !== PHASE.ANONYMOUS) return
+    writeCache(GUEST, { state: pickSyncable(state), revision: 0, dirty: false })
+  }, [state, phase])
+
+  // ── 5. Тема ───────────────────────────────────────────────────────────────
+  // Пока состояние аккаунта не загружено (и после выхода) state.theme пуст —
+  // тогда берём последний явный выбор из зеркального ключа. Иначе оформление
+  // на секунду перекидывало бы в системную тему при каждом входе и выходе.
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', effectiveTheme(state.theme || readThemeMirror()))
+    if (!state.theme) return
+    try { localStorage.setItem(THEME_MIRROR, state.theme) } catch {}
+  }, [state.theme])
+
+  // ── 6. Другие вкладки ─────────────────────────────────────────────────────
+  // Состояние: вкладки пишут в один ключ localStorage, событие storage
+  // говорит «сосед сохранил» — сливаем и показываем без перезагрузки.
+  const storageOwner = uid || (phase === PHASE.ANONYMOUS ? GUEST : null)
+  useEffect(() => {
+    if (!storageOwner) return
+    const key = `eataps:state:${storageOwner}`
+    const onStorage = (e) => {
+      if (e.key !== key || !e.newValue) return
+      try {
+        const rec = JSON.parse(e.newValue)
+        if (!rec?.state) return
+        setState((s) => {
+          const merged = mergeState(rec.state, pickSyncable(s))
+          // Если слияние ничего не изменило — не трогаем состояние. Иначе две
+          // вкладки бесконечно пересохраняли бы друг другу одно и то же.
+          return sameSyncable(merged, s) ? s : { ...s, ...merged }
+        })
+      } catch {}
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [storageOwner])
+
+  // Вход/выход в соседней вкладке. supabase-js такие события между вкладками
+  // не рассылает — без этого одна вкладка оставалась «залогиненной» после
+  // выхода в другой.
+  useEffect(() => {
+    if (!supabaseEnabled) return
+    return onAuthSignal(async (kind) => {
+      const cur = authRef.current
+      if (kind === 'signed-out') {
+        if (!cur.userId) return
+        // Хранилище уже очищено соседом; гасим собственную сессию в памяти.
+        try { await supabase.auth.signOut({ scope: 'local' }) } catch {}
+        dispatch({ type: 'SIGNED_OUT' })
+      } else if (kind === 'signed-in') {
+        if (cur.userId) return
+        try {
+          const { data } = await supabase.auth.getSession()
+          if (data?.session) dispatch({ type: 'SIGNED_IN', session: data.session })
+        } catch {}
+      }
+    })
+  }, [])
+
+  // ── 7. Сеть, фон, возврат на вкладку ──────────────────────────────────────
+  // Realtime сам по себе не гарантия: пока вкладка спала или сети не было,
+  // события могли не дойти. Поэтому при возвращении делаем контрольную сверку.
+  useEffect(() => {
+    if (!uid) return
+    const engine = () => (engineOwnerRef.current === uid ? engineRef.current : null)
+
+    const onOnline = () => { engine()?.retryNow(); engine()?.refresh() }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      // Долгий сон мобильного браузера мог остановить авто-refresh токена.
+      supabase?.auth?.getSession?.().catch(() => {})
+      engine()?.refresh()
+    }
+    // Уход со страницы: пробуем дослать накопленное. Даже если не успеем —
+    // изменения уже в локальном кэше и уедут при следующем запуске.
+    const onHide = () => { engine()?.flush().catch(() => {}) }
+
+    window.addEventListener('online', onOnline)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('pagehide', onHide)
+    }
+  }, [uid])
+
+  // Новая версия PWA применяется только когда всё сохранено: перезагрузка
+  // посреди отправки — самый обидный способ потерять последнюю правку.
+  useEffect(() => {
+    setUpdateSafetyCheck(() => !engineRef.current?.hasPendingChanges)
+  }, [syncStatus])
+
+  // ── 8. Подписка Stripe (серверный источник истины, вне app_state) ─────────
+  useEffect(() => {
+    if (!supabaseEnabled || !uid || recovering) return
+    let alive = true
     ;(async () => {
       const row = await pullSubscription(uid)
-      if (cancelled) return
+      if (!alive) return
       setState((s) => ({ ...s, subscription: subFromRow(row) }))
     })()
     const unsub = subscribeToSubscription(uid, (row) => {
-      setState((s) => ({ ...s, subscription: subFromRow(row) }))
+      if (alive) setState((s) => ({ ...s, subscription: subFromRow(row) }))
     })
-    return () => { cancelled = true; unsub() }
-  }, [uid])
+    return () => { alive = false; unsub() }
+  }, [uid, recovering])
 
   // Разлогин → возвращаем FREE (иначе UI останется с чужим тиром до перезагрузки).
   useEffect(() => {
-    if (!supabaseEnabled || uid) return
+    if (uid) return
     setState((s) => (s.subscription?.tier === 'FREE' ? s : { ...s, subscription: defaultSubscription() }))
   }, [uid])
 
   // Возврат из Stripe Checkout: успех — доопрашиваем несколько раз, пока вебхук
   // не запишет активную подписку (обычно приходит за 1–3 сек, но бывает дольше).
-  // Затем чистим query, чтобы при обновлении вкладки не повторять цикл.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     const outcome = params.get('checkout')
     if (!outcome) return
-    // Убираем query сразу, чтобы визуально ничего не мигало и рефреш не триггерил.
     params.delete('checkout')
     const clean = window.location.pathname + (params.toString() ? `?${params}` : '') + window.location.hash
     window.history.replaceState(null, '', clean)
@@ -228,6 +382,7 @@ export function StoreProvider({ children }) {
     ;(async () => {
       for (let i = 0; i < 8 && !cancelled; i++) {
         const row = await pullSubscription(uid)
+        if (cancelled) return
         const next = subFromRow(row)
         setState((s) => ({ ...s, subscription: next }))
         if (next.tier !== 'FREE' && next.status !== 'inactive') break
@@ -237,55 +392,37 @@ export function StoreProvider({ children }) {
     return () => { cancelled = true }
   }, [uid])
 
-  // Синк упал (офлайн/сбой) → при возвращении сети повторяем reconcile целиком.
-  useEffect(() => {
-    if (!supabaseEnabled || !uid || syncStatus !== 'error') return
-    const retry = () => setSyncTick((t) => t + 1)
-    window.addEventListener('online', retry)
-    return () => window.removeEventListener('online', retry)
-  }, [uid, syncStatus])
+  // ── 9. Мутации ────────────────────────────────────────────────────────────
+  // Метка времени берётся ДО setState: React в StrictMode вызывает функцию
+  // обновления дважды, и tick() внутри неё сжигал бы две метки на одну правку.
 
-  // debounced push on any change while logged in (только после успешной сверки)
-  useEffect(() => {
-    if (!supabaseEnabled || !uid) return
-    // Сначала гасим флаг «это setState самой синхронизации», чтобы он не
-    // застрял и не съел первый настоящий пуш пользователя.
-    if (suppressPush.current) {
-      suppressPush.current = false
-      return
-    }
-    if (!reconciledRef.current) return
-    clearTimeout(pushTimer.current)
-    pushTimer.current = setTimeout(async () => {
-      try {
-        setSyncStatus('syncing')
-        const ts = await pushState(uid, stateRef.current)
-        localStorage.setItem(META, String(Date.parse(ts)))
-        setSyncStatus('synced')
-      } catch {
-        setSyncStatus('error')
-      }
-    }, 1200)
-    return () => clearTimeout(pushTimer.current)
-  }, [state, uid])
+  const setProfile = useCallback((profile) => {
+    const ts = clock.tick()
+    setState((s) => ({ ...s, profile, meta: { ...s.meta, profileTs: ts } }))
+  }, [])
 
-  const setProfile = useCallback((profile) => setState((s) => ({ ...s, profile })), [])
-  const setTheme = useCallback((theme) => setState((s) => ({ ...s, theme })), [])
+  const setTheme = useCallback((theme) => {
+    const ts = clock.tick()
+    setState((s) => ({ ...s, theme, meta: { ...s.meta, themeTs: ts } }))
+  }, [])
 
+  // Правка дня: fn получает день, ts — уже готовую метку для новых записей.
   const editDay = useCallback((date, fn) => {
+    const ts = clock.tick()
     setState((s) => {
       const day = s.days[date] || blankDay()
-      return { ...s, days: { ...s.days, [date]: fn({ ...day }) } }
+      const next = fn({ ...day }, ts)
+      return { ...s, days: { ...s.days, [date]: next } }
     })
   }, [])
 
-  // Продукт внутри приёма пищи (day.meals — плоский список, принадлежность приёму
-  // считается через effectiveMealId — см. lib/meals.js). createdAt нужен для
-  // авто-времени приёма (время первого добавленного продукта).
   const addFood = useCallback((date, food) => {
+    const ts = clock.tick()
+    const id = crypto.randomUUID()
+    const createdAt = new Date().toISOString()
     setState((s) => {
       const day = s.days[date] || blankDay()
-      const entry = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...food }
+      const entry = { id, createdAt, ...food, updatedAt: ts }
       const days = { ...s.days, [date]: { ...day, meals: [...day.meals, entry] } }
       const snap = {
         name: food.name,
@@ -304,63 +441,107 @@ export function StoreProvider({ children }) {
     })
   }, [])
 
+  // Удаление оставляет тумбстоун: без него запись «воскресала» из копии другого
+  // устройства при следующем слиянии.
   const removeFood = useCallback((date, id) => {
-    editDay(date, (d) => ({ ...d, meals: d.meals.filter((m) => m.id !== id) }))
-  }, [editDay])
+    const ts = clock.tick()
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      const days = { ...s.days, [date]: { ...day, meals: day.meals.filter((m) => m.id !== id) } }
+      return { ...s, days, meta: addTombstone(s.meta, tombMeal(date, id), ts) }
+    })
+  }, [])
 
   const editFood = useCallback((date, updatedFood) => {
-    editDay(date, (d) => ({ ...d, meals: d.meals.map((m) => m.id === updatedFood.id ? updatedFood : m) }))
-  }, [editDay])
-
-  // Создание/редактирование приёма пищи (время, showTime, переименование custom).
-  const upsertMealSection = useCallback((date, section) => {
-    editDay(date, (d) => ({ ...d, mealSections: upsertSection(d, section) }))
-  }, [editDay])
-
-  // Удаление ТОЛЬКО пользовательского приёма — вместе со всеми его продуктами
-  // (UI обязан спросить подтверждение до вызова, если продукты есть — см. п.9).
-  const deleteMealSection = useCallback((date, mealId) => {
-    editDay(date, (d) => ({
+    editDay(date, (d, ts) => ({
       ...d,
-      mealSections: removeSection(d, mealId),
-      meals: d.meals.filter((m) => effectiveMealId(m) !== mealId),
+      meals: d.meals.map((m) => (m.id === updatedFood.id ? { ...updatedFood, updatedAt: ts } : m)),
     }))
   }, [editDay])
 
-  // Ручной порядок дополнительных приёмов — кнопки «выше/ниже» (dir: -1/+1).
-  const moveMealSection = useCallback((date, mealId, dir) => {
-    editDay(date, (d) => ({ ...d, mealSections: swapCustomOrder(d, mealId, dir) }))
+  const upsertMealSection = useCallback((date, section) => {
+    editDay(date, (d, ts) => ({ ...d, mealSections: upsertSection(d, { ...section, updatedAt: ts }) }))
   }, [editDay])
 
-  const setMood = useCallback((date, mood) => {
-    editDay(date, (d) => ({ ...d, mood }))
+  // Удаление пользовательского приёма — вместе со всеми его продуктами.
+  const deleteMealSection = useCallback((date, mealId) => {
+    const ts = clock.tick()
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      const doomed = day.meals.filter((m) => effectiveMealId(m) === mealId)
+      let meta = addTombstone(s.meta, tombSection(date, mealId), ts)
+      for (const m of doomed) meta = addTombstone(meta, tombMeal(date, m.id), ts)
+      const next = {
+        ...day,
+        mealSections: removeSection(day, mealId),
+        meals: day.meals.filter((m) => effectiveMealId(m) !== mealId),
+      }
+      return { ...s, days: { ...s.days, [date]: next }, meta }
+    })
+  }, [])
+
+  const moveMealSection = useCallback((date, mealId, dir) => {
+    editDay(date, (d, ts) => ({
+      ...d,
+      mealSections: swapCustomOrder(d, mealId, dir).map((sec) => ({ ...sec, updatedAt: ts })),
+    }))
   }, [editDay])
+
+  // Скаляры дня версионируются отдельно от списка продуктов: правка настроения
+  // на телефоне не должна конфликтовать с добавлением еды на компьютере.
+  const setMood = useCallback((date, mood) => {
+    const ts = clock.tick()
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      return {
+        ...s,
+        days: { ...s.days, [date]: { ...day, mood } },
+        meta: setDayFieldTs(s.meta, date, 'mood', ts),
+      }
+    })
+  }, [])
 
   const toggleWellbeing = useCallback((date, tag) => {
-    editDay(date, (d) => ({
-      ...d,
-      wellbeing: d.wellbeing.includes(tag) ? d.wellbeing.filter((t) => t !== tag) : [...d.wellbeing, tag],
-    }))
-  }, [editDay])
+    const ts = clock.tick()
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      const wellbeing = day.wellbeing.includes(tag)
+        ? day.wellbeing.filter((t) => t !== tag)
+        : [...day.wellbeing, tag]
+      return {
+        ...s,
+        days: { ...s.days, [date]: { ...day, wellbeing } },
+        meta: setDayFieldTs(s.meta, date, 'wellbeing', ts),
+      }
+    })
+  }, [])
 
   const addCustomFood = useCallback((food) => {
-    const entry = { id: crypto.randomUUID(), ...food }
+    const ts = clock.tick()
+    const entry = { id: crypto.randomUUID(), ...food, updatedAt: ts }
     setState((s) => {
-      const exists = (s.customFoods || []).some((f) => f.name.toLowerCase() === food.name.toLowerCase())
+      const list = s.customFoods || []
+      const exists = list.some((f) => f.name.toLowerCase() === food.name.toLowerCase())
       const customFoods = exists
-        ? s.customFoods.map((f) => (f.name.toLowerCase() === food.name.toLowerCase() ? { ...f, ...food, id: f.id } : f))
-        : [entry, ...(s.customFoods || [])]
+        ? list.map((f) => (f.name.toLowerCase() === food.name.toLowerCase() ? { ...f, ...food, id: f.id, updatedAt: ts } : f))
+        : [entry, ...list]
       return { ...s, customFoods }
     })
     return entry
   }, [])
 
   const removeCustomFood = useCallback((id) => {
-    setState((s) => ({ ...s, customFoods: (s.customFoods || []).filter((f) => f.id !== id) }))
+    const ts = clock.tick()
+    setState((s) => ({
+      ...s,
+      customFoods: (s.customFoods || []).filter((f) => f.id !== id),
+      meta: addTombstone(s.meta, tombCustomFood(id), ts),
+    }))
   }, [])
 
   const addCustomIngredient = useCallback((ing) => {
-    const entry = { id: crypto.randomUUID(), ...ing }
+    const ts = clock.tick()
+    const entry = { id: crypto.randomUUID(), ...ing, updatedAt: ts }
     setState((s) => {
       const list = s.customIngredients || []
       if (list.some((f) => f.name.toLowerCase() === ing.name.toLowerCase())) return s
@@ -370,14 +551,14 @@ export function StoreProvider({ children }) {
   }, [])
 
   const setPref = useCallback((key, val) => {
-    setState((s) => ({ ...s, prefs: { ...s.prefs, [key]: val } }))
+    const ts = clock.tick()
+    setState((s) => ({ ...s, prefs: { ...s.prefs, [key]: val }, meta: setPrefTs(s.meta, key, ts) }))
   }, [])
 
   const setSubscription = useCallback((sub) => {
     setState((s) => ({ ...s, subscription: { ...defaultSubscription(), ...sub } }))
   }, [])
 
-  // Тянем актуальную подписку из Supabase (webhook — источник истины).
   const refreshSubscription = useCallback(async () => {
     if (!uid) return null
     const row = await pullSubscription(uid)
@@ -386,27 +567,102 @@ export function StoreProvider({ children }) {
     return next
   }, [uid])
 
-  // Покупка: редирект на Stripe Checkout. Реальное состояние приедет по
-  // вебхуку в таблицу subscriptions → Realtime канал внизу обновит store.
-  const purchaseSubscription = useCallback(async (tier) => {
-    return subCheckout(tier, { session })
-  }, [session])
+  const purchaseSubscription = useCallback(async (tier) => subCheckout(tier, { session: auth.session }), [auth.session])
+  const openSubscriptionPortal = useCallback(async () => subPortal({ session: auth.session }), [auth.session])
 
-  // Портал Stripe: смена карты, апгрейд/даунгрейд, отмена — всё внутри Stripe.
-  const openSubscriptionPortal = useCallback(async () => {
-    return subPortal({ session })
-  }, [session])
-
+  // Сброс данных. Для аккаунта это не «обнулить локально»: без тумбстоунов всё
+  // вернулось бы с сервера при первом же слиянии.
   const resetAll = useCallback(() => {
-    // Сброс обнуляет и метки синхронизации: пустое локальное состояние не
-    // должно считаться «новее облака» при следующем входе.
-    localStorage.removeItem(LASTUID)
-    localStorage.removeItem(META)
-    setState({ ...empty, theme: systemTheme() })
+    const ts = clock.tick()
+    setState((s) => ({ ...clearedState(s, ts), subscription: s.subscription }))
+    if (!isSignedIn(authRef.current)) clearCache(GUEST)
   }, [])
 
-  const value = {
+  // ── 10. Выход ─────────────────────────────────────────────────────────────
+  // По умолчанию — только это устройство. Глобальный выход это отдельное
+  // осознанное действие: раньше scope не указывался нигде явно, и один
+  // неверный вызов выбрасывал человека со всех устройств сразу.
+  // discard: true — не пытаться дослать изменения (аккаунт удаляется, слать
+  // некуда) и всё равно стереть локальный кэш.
+  const signOut = useCallback(async ({ scope = 'local', discard = false } = {}) => {
+    const engine = engineRef.current
+    dispatch({ type: 'SIGN_OUT_START' })
+
+    // Сначала дослать несохранённое: выход не должен стоить пользователю
+    // последних правок.
+    let flushed = true
+    if (!discard) {
+      try { flushed = engine ? await engine.flush() : true } catch { flushed = false }
+    }
+
+    const owner = engineOwnerRef.current
+    engine?.stop()
+    engineRef.current = null
+    engineOwnerRef.current = null
+    removeAllRealtimeChannels()
+
+    let error = null
+    try {
+      const res = await supabase.auth.signOut({ scope })
+      if (res?.error) error = normalizeError(res.error)
+    } catch (e) {
+      error = normalizeError(e)
+    }
+
+    // Приватные данные не остаются на устройстве после выхода. Кэш сохраняем
+    // только если что-то не доехало до сервера — иначе выход означал бы потерю
+    // данных. Пользователю об этом честно сообщаем.
+    if (owner && (flushed || discard)) clearCache(owner)
+    setState((s) => ({ ...empty, subscription: defaultSubscription(), theme: s.theme }))
+    setSyncStatus(SYNC.IDLE)
+    dispatch({ type: 'SIGNED_OUT' })
+    postAuthSignal('signed-out')
+    log.auth('выход', { scope, всёОтправлено: flushed })
+    return { ok: !error, error, pendingChanges: !flushed }
+  }, [])
+
+  // Остановить синхронизацию, не выходя из аккаунта. Нужно ровно перед
+  // удалением аккаунта: иначе отложенное сохранение успело бы заново создать
+  // строку app_state, которую мы только что стёрли.
+  const stopSync = useCallback(() => {
+    engineRef.current?.stop()
+    engineRef.current = null
+    engineOwnerRef.current = null
+    setSyncStatus(SYNC.IDLE)
+  }, [])
+
+  const retryData = useCallback(() => {
+    dispatch({ type: 'RETRY_DATA' })
+    setDataNonce((n) => n + 1)
+  }, [])
+
+  const retrySync = useCallback(() => {
+    engineRef.current?.retryNow()
+    engineRef.current?.refresh()
+  }, [])
+
+  // Форма входа сообщает о начале и завершении запроса — состояние
+  // authenticating нужно, чтобы UI не считал человека гостем, пока ответ в пути.
+  const beginSignIn = useCallback(() => dispatch({ type: 'SIGN_IN_START' }), [])
+  const endSignIn = useCallback((err) => {
+    dispatch({ type: 'SIGN_IN_SETTLED', error: err ? normalizeError(err) : null })
+  }, [])
+
+  const completeRecovery = useCallback(() => dispatch({ type: 'RECOVERY_COMPLETED' }), [])
+
+  // Отмена восстановления пароля = выход: recovery-сессия не должна оставаться
+  // «обычным входом», иначе ссылка из письма превращается в постоянный доступ.
+  const cancelRecovery = useCallback(async () => {
+    try { await supabase.auth.signOut({ scope: 'local' }) } catch {}
+    dispatch({ type: 'SIGNED_OUT' })
+  }, [])
+
+  const dismissAuthError = useCallback(() => dispatch({ type: 'DISMISS_ERROR' }), [])
+
+  const value = useMemo(() => ({
     ...state,
+    theme: state.theme,
+    resolvedTheme: effectiveTheme(state.theme),
     customFoods: state.customFoods || [],
     customIngredients: state.customIngredients || [],
     recents: state.recents || [],
@@ -434,19 +690,43 @@ export function StoreProvider({ children }) {
     resetAll,
     // auth / sync
     supabaseEnabled,
-    session,
-    user: session?.user || null,
+    authPhase: phase,
+    booting: isBooting(auth),
+    signedIn: isSignedIn(auth),
+    offline: phase === PHASE.OFFLINE_WITH_CACHED_SESSION,
+    authError: auth.error,
+    session: auth.session,
+    user: auth.session?.user || null,
     syncStatus,
+    hasPendingChanges: syncStatus === SYNC.LOCAL || syncStatus === SYNC.OFFLINE,
     auth: authApi,
-    recovery,
-    clearRecovery: () => setRecovery(false),
-  }
+    signOut,
+    stopSync,
+    beginSignIn,
+    endSignIn,
+    announceSignIn,
+    recovery: recovering,
+    completeRecovery,
+    cancelRecovery,
+    retryData,
+    retrySync,
+    dismissAuthError,
+    deviceId: clock.deviceId,
+  }), [
+    state, auth, phase, recovering, syncStatus,
+    setProfile, setTheme, addFood, removeFood, editFood, upsertMealSection, deleteMealSection,
+    moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient,
+    setPref, setSubscription, purchaseSubscription, openSubscriptionPortal, refreshSubscription,
+    resetAll, signOut, stopSync, beginSignIn, endSignIn, completeRecovery, cancelRecovery,
+    retryData, retrySync, dismissAuthError,
+  ])
 
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>
 }
 
-export function useStore() {
-  const ctx = useContext(StoreCtx)
-  if (!ctx) throw new Error('useStore must be used within StoreProvider')
-  return ctx
+// Сообщить соседним вкладкам об успешном входе. Вызывает форма входа: только
+// она знает, что вход был именно действием пользователя, а не восстановлением
+// сессии при запуске.
+export function announceSignIn() {
+  postAuthSignal('signed-in')
 }

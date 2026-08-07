@@ -1,8 +1,8 @@
-import { useState, useEffect, Component } from 'react'
+import { useState, useEffect, useRef, Component } from 'react'
 import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from '@reown/appkit/react'
 import { useStore } from '../store.jsx'
 import { web3Enabled } from '../lib/appkit.js'
-import { ruAuthError } from '../lib/authErrors.js'
+import { normalizeError } from '../lib/authErrors.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 
 // ── Web3-кнопка вынесена в отдельный компонент ────────────────────────────────
@@ -52,39 +52,61 @@ function Web3Button({ busy, run, auth }) {
 }
 
 export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onRegistered }) {
-  const { auth, user } = useStore()
+  const { auth, user, beginSignIn, endSignIn, announceSignIn } = useStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null) // {type:'err'|'ok', text}
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
+  // Ссылка, а не состояние: защита от повторной отправки должна сработать в том
+  // же тике, что и клик. setBusy применяется только к следующему рендеру, и
+  // двойной тап по кнопке успевал отправить два запроса регистрации.
+  const inFlight = useRef(false)
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
+
   const isRegister = mode === 'register'
 
+  // Сессия появилась → рассказываем соседним вкладкам и закрываем форму.
+  // Именно здесь, а не в run(): магическая ссылка и письмо сброса пароля
+  // завершаются успешно, но сессии не создают — объявлять там было бы враньём.
   useEffect(() => {
-    if (user) onClose?.()
+    if (!user) return
+    announceSignIn()
+    onClose?.()
   }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async (fn, okText, { beforeAuth = false } = {}) => {
+    if (inFlight.current) return
+    inFlight.current = true
     if (beforeAuth) onBeforeAuth?.()
     setBusy(true)
     setMsg(null)
+    beginSignIn()
+    let failure = null
     try {
       const { error } = (await fn()) || {}
-      if (error) setMsg({ type: 'err', text: ruAuthError(error.message) })
-      else if (okText) setMsg({ type: 'ok', text: okText })
+      failure = error || null
+      if (!error && okText && alive.current) setMsg({ type: 'ok', text: okText })
+      else if (error && alive.current) setMsg({ type: 'err', text: normalizeError(error).message })
     } catch (e) {
-      setMsg({ type: 'err', text: ruAuthError(e.message) })
+      failure = e
+      // Компонент мог размонтироваться, пока запрос летел — setState на
+      // размонтированном узле здесь не нужен.
+      if (alive.current) setMsg({ type: 'err', text: normalizeError(e).message })
     } finally {
-      setBusy(false)
+      inFlight.current = false
+      endSignIn(failure)
+      if (alive.current) setBusy(false)
     }
   }
 
-  const doLogin = () => run(() => auth.signInEmail(email, password))
+  const doLogin = () => run(() => auth.signInEmail(email.trim(), password))
 
   const doRegister = () =>
     run(async () => {
-      const res = await auth.signUpEmail(email, password)
+      const res = await auth.signUpEmail(email.trim(), password)
       if (!res.error && res.data?.user && res.data.user.identities?.length === 0) {
         return { error: { message: 'User already registered' } }
       }
@@ -92,7 +114,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
       return res
     }, 'Готово. Подтвердите почту по ссылке из письма — и можно пользоваться приложением.')
 
-  const emailOk = /\S+@\S+\.\S+/.test(email)
+  const emailOk = /\S+@\S+\.\S+/.test(email.trim())
 
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close}>

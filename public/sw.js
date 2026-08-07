@@ -1,4 +1,4 @@
-const CACHE = 'eataps-v9'
+const CACHE = 'eataps-v10'
 // Стартовые ассеты ядра (entry-скрипт + css) подставляются при сборке скриптом
 // scripts/inject-precache.mjs вместо маркера ниже.
 const BUILD_ASSETS = /* __BUILD_ASSETS__ */ []
@@ -13,14 +13,24 @@ const ASSETS = [
   ...BUILD_ASSETS,
 ]
 
+// Новая версия НЕ активируется сама. Иначе она успевает удалить старые чанки,
+// пока открытая вкладка ещё работает на предыдущей сборке, и ленивый импорт
+// падает на 404. Активацией управляет страница: она сообщит, когда безопасно
+// (нет несохранённых изменений), см. main.jsx.
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()))
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)))
 })
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   )
+})
+
+self.addEventListener('message', (e) => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting()
 })
 
 // Клик по уведомлению — сфокусировать уже открытую вкладку или открыть новую.
@@ -35,9 +45,31 @@ self.addEventListener('notificationclick', (e) => {
   })())
 })
 
+// Ссылка входа/сброса пароля: код обмена одноразовый, отдать его из кэша —
+// значит сломать вход. Такие переходы всегда идут в сеть напрямую.
+function isAuthCallback(url) {
+  return url.searchParams.has('code')
+    || url.searchParams.has('error_description')
+    || url.searchParams.has('token_hash')
+    || url.hash.includes('access_token')
+    || url.pathname.startsWith('/auth/')
+}
+
 self.addEventListener('fetch', (e) => {
   const { request } = e
   if (request.method !== 'GET') return
+
+  const url = new URL(request.url)
+
+  // Чужие origin — прежде всего Supabase (REST, Auth, Realtime, Storage) — service
+  // worker не трогает вообще. Приватный ответ не должен попасть ни в кэш, ни в
+  // выдачу из кэша: устаревшее состояние аккаунта хуже, чем его отсутствие.
+  if (url.origin !== self.location.origin) return
+
+  // Свои серверные функции (/api/*) — всегда живая сеть.
+  if (url.pathname.startsWith('/api/')) return
+
+  if (isAuthCallback(url)) return
 
   // Навигация (HTML) — network-first: всегда берём свежий index из сети, чтобы
   // хэши ленивых чанков совпадали с задеплоенными (иначе после деплоя старый
@@ -67,7 +99,7 @@ self.addEventListener('fetch', (e) => {
       if (cached) return cached
       try {
         const res = await fetch(request)
-        if (res && res.status === 200 && request.url.startsWith(self.location.origin)) {
+        if (res && res.status === 200 && res.type === 'basic') {
           const copy = res.clone()
           caches.open(CACHE).then((c) => c.put(request, copy))
         }
