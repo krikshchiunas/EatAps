@@ -203,6 +203,31 @@ with checks(порядок, проверка, ok, деталь) as (
     exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname='public' and p.proname='ensure_public_id'),
     'чинит отсутствующий public_id при первом обращении'
+
+  -- 10. Устранение слабостей аудита (миграция hardening)
+  union all
+  select 31, 'имя в заявке в друзья ставит сервер, а не клиент',
+    exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname='friendships' and t.tgname='friendships_set_requester_name' and not t.tgisinternal),
+    'иначе заявку можно подписать чужим именем'
+
+  union all
+  select 32, 'ограничена частота исходящих заявок в друзья',
+    exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      where c.relname='friendships' and t.tgname='friendships_rate_limit' and not t.tgisinternal), ''
+
+  union all
+  select 33, 'ограничен размер состояния в save_app_state',
+    coalesce((select pg_get_functiondef(p.oid) like '%state is too large%'
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='save_app_state' limit 1), false), ''
+
+  union all
+  select 34, 'бакет chat-images ограничен по размеру и типу файла',
+    coalesce((select file_size_limit is not null and allowed_mime_types is not null
+      from storage.buckets where id='chat-images'), false),
+    coalesce((select 'лимит: ' || coalesce((file_size_limit/1024/1024)::text || ' МБ', 'нет')
+      from storage.buckets where id='chat-images'), 'бакета нет')
 )
 
 select

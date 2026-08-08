@@ -7,7 +7,7 @@ export const CANONICAL_ORIGIN = 'https://www.eataps.com'
 // Список адресов, куда разрешено возвращать человека после Stripe.
 // Дополнительные (превью-развёртывания) задаются переменной ALLOWED_ORIGINS
 // через запятую — чтобы не править код ради нового домена.
-function allowedOrigins() {
+export function allowedOrigins() {
   const extra = String(process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((s) => s.trim().replace(/\/+$/, ''))
@@ -45,4 +45,19 @@ export function safeOrigin(req, fallbackFromBody) {
   return normalize(fallbackFromBody)
     || normalize(req?.headers?.host ? `https://${req.headers.host}` : null)
     || CANONICAL_ORIGIN
+}
+
+// Пришёл ли запрос со страницы нашего приложения. Заголовок Origin браузер
+// ставит сам и подделать его со страницы нельзя — это отсекает вызовы с чужих
+// сайтов. От curl не спасает: там заголовка может не быть вовсе, поэтому это
+// один слой защиты, а не единственный.
+export function isAllowedOrigin(value) {
+  if (!value || typeof value !== 'string') return false
+  try {
+    const u = new URL(value)
+    if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.protocol === 'http:') return true
+    return allowedOrigins().has(`${u.protocol}//${u.host}`)
+  } catch {
+    return false
+  }
 }

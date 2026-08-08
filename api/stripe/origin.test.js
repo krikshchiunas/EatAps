@@ -64,3 +64,16 @@ test('мусор и отсутствующий запрос не роняют ф
   assert.equal(safeOrigin(undefined, undefined), CANONICAL_ORIGIN)
   assert.equal(safeOrigin({}, null), CANONICAL_ORIGIN)
 })
+
+// ── Проверка происхождения запроса (используется точкой обратной связи) ─────
+test('isAllowedOrigin пропускает только свои страницы', async () => {
+  const { isAllowedOrigin } = await import('./origin.js')
+  assert.equal(isAllowedOrigin('https://www.eataps.com'), true)
+  assert.equal(isAllowedOrigin('https://eataps.com'), true)
+  assert.equal(isAllowedOrigin('http://localhost:5199'), true)
+  assert.equal(isAllowedOrigin('https://www.eataps.com/profile'), true)
+
+  for (const bad of ['https://evil.com', 'https://eataps.com.evil.com', 'http://www.eataps.com', '', null, undefined, 'мусор']) {
+    assert.equal(isAllowedOrigin(bad), false, `пропущено: ${bad}`)
+  }
+})
