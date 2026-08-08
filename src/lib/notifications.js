@@ -141,8 +141,15 @@ function maybeShowDeficit(profile, day) {
 // Запустить фоновый планировщик. Возвращает функцию остановки.
 // Пока приложение открыто, каждую минуту проверяет, не пора ли пушнуть.
 export function startScheduler(getState) {
+  // В обычном Safari на iPhone переменной Notification не существует вовсе —
+  // API доступен только в приложении, добавленном на главный экран (iOS 16.4+).
+  // Обращение к Notification.permission напрямую бросало ReferenceError прямо
+  // в useEffect, React размонтировал всё дерево, и человек видел белый экран.
+  // Планировщик запускается только там, где уведомления в принципе есть.
+  if (!notificationsSupported()) return () => {}
+
   const tick = () => {
-    if (Notification.permission !== 'granted') return
+    if (notificationPermission() !== 'granted') return
     const { profile, days } = getState() || {}
     const today = keyOf()
     const day = days?.[today]
@@ -174,7 +181,10 @@ function pluralize(n, one, few, many) {
 // уведомление обновляется, счётчик растёт, а не появляется отдельная плашка.
 // Заголовок всегда «EatAps», в теле — имя и число, иконка — аватарка отправителя.
 export function notifyIncomingMessage({ senderId, senderName, senderAvatar, unreadCount, messageId }) {
-  if (Notification.permission !== 'granted') return
+  // Та же ловушка, что и в планировщике: на iPhone вне установленного
+  // приложения Notification не существует, и прямое обращение роняет обработчик
+  // входящего сообщения.
+  if (notificationPermission() !== 'granted') return
   if (senderId && senderId === activeChatUserId) return
   const n = Math.max(1, Number(unreadCount) || 1)
   const name = (senderName && senderName.trim()) || 'Пользователь'

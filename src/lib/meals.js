@@ -14,6 +14,7 @@
 // Пользовательские секции хранятся в day.mealSections с момента создания.
 // ─────────────────────────────────────────────────────────────────────────────
 import { MEAL_TYPES } from './foods.js'
+import { newId } from './uuid.js'
 
 export const STANDARD_TYPES = ['breakfast', 'lunch', 'dinner', 'snack']
 export const OTHER_ID = 'std:other' // фолбэк для продуктов с нераспознанным/отсутствующим type
@@ -145,7 +146,7 @@ export function nextSortOrder(day) {
 
 export function newCustomSection(name, day) {
   return {
-    id: crypto.randomUUID(),
+    id: newId(),
     type: 'custom',
     customName: name.trim(),
     time: null,

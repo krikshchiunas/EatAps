@@ -8,6 +8,7 @@ import { defaultSubscription, checkout as subCheckout, openBillingPortal as subP
 import { upsertSection, removeSection, swapCustomOrder, effectiveMealId } from './lib/meals.js'
 import { createClock } from './lib/hlc.js'
 import { getDeviceId } from './lib/deviceId.js'
+import { newId } from './lib/uuid.js'
 import {
   emptyMeta, blankDay, pickSyncable, normalizeState, mergeState, sameSyncable, clearedState,
   addTombstone, setDayFieldTs, setPrefTs,
@@ -149,10 +150,20 @@ export function StoreProvider({ children }) {
 
     // Страховка: если INITIAL_SESSION почему-то не пришёл (недоступное
     // хранилище, зависший запрос), не оставляем приложение в вечной загрузке.
+    //
+    // getSession() тоже гоняем наперегонки с таймаутом: при мёртвой сети он
+    // умеет висеть на обновлении токена сколь угодно долго, и тогда страховка
+    // от бесконечной загрузки сама превращалась бы в бесконечную загрузку.
     const guard = setTimeout(async () => {
       if (!alive || authRef.current.phase !== PHASE.INITIALIZING) return
       let session = null
-      try { session = (await supabase.auth.getSession()).data.session } catch {}
+      try {
+        const res = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+        ])
+        session = res?.data?.session || null
+      } catch {}
       if (alive) dispatch({ type: 'INIT_TIMEOUT', session })
     }, 6000)
 
@@ -164,8 +175,12 @@ export function StoreProvider({ children }) {
   }, [])
 
   // ── 2. Гость: состояние живёт в отдельном локальном кэше ──────────────────
+  // AUTH_ERROR (сессия оказалась мёртвой) обрабатывается здесь же и это
+  // важно: без него приватные данные ушедшего пользователя оставались бы на
+  // экране после автоматического выхода — приложение считало бы его гостем,
+  // но продолжало рисовать его дневник.
   useEffect(() => {
-    if (phase !== PHASE.ANONYMOUS) return
+    if (phase !== PHASE.ANONYMOUS && phase !== PHASE.AUTH_ERROR) return
     const cached = readCache(GUEST)
     setState((s) => ({
       ...empty,
@@ -229,6 +244,14 @@ export function StoreProvider({ children }) {
       if (guest) clearCache(GUEST) // гостевые данные усыновлены — на устройстве их больше нет
       if (!res?.fatal) dispatch({ type: 'DATA_LOADED', userId: ownerAtStart })
       if (res?.offline) dispatch({ type: 'DATA_OFFLINE', userId: ownerAtStart })
+    }).catch((e) => {
+      // Без этой ветки любая неожиданная ошибка внутри start() оставляла бы
+      // приложение навсегда в фазе загрузки — то есть на бесконечном спиннере.
+      // Данные из кэша уже показаны, поэтому просто выпускаем интерфейс.
+      if (!alive) return
+      log.error('sync', 'запуск синхронизации не удался', e)
+      setSyncStatus(SYNC.ERROR)
+      dispatch({ type: 'DATA_LOADED', userId: ownerAtStart })
     })
 
     return () => {
@@ -418,7 +441,7 @@ export function StoreProvider({ children }) {
 
   const addFood = useCallback((date, food) => {
     const ts = clock.tick()
-    const id = crypto.randomUUID()
+    const id = newId()
     const createdAt = new Date().toISOString()
     setState((s) => {
       const day = s.days[date] || blankDay()
@@ -518,7 +541,7 @@ export function StoreProvider({ children }) {
 
   const addCustomFood = useCallback((food) => {
     const ts = clock.tick()
-    const entry = { id: crypto.randomUUID(), ...food, updatedAt: ts }
+    const entry = { id: newId(), ...food, updatedAt: ts }
     setState((s) => {
       const list = s.customFoods || []
       const exists = list.some((f) => f.name.toLowerCase() === food.name.toLowerCase())
@@ -541,7 +564,7 @@ export function StoreProvider({ children }) {
 
   const addCustomIngredient = useCallback((ing) => {
     const ts = clock.tick()
-    const entry = { id: crypto.randomUUID(), ...ing, updatedAt: ts }
+    const entry = { id: newId(), ...ing, updatedAt: ts }
     setState((s) => {
       const list = s.customIngredients || []
       if (list.some((f) => f.name.toLowerCase() === ing.name.toLowerCase())) return s

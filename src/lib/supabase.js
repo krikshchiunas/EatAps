@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { pickSyncable } from './syncModel.js'
 import { projectFriendState } from './friendView.js'
 import { normalizeError } from './authErrors.js'
+import { log } from './log.js'
+import { newId } from './uuid.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -104,24 +106,33 @@ export async function saveAppState(state, baseRevision) {
 // оставляют висящих каналов.
 export function subscribeToAppState(userId, onChange) {
   if (!supabase || !userId) return () => {}
-  const channel = supabase
-    .channel(`app_state:${userId}`)
-    .on('postgres_changes',
-      { event: '*', schema: 'public', table: 'app_state', filter: `user_id=eq.${userId}` },
-      (payload) => {
-        const row = payload.new
-        if (!row || row.user_id !== userId) return
-        onChange({
-          revision: Number(row.revision) || 0,
-          updatedAt: row.updated_at || null,
-          // Крупные состояния realtime обрезает (лимит размера записи). Тогда
-          // state приедет пустым — подписчик обязан дочитать строку сам.
-          state: payload.errors?.length ? null : (row.state ?? null),
-        })
-      },
-    )
-    .subscribe()
-  return () => { supabase.removeChannel(channel) }
+  // Подписка обёрнута целиком: сбой при создании канала (заблокированный
+  // websocket, не включённый Realtime, экзотическая сеть) не должен ронять
+  // запуск приложения. Синхронизация без Realtime работает — правки просто
+  // приезжают при следующей сверке, а не мгновенно.
+  try {
+    const channel = supabase
+      .channel(`app_state:${userId}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'app_state', filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const row = payload.new
+          if (!row || row.user_id !== userId) return
+          onChange({
+            revision: Number(row.revision) || 0,
+            updatedAt: row.updated_at || null,
+            // Крупные состояния realtime обрезает (лимит размера записи). Тогда
+            // state приедет пустым — подписчик обязан дочитать строку сам.
+            state: payload.errors?.length ? null : (row.state ?? null),
+          })
+        },
+      )
+      .subscribe()
+    return () => { try { supabase.removeChannel(channel) } catch {} }
+  } catch (e) {
+    log.error('realtime', 'не удалось подписаться на состояние', e)
+    return () => {}
+  }
 }
 
 // ---------------- Подписки Stripe ----------------
@@ -141,14 +152,19 @@ export async function pullSubscription(userId) {
 // вебхук записал новый статус после оплаты/отмены.
 export function subscribeToSubscription(userId, onChange) {
   if (!supabase || !userId) return () => {}
-  const channel = supabase
-    .channel(`sub:${userId}`)
-    .on('postgres_changes',
-      { event: '*', schema: 'public', table: 'subscriptions', filter: `user_id=eq.${userId}` },
-      (payload) => onChange(payload.new || null),
-    )
-    .subscribe()
-  return () => supabase.removeChannel(channel)
+  try {
+    const channel = supabase
+      .channel(`sub:${userId}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'subscriptions', filter: `user_id=eq.${userId}` },
+        (payload) => onChange(payload.new || null),
+      )
+      .subscribe()
+    return () => { try { supabase.removeChannel(channel) } catch {} }
+  } catch (e) {
+    log.error('realtime', 'не удалось подписаться на подписку', e)
+    return () => {}
+  }
 }
 
 // ---------------- Публичные ID (AA000001) ----------------
@@ -337,7 +353,7 @@ async function compressImageFile(file, maxSize = 1280, quality = 0.8) {
 export async function uploadChatImage(userId, file) {
   if (!supabase) throw new Error('Нет подключения')
   const blob = await compressImageFile(file)
-  const id = crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2)
+  const id = newId()
   const path = `${userId}/${id}.jpg`
   const { error } = await supabase.storage.from('chat-images').upload(path, blob, {
     contentType: 'image/jpeg',

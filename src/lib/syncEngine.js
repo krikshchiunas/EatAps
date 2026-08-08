@@ -292,7 +292,13 @@ export function createSyncEngine({
       }
 
       if (!stopped) {
-        unsubscribeRealtime = transport.subscribe(userId, handleRemote)
+        // Realtime — удобство, а не условие работы. Сбой подписки не должен
+        // прерывать запуск: без неё правки приезжают при следующей сверке.
+        try {
+          unsubscribeRealtime = transport.subscribe(userId, handleRemote)
+        } catch (e) {
+          log.error('sync', 'подписка на изменения не поднялась', e)
+        }
         if (dirty) schedule(0)
         else if (!offline) setStatus(SYNC.SYNCED)
       }

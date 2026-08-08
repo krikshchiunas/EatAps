@@ -7,6 +7,7 @@ import { autoStandardMealId, labelForMealId, typeOfMealId } from './lib/meals.js
 import Onboarding from './components/Onboarding.jsx'
 import BootScreen from './components/BootScreen.jsx'
 import SyncIndicator from './components/SyncIndicator.jsx'
+import AuthNotice from './components/AuthNotice.jsx'
 import DayScreen from './components/DayScreen.jsx'
 import HistoryScreen from './components/HistoryScreen.jsx'
 import StatsScreen from './components/StatsScreen.jsx'
@@ -121,6 +122,7 @@ export default function App() {
     return (
       <div className="app">
         <Onboarding />
+        <AuthNotice />
       </div>
     )
   }
@@ -166,6 +168,7 @@ export default function App() {
         />
       )}
       <SyncIndicator />
+      <AuthNotice />
     </div>
   )
 }
