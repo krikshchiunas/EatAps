@@ -429,7 +429,7 @@ export function subscribeToIncoming(myId, onNew) {
   return () => supabase.removeChannel(channel)
 }
 
-const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at, read_at'
+const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at, read_at, reactions'
 
 // Отметить прочитанными все входящие от собеседника (серверная функция —
 // одним запросом, без гонок). Локальная метка остаётся для офлайн-бейджа.
@@ -438,21 +438,44 @@ export async function markMessagesRead(senderId) {
   try { await supabase.rpc('mark_messages_read', { p_sender: senderId }) } catch {}
 }
 
-// Подписка на прочтение МОИХ сообщений собеседником: ловим UPDATE, где
-// sender = я. Нужен replica identity full на messages (см. schema.sql).
-export function subscribeToReadReceipts(myId, friendId, onRead) {
+// Подписка на изменения МОИХ отправленных сообщений: прочтение собеседником
+// (read_at) и его реакция на них (reactions). Ловим UPDATE, где sender = я.
+// Нужен replica identity full на messages (см. schema.sql).
+//
+// Раньше событие фильтровалось условием `row.read_at` и реакция-без-прочтения
+// молча терялась: непрочитанное сообщение, на которое поставили реакцию, не
+// долетало до собеседника в реальном времени. Теперь отдаём строку целиком —
+// вызывающий сам решает, что из неё изменилось.
+export function subscribeToSentUpdates(myId, friendId, onUpdate) {
   if (!supabase || !myId) return () => {}
-  const channel = supabase
-    .channel(`reads:${myId}:${friendId}:${Date.now()}`)
-    .on('postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender=eq.${myId}` },
-      (payload) => {
-        const row = payload.new
-        if (row?.recipient === friendId && row.read_at) onRead(row)
-      },
-    )
-    .subscribe()
-  return () => supabase.removeChannel(channel)
+  try {
+    const channel = supabase
+      .channel(`sent:${myId}:${friendId}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender=eq.${myId}` },
+        (payload) => {
+          const row = payload.new
+          if (row?.recipient === friendId) onUpdate(row)
+        },
+      )
+      .subscribe()
+    return () => { try { supabase.removeChannel(channel) } catch {} }
+  } catch (e) {
+    log.error('realtime', 'не удалось подписаться на обновления своих сообщений', e)
+    return () => {}
+  }
+}
+
+// Переключить реакцию на сообщении (сейчас — единственная, 🥕). Сервер решает
+// добавить её или снять, по фактическому текущему состоянию строки: клиент
+// всегда просит «переключить», а не «поставить»/«снять» — так двойной тап
+// почти одновременно с двух устройств не разъезжается сильнее, чем на один
+// лишний клик, который тут же поправит realtime-событие.
+export async function toggleMessageReaction(messageId, emoji = '🥕') {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { data, error } = await supabase.rpc('toggle_message_reaction', { p_message_id: messageId, p_emoji: emoji })
+  if (error) return { error: normalizeError(error).message }
+  return { ok: data }
 }
 
 export async function sendChatMessage({ sender, recipient, text, imageUrl, mealRef, replyTo, replySnapshot, forwardedName }) {
@@ -566,19 +589,30 @@ export function createTypingChannel(myId, friendId, onTyping) {
 }
 
 // Realtime-подписка на новые входящие сообщения от конкретного друга.
-export function subscribeToChat(myId, friendId, onMessage) {
+// onEvent(eventType, row) — 'INSERT' для новых сообщений от друга, 'UPDATE'
+// для изменений в них (сейчас единственное такое изменение — реакция на
+// сообщение друга; собственное прочтение мы не пишем через этот путь).
+export function subscribeToChat(myId, friendId, onEvent) {
   if (!supabase) return () => {}
-  const channel = supabase
-    .channel(`chat:${myId}:${friendId}:${Date.now()}`)
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'messages', filter: `recipient=eq.${myId}` },
-      (payload) => {
-        if (payload.new?.sender === friendId) onMessage(payload.new)
-      },
-    )
-    .subscribe()
-  return () => supabase.removeChannel(channel)
+  try {
+    const channel = supabase
+      .channel(`chat:${myId}:${friendId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages', filter: `recipient=eq.${myId}` },
+        (payload) => {
+          const row = payload.new
+          if (row?.sender === friendId && (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE')) {
+            onEvent(payload.eventType, row)
+          }
+        },
+      )
+      .subscribe()
+    return () => { try { supabase.removeChannel(channel) } catch {} }
+  } catch (e) {
+    log.error('realtime', 'не удалось подписаться на чат', e)
+    return () => {}
+  }
 }
 
 // Последнее сообщение в каждом диалоге — для списка чатов.

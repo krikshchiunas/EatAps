@@ -3,8 +3,9 @@ import { useStore } from '../store.jsx'
 import {
   listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage,
   markChatRead, listFriendships,
-  markMessagesRead, subscribeToReadReceipts, hideMessageLocally,
+  markMessagesRead, subscribeToSentUpdates, hideMessageLocally,
   createTypingChannel, watchPresence, fetchLastSeen,
+  toggleMessageReaction,
 } from '../lib/supabase.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
@@ -20,6 +21,13 @@ import ConfirmDialog from './ConfirmDialog.jsx'
 // ── helpers ───────────────────────────────────────────────────────────────────
 const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
 const COARSE = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+const REDUCED_MOTION = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+// Реакция на сообщение — двойной тап/двойной клик по пузырю. Пока одна:
+// вторая морковка (второй двойной тап) снимает первую — переключение, а не
+// добавление новой реакции поверх старой.
+const CARROT = '🥕'
+const DOUBLE_TAP_MS = 320
 
 function timeShort(iso) {
   if (!iso) return ''
@@ -199,21 +207,27 @@ export default function ChatView({ friend, onClose }) {
       }
     })()
 
-    const unsub = subscribeToChat(myId, friend.id, (m) => {
-      markChatRead(friend.id)
-      // Чат открыт — сразу отмечаем входящее прочитанным (собеседник увидит вилку).
-      markMessagesRead(friend.id)
-      setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]))
-      if (atBottomRef.current) requestAnimationFrame(() => pinBottom(true))
-      else setShowJump(true)
+    const unsub = subscribeToChat(myId, friend.id, (eventType, m) => {
+      if (eventType === 'INSERT') {
+        markChatRead(friend.id)
+        // Чат открыт — сразу отмечаем входящее прочитанным (собеседник увидит вилку).
+        markMessagesRead(friend.id)
+        setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]))
+        if (atBottomRef.current) requestAnimationFrame(() => pinBottom(true))
+        else setShowJump(true)
+      } else if (eventType === 'UPDATE') {
+        // Друг поставил (или снял) реакцию на своё же сообщение, или это
+        // подтверждение моей реакции с другого устройства.
+        setMessages((cur) => cur.map((x) => (x.id === m.id ? { ...x, reactions: m.reactions } : x)))
+      }
     })
 
-    // Собеседник прочитал моё сообщение → перекрашиваем вилку.
-    const unsubReads = subscribeToReadReceipts(myId, friend.id, (row) => {
-      setMessages((cur) => cur.map((x) => (x.id === row.id ? { ...x, read_at: row.read_at } : x)))
+    // Собеседник прочитал моё сообщение (вилка) или поставил реакцию на него.
+    const unsubSent = subscribeToSentUpdates(myId, friend.id, (row) => {
+      setMessages((cur) => cur.map((x) => (x.id === row.id ? { ...x, read_at: row.read_at, reactions: row.reactions } : x)))
     })
 
-    return () => { cancelled = true; unsub(); unsubReads() }
+    return () => { cancelled = true; unsub(); unsubSent() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myId, friend.id])
 
@@ -406,6 +420,41 @@ export default function ChatView({ friend, onClose }) {
     catch { flash('Не удалось скопировать') }
   }, [flash])
 
+  // Переключить реакцию на сообщении. Оптимистично — двойной тап обязан
+  // выглядеть мгновенным, ответ сервера прилетит и подтвердит (или откатит,
+  // если что-то пошло не так) уже без видимой задержки для человека.
+  // Сообщение, ещё не сохранённое на сервере (status 'sending'/'failed'),
+  // реагировать не на что — у него ещё нет строки в БД, RPC его не найдёт.
+  const toggleReaction = useCallback(async (m) => {
+    if (!m || String(m.id).startsWith('temp-')) return
+    const mine = (m.reactions || {})[myId] === CARROT
+    haptic(mine ? 10 : 16)
+    setMessages((cur) => cur.map((x) => {
+      if (x.id !== m.id) return x
+      const reactions = { ...(x.reactions || {}) }
+      if (mine) delete reactions[myId]
+      else reactions[myId] = CARROT
+      return { ...x, reactions }
+    }))
+    const res = await toggleMessageReaction(m.id)
+    if (res.error) {
+      setMessages((cur) => cur.map((x) => {
+        if (x.id !== m.id) return x
+        const reactions = { ...(x.reactions || {}) }
+        if (mine) reactions[myId] = CARROT
+        else delete reactions[myId]
+        return { ...x, reactions }
+      }))
+      flash(res.error)
+    }
+  }, [myId, flash])
+
+  // Ссылка на актуальную toggleReaction для делегированного жеста ниже: тот
+  // эффект монтируется один раз ([] deps) и не должен пересоздаваться из-за
+  // смены myId/flash — обращается к функции через ref, а не через замыкание.
+  const toggleReactionRef = useRef(toggleReaction)
+  toggleReactionRef.current = toggleReaction
+
   // «Удалить у меня» — ТОЛЬКО локальное скрытие, БД не трогаем. Раньше для
   // своих сообщений вызывался deleteChatMessage, и строка исчезала у обоих —
   // это поведение пункта «Удалить у всех», а не того, что написано на кнопке.
@@ -431,10 +480,16 @@ export default function ChatView({ friend, onClose }) {
   // блокируем — это отдельно гасит нативное меню ОС (share sheet на iOS,
   // «сохранить изображение» на Android), которое к нашему жесту отношения
   // не имеет и не отключается вместе с ним.
+  //
+  // Двойной тап по пузырю (не по свайпу, не по ссылке/кнопке внутри) —
+  // реакция 🥕. Обычный одиночный тап по фону сообщения и раньше не делал
+  // ничего (mode остаётся null, onEnd выходил сразу) — это ровно та точка,
+  // где можно посчитать вторую метку без риска зацепить существующие жесты.
   useEffect(() => {
     const el = listRef.current
     if (!el) return
     let g = null
+    let lastTap = { mid: null, time: 0 }
 
     const rowOf = (t) => t.closest?.('[data-mid]')
 
@@ -442,7 +497,8 @@ export default function ChatView({ friend, onClose }) {
       const row = rowOf(e.target)
       if (!row) { g = null; return }
       const t = e.touches[0]
-      g = { row, bubble: row.querySelector('.msg'), mid: row.dataset.mid, x: t.clientX, y: t.clientY, decided: false, mode: null }
+      const interactive = !!e.target.closest?.('a, button')
+      g = { row, bubble: row.querySelector('.msg'), mid: row.dataset.mid, x: t.clientX, y: t.clientY, decided: false, mode: null, interactive }
     }
     const onMove = (e) => {
       if (!g) return
@@ -465,16 +521,33 @@ export default function ChatView({ friend, onClose }) {
     }
     const onEnd = () => {
       if (!g) return
-      const row = g.row, bubble = g.bubble, mid = g.mid, mode = g.mode
+      const row = g.row, bubble = g.bubble, mid = g.mid, mode = g.mode, interactive = g.interactive
       g = null
-      if (mode !== 'swipe') return
-      const triggered = row.classList.contains('will-open-menu')
-      row.classList.remove('swiping', 'will-open-menu')
-      if (bubble) bubble.style.transform = ''
-      if (triggered) {
-        haptic(14)
-        const m = messagesRef.current.find((x) => String(x.id) === mid)
-        if (m) setMenuMsg(m)
+
+      if (mode === 'swipe') {
+        const triggered = row.classList.contains('will-open-menu')
+        row.classList.remove('swiping', 'will-open-menu')
+        if (bubble) bubble.style.transform = ''
+        if (triggered) {
+          haptic(14)
+          const m = messagesRef.current.find((x) => String(x.id) === mid)
+          if (m) setMenuMsg(m)
+        }
+        return
+      }
+
+      // Палец почти не сдвинулся — это тап, а не жест. Ссылки, кнопки внутри
+      // пузыря (цитата, карточка еды, «повторить») отрабатывают сами через
+      // нативный click, в счёт двойного тапа не идут.
+      if (mode === null && !interactive) {
+        const now = Date.now()
+        if (lastTap.mid === mid && now - lastTap.time < DOUBLE_TAP_MS) {
+          lastTap = { mid: null, time: 0 }
+          const m = messagesRef.current.find((x) => String(x.id) === mid)
+          if (m) toggleReactionRef.current(m)
+        } else {
+          lastTap = { mid, time: now }
+        }
       }
     }
 
@@ -542,7 +615,7 @@ export default function ChatView({ friend, onClose }) {
             <MessageList
               messages={messages} myId={myId} friendName={friendName}
               onQuoteTap={jumpTo} onImgLoad={onImgLoad} onRetry={retry}
-              onOpenMeal={setMealCard}
+              onOpenMeal={setMealCard} onToggleReaction={toggleReaction}
             />
           )}
           {peerTyping && <TypingBubble name={friendName} />}
@@ -620,7 +693,7 @@ export default function ChatView({ friend, onClose }) {
 }
 
 // ── message list (memoized — не перерисовывается при вводе текста) ─────────────
-const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
+const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry, onOpenMeal, onToggleReaction }) {
   return messages.map((m, i) => {
     const mine = m.sender === myId
     const prev = messages[i - 1]
@@ -634,7 +707,7 @@ const MessageList = memo(function MessageList({ messages, myId, friendName, onQu
         <MessageRow
           m={m} mine={mine} tail={!sameAsNext} grouped={sameAsPrev}
           friendName={friendName} onQuoteTap={onQuoteTap} onImgLoad={onImgLoad}
-          onRetry={onRetry} onOpenMeal={onOpenMeal}
+          onRetry={onRetry} onOpenMeal={onOpenMeal} onToggleReaction={onToggleReaction}
         />
       </div>
     )
@@ -716,8 +789,17 @@ function MealRefCard({ meal: raw, onOpen }) {
   )
 }
 
-function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
+function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, onOpenMeal, onToggleReaction }) {
   const status = m.status // sending | failed | undefined(=sent)
+
+  // Двойной клик — фолбэк для мыши/трекпада (тач-версия жеста живёт в
+  // делегированном обработчике на списке, см. ChatView). Ссылки и кнопки
+  // внутри пузыря отрабатывают сами, в реакцию не идут.
+  const onDoubleClick = (e) => {
+    if (e.target.closest?.('a, button')) return
+    onToggleReaction?.(m)
+  }
+
   return (
     <div className={`msg-row ${mine ? 'mine' : 'theirs'}${grouped ? ' grouped' : ''}`} data-mid={m.id}>
       {/* Иконка «⋯» — свайп влево теперь открывает меню действий целиком
@@ -728,7 +810,7 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, on
           <circle cx="6" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="18" cy="12" r="1.8" />
         </svg>
       </span>
-      <div className={`msg ${mine ? 'mine' : 'theirs'}${tail ? ' tail' : ''}`}>
+      <div className={`msg ${mine ? 'mine' : 'theirs'}${tail ? ' tail' : ''}`} onDoubleClick={onDoubleClick}>
         {m.forwarded_name && (
           <div className="msg-forward">Переслано от {m.forwarded_name}</div>
         )}
@@ -765,8 +847,66 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, on
             <button className="msg-fail" onClick={() => onRetry(m)} title="Повторить">! повторить</button>
           )}
         </div>
+        <ReactionBadge reactions={m.reactions} />
       </div>
     </div>
+  )
+}
+
+// Реакция на сообщение — маленький бейдж с морковкой у нижнего угла пузыря.
+// Появление и исчезновение анимированы CSS-transition (плавный «поп»), а не
+// keyframes на маунт: React не умеет анимировать удаление узла из DOM сам по
+// себе, поэтому бейдж остаётся смонтированным ещё 260мс после того, как
+// реакция снята — ровно на время transition, — и только потом пропадает
+// по-настоящему. Отсюда mounted (то, что реально в DOM) отдельно от show
+// (то, что видно) — на mounted=true, show=false элемент есть, но прозрачный
+// и сжатый, и именно это состояние проигрывает анимацию исчезновения.
+function ReactionBadge({ reactions }) {
+  const count = reactions ? Object.keys(reactions).length : 0
+  const active = count > 0
+  const [mounted, setMounted] = useState(active)
+  const [show, setShow] = useState(active && REDUCED_MOTION)
+  const unmountTimer = useRef(null)
+  const frames = useRef([])
+
+  useEffect(() => {
+    clearTimeout(unmountTimer.current)
+    frames.current.forEach(cancelAnimationFrame)
+    frames.current = []
+
+    if (REDUCED_MOTION) {
+      setMounted(active)
+      setShow(active)
+      return
+    }
+
+    if (active) {
+      setMounted(true)
+      // Два кадра: сначала элемент должен попасть в DOM со стартовыми
+      // стилями (scale 0, opacity 0), и только потом получить класс .show —
+      // иначе браузер применит конечное состояние сразу, без перехода.
+      const f1 = requestAnimationFrame(() => {
+        const f2 = requestAnimationFrame(() => setShow(true))
+        frames.current.push(f2)
+      })
+      frames.current.push(f1)
+    } else {
+      setShow(false)
+      unmountTimer.current = setTimeout(() => setMounted(false), 260)
+    }
+
+    return () => {
+      clearTimeout(unmountTimer.current)
+      frames.current.forEach(cancelAnimationFrame)
+    }
+  }, [active])
+
+  if (!mounted) return null
+  return (
+    <span className={`msg-reaction${show ? ' show' : ''}`} aria-hidden>
+      {CARROT}
+      {count > 1 && <b>{count}</b>}
+    </span>
   )
 }
 

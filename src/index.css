@@ -1029,6 +1029,31 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 }
 .msg.theirs .msg-fail { color: #F0A88E; background: rgba(240, 168, 142, 0.16); }
 
+/* Реакция на сообщение (двойной тап/двойной клик → 🥕). Сидит бейджем на
+   нижнем углу пузыря, «выезжая» за его край — как в большинстве чатов.
+   Появление/исчезновение — через transition на классе .show (см. ReactionBadge
+   в ChatView.jsx: React не умеет анимировать unmount, поэтому узел держится
+   в DOM ещё 260мс после снятия реакции, ровно на длительность перехода). */
+.msg-reaction {
+  position: absolute; bottom: -8px;
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px 6px; border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 2px var(--bg, var(--surface-2));
+  font-size: 13px; line-height: 1.1;
+  transform: scale(0); opacity: 0; transform-origin: bottom center;
+  transition: transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+.msg-reaction.show { transform: scale(1); opacity: 1; }
+.msg.mine   .msg-reaction { right: 10px; }
+.msg.theirs .msg-reaction { left: 10px; }
+.msg-reaction b { font-size: 10px; font-weight: 700; color: var(--ink-2); margin-left: 1px; }
+@media (prefers-reduced-motion: reduce) {
+  .msg-reaction, .msg-reaction.show { transition: opacity 0.1s ease; transform: none; }
+}
+
 /* Reply quote inside bubble */
 .msg-quote {
   display: flex; flex-direction: column; align-items: flex-start;

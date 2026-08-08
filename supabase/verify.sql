@@ -228,6 +228,29 @@ with checks(порядок, проверка, ok, деталь) as (
       from storage.buckets where id='chat-images'), false),
     coalesce((select 'лимит: ' || coalesce((file_size_limit/1024/1024)::text || ' МБ', 'нет')
       from storage.buckets where id='chat-images'), 'бакета нет')
+
+  -- 11. Реакции на сообщения (двойной тап → 🥕)
+  union all
+  select 35, 'колонка messages.reactions существует',
+    exists (select 1 from information_schema.columns
+      where table_schema='public' and table_name='messages' and column_name='reactions'), ''
+
+  union all
+  select 36, 'RPC toggle_message_reaction создан',
+    exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='toggle_message_reaction'), ''
+
+  union all
+  select 37, 'toggle_message_reaction доступен authenticated, не anon',
+    has_function_privilege('authenticated', 'public.toggle_message_reaction(uuid, text)', 'EXECUTE')
+    and not has_function_privilege('anon', 'public.toggle_message_reaction(uuid, text)', 'EXECUTE'), ''
+
+  union all
+  select 38, 'guard_message_update ограничивает получателя собственным ключом реакции',
+    coalesce((select pg_get_functiondef(p.oid) like '%Only your own reaction key can change%'
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='guard_message_update' limit 1), false),
+    'иначе прямой запрос в обход RPC мог бы дописать реакцию под чужим ключом'
 )
 
 select
