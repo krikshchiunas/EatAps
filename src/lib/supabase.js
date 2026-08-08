@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { pickSyncable } from './syncModel.js'
 import { projectFriendState } from './friendView.js'
 import { normalizeError } from './authErrors.js'
+import { isMissingColumn } from './pgErrors.js'
 import { log } from './log.js'
 import { newId } from './uuid.js'
 
@@ -430,6 +431,13 @@ export function subscribeToIncoming(myId, onNew) {
 }
 
 const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at, read_at, reactions'
+// Фолбэк на случай, если фронтенд с реакциями задеплоен раньше миграции
+// 2026-08-08_chat_reactions.sql: колонки reactions в базе ещё нет. Без этого
+// запрос с несуществующей колонкой возвращает ошибку целиком — не «reactions
+// пустой», а «весь чат не открылся». Тот же принцип независимости от порядка
+// деплоя, что и у остальных миграций в проекте, здесь был упущен при первой
+// реализации — чиним, а не полагаемся на то, что SQL прогонят мгновенно.
+const MSG_COLS_LEGACY = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at, read_at'
 
 // Отметить прочитанными все входящие от собеседника (серверная функция —
 // одним запросом, без гонок). Локальная метка остаётся для офлайн-бейджа.
@@ -491,7 +499,14 @@ export async function sendChatMessage({ sender, recipient, text, imageUrl, mealR
     forwarded_name: forwardedName || null,
   }
   if (!payload.text && !payload.image_url && !payload.meal_ref) return { error: 'Пустое сообщение' }
-  const { data, error } = await supabase.from('messages').insert(payload).select(MSG_COLS).single()
+  let { data, error } = await supabase.from('messages').insert(payload).select(MSG_COLS).single()
+  if (error && isMissingColumn(error)) {
+    // Колонка отсутствует → RETURNING падает на этапе планирования запроса,
+    // сама вставка не проходит вовсе (не транзакция наполовину) — повторный
+    // insert здесь не создаёт дубликат строки.
+    ;({ data, error } = await supabase.from('messages').insert(payload).select(MSG_COLS_LEGACY).single())
+    if (data) data = { ...data, reactions: {} }
+  }
   if (error) return { error: normalizeError(error).message }
   return { ok: data }
 }
@@ -504,12 +519,18 @@ export async function deleteChatMessage(id) {
 
 export async function listMessagesWith(myId, friendId, limit = 300) {
   if (!supabase) return []
-  const { data, error } = await supabase
+  const query = (cols) => supabase
     .from('messages')
-    .select(MSG_COLS)
+    .select(cols)
     .or(`and(sender.eq.${myId},recipient.eq.${friendId}),and(sender.eq.${friendId},recipient.eq.${myId})`)
     .order('created_at', { ascending: true })
     .limit(limit)
+
+  let { data, error } = await query(MSG_COLS)
+  if (error && isMissingColumn(error)) {
+    ;({ data, error } = await query(MSG_COLS_LEGACY))
+    if (data) data = data.map((m) => ({ ...m, reactions: {} }))
+  }
   if (error) throw error
   // Скрытые «у меня» не показываем — в БД они остаются для собеседника.
   const hidden = getHiddenMessageIds()
