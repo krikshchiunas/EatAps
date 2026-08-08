@@ -2,7 +2,7 @@
 // сценарии, которые в браузере воспроизводятся долго и ненадёжно.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SYNC } from './syncEngine.js'
+import { SYNC, createSyncEngine } from './syncEngine.js'
 import { emptyMeta, blankDay, normalizeState } from './syncModel.js'
 import { DATE, createServer, createTimers, createDevice, serverMeals } from './syncTestKit.js'
 
@@ -399,4 +399,49 @@ test('ошибка прав не приводит к бесконечному д
 
   assert.equal(dev.status, SYNC.ERROR)
   assert.ok(!/row-level|policy|42501/i.test(JSON.stringify(dev.statuses)), 'наружу не течёт техническая формулировка')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Совместимость с WebKit
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('таймеры вызываются с правильным получателем — иначе Safari падает', () => {
+  const realSet = globalThis.setTimeout
+  const realClear = globalThis.clearTimeout
+
+  // WebKit требует, чтобы this у Window.setTimeout был самим Window. Вызов
+  // через объект (timers.setTimeout(...)) передаёт this = timers, и Safari
+  // бросает «Can only call Window.setTimeout on instances of Window».
+  // Chrome и Firefox это прощают — поэтому баг ловится только здесь.
+  const strict = (name, real) => function (...args) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError(`Can only call Window.${name} on instances of Window`)
+    }
+    return real.apply(globalThis, args)
+  }
+  globalThis.setTimeout = strict('setTimeout', realSet)
+  globalThis.clearTimeout = strict('clearTimeout', realClear)
+
+  try {
+    const cache = new Map()
+    const engine = createSyncEngine({
+      userId: 'u1',
+      // Движок создаётся БЕЗ параметра timers — проверяем ровно те, что по умолчанию.
+      transport: { pull: async () => null, save: async () => ({ revision: 1, conflict: false }), subscribe: () => () => {} },
+      clock: { tick: () => '000000000001000-00000-aaaaaaaa', observe: () => {}, deviceId: 'aaaaaaaa' },
+      cache: { read: () => null, write: (r) => cache.set('u1', r), clear: () => cache.delete('u1') },
+    })
+
+    // Ввод еды приводит сюда: правка → отложенное сохранение → таймер.
+    assert.doesNotThrow(
+      () => engine.push({ profile: { name: 'Аня' }, days: {} }),
+      'здесь Safari выбрасывал человека из приложения при вводе еды',
+    )
+    // Повторная правка перезапускает таймер — задействуется clearTimeout.
+    assert.doesNotThrow(() => engine.push({ profile: { name: 'Аня Б' }, days: {} }))
+    assert.doesNotThrow(() => engine.stop())
+  } finally {
+    globalThis.setTimeout = realSet
+    globalThis.clearTimeout = realClear
+  }
 })

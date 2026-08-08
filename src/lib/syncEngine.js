@@ -47,7 +47,16 @@ export function createSyncEngine({
   onStatus = () => {},       // сменился статус синхронизации
   onFatal = () => {},        // сессия мертва — решение принимает store
   debounceMs = DEFAULT_DEBOUNCE,
-  timers = { setTimeout, clearTimeout },
+  // Обёртки, а не ссылки на setTimeout/clearTimeout напрямую. Разница
+  // принципиальная: вызов timers.setTimeout(...) передаёт в функцию this,
+  // равный объекту timers, а не window. Chrome и Firefox это прощают, WebKit —
+  // нет: Safari бросает «Can only call Window.setTimeout on instances of
+  // Window». Через стрелку глобальная функция вызывается сама по себе, с
+  // правильным получателем.
+  timers = {
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (id) => clearTimeout(id),
+  },
 }) {
   let generation = 0
   let stopped = false

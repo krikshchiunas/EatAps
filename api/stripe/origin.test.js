@@ -1,0 +1,66 @@
+// Адрес возврата после оплаты — место, где ошибка стоит дороже всего:
+// returnUrl приходит из тела запроса, то есть полностью под контролем
+// вызывающего. Прежняя проверка требовала лишь https, под неё подходил любой
+// чужой домен.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { safeOrigin, CANONICAL_ORIGIN } from './origin.js'
+
+const req = (host = 'www.eataps.com') => ({ headers: { host } })
+
+test('чужой домен в returnUrl отбрасывается', () => {
+  for (const evil of [
+    'https://evil.com',
+    'https://eataps.com.evil.com',
+    'https://www.eataps.com.attacker.io/path',
+    'https://evil.com/?x=https://www.eataps.com',
+    'https://xn--eatps-8ve.com',            // похожий домен на пуникоде
+    'http://www.eataps.com',                // подмена схемы на незащищённую
+    'javascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    '//evil.com',
+  ]) {
+    assert.equal(safeOrigin(req(), evil), CANONICAL_ORIGIN, `пропущено: ${evil}`)
+  }
+})
+
+test('свои домены разрешены', () => {
+  assert.equal(safeOrigin(req(), 'https://www.eataps.com'), 'https://www.eataps.com')
+  assert.equal(safeOrigin(req(), 'https://eataps.com'), 'https://eataps.com')
+  assert.equal(safeOrigin(req(), 'https://www.eataps.com/profile?tab=1'), 'https://www.eataps.com')
+})
+
+test('локальная разработка работает, но только на петлевом адресе', () => {
+  assert.equal(safeOrigin(req(), 'http://localhost:5173'), 'http://localhost:5173')
+  assert.equal(safeOrigin(req(), 'http://127.0.0.1:5199'), 'http://127.0.0.1:5199')
+  // Чужой хост, притворяющийся локальным именем, — не петлевой адрес.
+  assert.equal(safeOrigin(req(), 'http://localhost.evil.com'), CANONICAL_ORIGIN)
+})
+
+test('дополнительные домены задаются переменной окружения', () => {
+  const before = process.env.ALLOWED_ORIGINS
+  process.env.ALLOWED_ORIGINS = 'https://eataps-preview.vercel.app, https://staging.eataps.com/'
+  try {
+    assert.equal(safeOrigin(req(), 'https://eataps-preview.vercel.app'), 'https://eataps-preview.vercel.app')
+    assert.equal(safeOrigin(req(), 'https://staging.eataps.com'), 'https://staging.eataps.com')
+    assert.equal(safeOrigin(req(), 'https://other.vercel.app'), CANONICAL_ORIGIN)
+  } finally {
+    if (before === undefined) delete process.env.ALLOWED_ORIGINS
+    else process.env.ALLOWED_ORIGINS = before
+  }
+})
+
+test('без returnUrl берётся хост запроса, но тоже по списку', () => {
+  assert.equal(safeOrigin(req('www.eataps.com'), null), 'https://www.eataps.com')
+  assert.equal(safeOrigin(req('eataps.com'), undefined), 'https://eataps.com')
+  // Подделанный заголовок Host не должен становиться адресом возврата.
+  assert.equal(safeOrigin(req('evil.com'), null), CANONICAL_ORIGIN)
+})
+
+test('мусор и отсутствующий запрос не роняют функцию', () => {
+  for (const bad of [null, undefined, '', 0, {}, [], 'не адрес']) {
+    assert.equal(safeOrigin(req(), bad), CANONICAL_ORIGIN)
+  }
+  assert.equal(safeOrigin(undefined, undefined), CANONICAL_ORIGIN)
+  assert.equal(safeOrigin({}, null), CANONICAL_ORIGIN)
+})

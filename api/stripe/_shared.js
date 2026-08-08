@@ -42,15 +42,6 @@ export async function getUserFromRequest(req) {
   return data?.user || null
 }
 
-export function safeOrigin(req, fallbackFromBody) {
-  // Разрешаем только https://www.eataps.com, https://eataps.com или свой Vercel-домен —
-  // иначе returnUrl можно подменить и увести пользователя.
-  const raw = fallbackFromBody || `https://${req.headers.host || 'www.eataps.com'}`
-  try {
-    const u = new URL(raw)
-    if (u.protocol !== 'https:' && u.hostname !== 'localhost') return 'https://www.eataps.com'
-    return `${u.protocol}//${u.host}`
-  } catch {
-    return 'https://www.eataps.com'
-  }
-}
+// Проверка адреса возврата живёт в origin.js — без зависимостей, чтобы её
+// можно было прогонять тестами без установленных SDK.
+export { safeOrigin, CANONICAL_ORIGIN } from './origin.js'
