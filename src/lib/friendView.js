@@ -33,11 +33,25 @@ function projectCustomFoods(list) {
   return list.filter((f) => isObj(f) && f.kind === 'composite' && f.recipe)
 }
 
+// Из дня друг видит только список еды. Настроение, самочувствие и заметка —
+// нет: на экране друга их не показывают, а по содержанию они куда личнее
+// списка продуктов («болит голова», «поругались»). Отдавать то, что не
+// отображается, значит раздавать данные без причины.
+function projectDays(raw) {
+  if (!isObj(raw)) return {}
+  const out = {}
+  for (const date in raw) {
+    const day = raw[date]
+    out[date] = { meals: Array.isArray(day?.meals) ? day.meals : [] }
+  }
+  return out
+}
+
 export function projectFriendState(raw) {
   const s = isObj(raw) ? raw : {}
   return {
     profile: projectFriendProfile(s.profile),
-    days: isObj(s.days) ? s.days : {},
+    days: projectDays(s.days),
     customFoods: projectCustomFoods(s.customFoods),
   }
 }

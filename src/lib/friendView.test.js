@@ -67,10 +67,23 @@ test('настройки, история поиска, ингредиенты и
   assert.deepEqual(Object.keys(v).sort(), ['customFoods', 'days', 'profile'])
 })
 
-test('дневник отдаётся целиком — это и есть смысл экрана друга', () => {
+test('еда из дневника отдаётся — это и есть смысл экрана друга', () => {
   const days = projectFriendState(FULL).days
   assert.equal(days['2026-08-06'].meals[0].name, 'Овсянка')
-  assert.equal(days['2026-08-06'].mood, 'good')
+})
+
+test('настроение, самочувствие и заметка дня другу не уезжают', () => {
+  const day = projectFriendState(FULL).days['2026-08-06']
+  assert.equal(day.mood, undefined, 'настроение личнее списка продуктов')
+  assert.equal(day.note, undefined, 'свободная заметка о самочувствии')
+  assert.equal(day.wellbeing, undefined)
+  assert.deepEqual(Object.keys(day), ['meals'], 'из дня видно ровно то, что на экране')
+})
+
+test('битый день не роняет экран друга', () => {
+  const days = projectFriendState({ days: { '2026-08-06': null, '2026-08-07': { meals: 'нет' } } }).days
+  assert.deepEqual(days['2026-08-06'], { meals: [] })
+  assert.deepEqual(days['2026-08-07'], { meals: [] })
 })
 
 test('из своих продуктов видны только составные блюда', () => {

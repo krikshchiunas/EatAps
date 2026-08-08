@@ -198,3 +198,55 @@ create trigger friendships_rate_limit
 
 create index if not exists friendships_requester_created_idx
   on public.friendships (requester, created_at desc);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 6. Друг не получает настроение, самочувствие и личную заметку дня
+-- ─────────────────────────────────────────────────────────────────────────
+-- friend_state отдавала объект дня целиком. На экране друга видно только
+-- список еды, но в объекте лежат также mood, wellbeing и note — а это куда
+-- более личные вещи, чем перечень продуктов: «болит голова», «плохо спал»,
+-- свободная заметка о самочувствии. Отдавать то, что не отображается, — это
+-- раздача данных без причины. Оставляем из дня ровно meals.
+create or replace function public.friend_state(p_user_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when p_user_id = auth.uid() or exists (
+      select 1 from public.friendships f
+      where f.status = 'accepted'
+        and (
+          (f.requester = auth.uid() and f.addressee = p_user_id)
+          or (f.addressee = auth.uid() and f.requester = p_user_id)
+        )
+    )
+    then jsonb_strip_nulls(jsonb_build_object(
+      'profile', jsonb_build_object(
+        'name',          a.state->'profile'->'name',
+        'avatar',        a.state->'profile'->'avatar',
+        'bio',           a.state->'profile'->'bio',
+        'favRestaurant', a.state->'profile'->'favRestaurant',
+        'favDish',       a.state->'profile'->'favDish',
+        'targets',       jsonb_build_object('calories', a.state->'profile'->'targets'->'calories')
+      ),
+      'days', coalesce((
+        select jsonb_object_agg(d.key, jsonb_build_object('meals', coalesce(d.value->'meals', '[]'::jsonb)))
+        from jsonb_each(coalesce(a.state->'days', '{}'::jsonb)) d
+      ), '{}'::jsonb),
+      'customFoods', coalesce((
+        select jsonb_agg(f)
+        from jsonb_array_elements(coalesce(a.state->'customFoods', '[]'::jsonb)) f
+        where f->>'kind' = 'composite' and f ? 'recipe'
+      ), '[]'::jsonb)
+    ))
+    else null
+  end
+  from public.app_state a
+  where a.user_id = p_user_id;
+$$;
+
+revoke all on function public.friend_state(uuid) from public, anon;
+grant execute on function public.friend_state(uuid) to authenticated;
