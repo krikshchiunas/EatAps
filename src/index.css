@@ -191,6 +191,10 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 }
 .seg button.on { background: var(--primary); color: var(--surface); border-color: var(--primary); }
 [data-theme="dark"] .seg button.on { color: #171D19; }
+/* Сканер штрихкода — не режим наравне с «Поиском», а действие: открывает
+   камеру и сразу закрывается. Поэтому кнопка узкая и никогда не «залипает». */
+.seg .seg-scan { flex: 0 0 54px; font-size: 20px; line-height: 1; }
+.seg .seg-scan:active { transform: scale(0.94); }
 
 .bottomnav {
   position: fixed; left: 0; right: 0; bottom: 0;
@@ -1469,3 +1473,125 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 20px);
 }
 .crash-screen .card { max-width: 420px; width: 100%; }
+
+/* ── Сканер штрихкода ─────────────────────────────────────────────────────
+   Экран поверх листа добавления: живая картинка с камеры, рамка и подсказка.
+   Цвета здесь намеренно не тематические — под кадром с камеры всегда тёмно,
+   и в светлой теме тоже. */
+.scanner {
+  position: fixed; inset: 0; z-index: 50;
+  background: #000;
+  display: flex; flex-direction: column; align-items: center;
+  overflow: hidden;
+  animation: scanner-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes scanner-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.scanner-video {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  /* Камера — фон для рамки и подсказок, жесты ей не нужны. */
+  pointer-events: none;
+}
+
+.scanner-top {
+  position: relative; z-index: 2;
+  width: 100%; max-width: 460px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+}
+.scanner-title { color: #fff; font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
+.scanner-x {
+  width: 36px; height: 36px; border-radius: 12px;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  color: #fff; font-size: 16px;
+}
+
+/* Рамка: вырез в затемнении делает огромная тень, а не отдельные накладки. */
+.scanner-frame {
+  position: relative; z-index: 2;
+  margin: auto 0 0;
+  width: min(86%, 380px); height: 168px;
+  border-radius: 18px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+}
+.scanner-frame .c {
+  position: absolute; width: 30px; height: 30px;
+  border: 3px solid var(--primary); border-radius: 4px;
+}
+.scanner-frame .tl { top: -2px; left: -2px; border-right: none; border-bottom: none; border-top-left-radius: 16px; }
+.scanner-frame .tr { top: -2px; right: -2px; border-left: none; border-bottom: none; border-top-right-radius: 16px; }
+.scanner-frame .bl { bottom: -2px; left: -2px; border-right: none; border-top: none; border-bottom-left-radius: 16px; }
+.scanner-frame .br { bottom: -2px; right: -2px; border-left: none; border-top: none; border-bottom-right-radius: 16px; }
+
+/* Бегунок — единственный признак, что приложение смотрит в кадр и работает. */
+.scanner-beam {
+  position: absolute; left: 10px; right: 10px; top: 0; height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  box-shadow: 0 0 12px var(--primary);
+  animation: scanner-beam 2.1s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes scanner-beam {
+  0%, 100% { transform: translateY(8px); opacity: 0.35; }
+  50%      { transform: translateY(158px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scanner-beam { animation: none; opacity: 0.7; transform: translateY(83px); }
+}
+
+.scanner-hint {
+  position: relative; z-index: 2;
+  margin: 22px 20px 0; max-width: 340px;
+  color: #fff; font-size: 15px; font-weight: 500; text-align: center;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+.scanner-tip {
+  position: relative; z-index: 2;
+  margin: 10px 24px 0; max-width: 320px;
+  color: rgba(255, 255, 255, 0.72); font-size: 13px; line-height: 1.45; text-align: center;
+  animation: scanner-pop 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Своё появление, а не toast-in: тот сдвигает элемент на -50% по горизонтали,
+   потому что рассчитан на всплывашку, прибитую к left:50%. */
+@keyframes scanner-pop {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Карточка поверх камеры: поиск товара, «не найден», отказ доступа. */
+.scanner-card {
+  position: relative; z-index: 3;
+  margin: 20px 16px 0; width: min(100% - 32px, 380px);
+  background: var(--surface); border-radius: 22px;
+  padding: 20px; text-align: center;
+  box-shadow: var(--shadow-float);
+  animation: scanner-pop 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.scanner-card h3 { font-size: 18px; font-weight: 640; letter-spacing: -0.3px; color: var(--ink); }
+.scanner-card p { margin-top: 8px; font-size: 14px; line-height: 1.45; color: var(--ink-2); }
+.scanner-card .btn { margin-top: 14px; }
+.scanner-code {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px; font-size: 13px !important; color: var(--ink-3) !important;
+}
+
+.scanner-bottom {
+  position: relative; z-index: 2;
+  margin-top: auto;
+  width: 100%; max-width: 460px;
+  padding: 20px 20px calc(env(safe-area-inset-bottom) + 20px);
+}
+/* .btn.ghost — два класса, поэтому и здесь два: иначе кнопка останется белой. */
+.btn.scanner-cancel {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.26);
+  color: #fff;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}

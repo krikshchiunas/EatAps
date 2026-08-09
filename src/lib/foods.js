@@ -1,3 +1,5 @@
+import { barcodeVariants } from './barcode.js'
+
 export const MEAL_TYPES = [
   { key: 'breakfast', label: 'Завтрак', emoji: '🌅' },
   { key: 'lunch', label: 'Обед', emoji: '🥗' },
@@ -931,7 +933,11 @@ export function getPortions(food) {
   const catKey = isDrink ? 'drink' : DISH_CATS.has(food.cat) ? 'dish' : food.cat
   const spec = PORTIONS_BY_NAME[food.name] || []
   const cat = PORTIONS_BY_CAT[catKey] || PORTIONS_BY_CAT._default
-  const list = spec.length >= 3 ? spec : [...spec, ...cat]
+  const base = spec.length >= 3 ? spec : [...spec, ...cat]
+  // Порции самого товара (у продукта со штрихкода — порция и вес с упаковки)
+  // идут первыми: они точнее любых наших усреднённых «стакан / порция».
+  const own = (food.portions || []).map((p) => [p.label, p.grams])
+  const list = own.length ? [...own, ...base] : base
   const seen = new Set()
   const out = []
   for (const [label, grams] of list) {
@@ -951,6 +957,115 @@ export function searchIngredients(query) {
   const prefix = items.filter(({ text }) => wordPrefixMatch(text, [q, ...syn]))
   if (prefix.length > 0) return prefix.map((x) => x.i)
   return items.filter(({ text }) => text.includes(q)).map((x) => x.i)
+}
+
+// ── Товар по штрихкоду ───────────────────────────────────────────────────────
+
+const OFF_FIELDS = [
+  'product_name', 'product_name_ru', 'generic_name', 'brands', 'quantity',
+  'product_quantity', 'serving_size', 'serving_quantity', 'nutriments', 'categories_tags',
+].join(',')
+
+const DRINK_TAGS = /(beverages|boissons|drinks|напитки|waters|juices|sodas|milks)/i
+const VOLUME_RE = /\d\s*(ml|мл|cl|l\b|л\b|liter|litre|литр)/i
+
+function looksLikeDrink(p) {
+  if ((p.categories_tags || []).some((t) => DRINK_TAGS.test(t))) return true
+  return VOLUME_RE.test(p.quantity || '') || VOLUME_RE.test(p.serving_size || '')
+}
+
+// Значение на 100 г/мл. Если база знает только «за порцию», пересчитываем —
+// это перевод единиц реальных данных, а не выдумывание недостающих.
+function per100(nutriments, key, servingQty) {
+  const direct = nutriments[key + '_100g']
+  if (direct != null && Number.isFinite(+direct)) return +direct
+  const serving = nutriments[key + '_serving']
+  if (serving != null && Number.isFinite(+serving) && servingQty > 0) {
+    return (+serving * 100) / servingQty
+  }
+  return null
+}
+
+const posNum = (v, max) => {
+  const n = +v
+  return Number.isFinite(n) && n > 0 && n <= max ? n : null
+}
+
+// Поиск продукта по считанному коду.
+//
+// Возвращает:
+//   { status: 'ok', food }            — нашли и название, и калорийность
+//   { status: 'no-nutrition', name }  — название есть, данных о составе нет
+//   { status: 'not-found' }           — такого кода в базе нет
+// Ошибка сети — исключение: «нет связи» и «нет товара» человеку надо показывать
+// по-разному, и молча подменять одно другим нельзя.
+export async function lookupBarcode(code, signal) {
+  let product = null
+  // Один и тот же товар лежит в базе то с ведущим нулём, то без — пробуем оба.
+  for (const variant of barcodeVariants(code)) {
+    const url = `https://ru.openfoodfacts.org/api/v2/product/${encodeURIComponent(variant)}.json?fields=${OFF_FIELDS}`
+    const res = await fetch(url, { signal })
+    if (res.status === 404) continue
+    if (!res.ok) throw new Error('off_http_' + res.status)
+    const data = await res.json()
+    if (data && data.status === 1 && data.product) { product = data.product; break }
+  }
+  if (!product) return { status: 'not-found' }
+
+  const raw = (product.product_name_ru || product.product_name || product.generic_name || '').trim()
+  if (!raw) return { status: 'not-found' }
+  const brand = product.brands ? product.brands.split(',')[0].trim() : ''
+  const name = brand && !raw.toLowerCase().includes(brand.toLowerCase()) ? `${raw} · ${brand}` : raw
+
+  const drink = looksLikeDrink(product)
+  const unit = drink ? 'мл' : 'г'
+  const serving = posNum(product.serving_quantity, 3000)
+  const pack = posNum(product.product_quantity, 5000)
+
+  const n = product.nutriments || {}
+  let kcal = per100(n, 'energy-kcal', serving)
+  if (kcal == null) {
+    const kj = per100(n, 'energy', serving)
+    if (kj != null) kcal = kj / 4.184
+  }
+  // Название нашли — но состав в базе не заполнен. Переписывать название рукой
+  // человека уже не заставим, а цифры пусть возьмёт с этикетки.
+  if (kcal == null || !(kcal > 0) || kcal >= 1000) return { status: 'no-nutrition', name, drink }
+
+  // Порции — только те, что указаны на упаковке.
+  const portions = []
+  if (serving) portions.push({ label: 'порция', grams: Math.round(serving) })
+  if (pack && pack !== serving) portions.push({ label: 'упаковка', grams: Math.round(pack) })
+
+  // cat намеренно не ставим — как и у продуктов из поиска по той же базе.
+  // Во-первых, классификация питательности (nutritionClassification) читает
+  // `food.cat || inferCategory(food)`: выдуманная категория «блюдо» перекрыла бы
+  // разбор по названию, и сканированное молоко перестало бы считаться молочным.
+  // Во-вторых, подсказки порций для «блюда» — тарелка на 350 г — для
+  // произвольной пачки с полки бессмысленны.
+  const food = {
+    name,
+    emoji: drink ? '🥤' : '🛒',
+    unit,
+    kcal: Math.round(kcal),
+    protein: +(+(per100(n, 'proteins', serving) || 0)).toFixed(1),
+    carbs: +(+(per100(n, 'carbohydrates', serving) || 0)).toFixed(1),
+    fat: +(+(per100(n, 'fat', serving) || 0)).toFixed(1),
+    source: 'off',
+    barcode: code,
+    portions,
+  }
+  const sugar = per100(n, 'sugars', serving)
+  if (sugar != null) food.sugar = +(+sugar).toFixed(1)
+  const satFat = per100(n, 'saturated-fat', serving)
+  if (satFat != null) food.satFat = +(+satFat).toFixed(1)
+
+  // Сколько подставить в поле количества. Порция с упаковки — лучший ответ;
+  // маленькую пачку человек обычно съедает целиком; иначе просто круглое число,
+  // которое всё равно правится одним касанием.
+  food.defaultGrams = serving ? Math.round(serving) : pack && pack <= 500 ? Math.round(pack) : drink ? 250 : 100
+
+  return { status: 'ok', food }
 }
 
 export async function searchOpenFoodFacts(query, signal) {

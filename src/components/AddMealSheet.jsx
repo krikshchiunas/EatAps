@@ -3,6 +3,7 @@ import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchIngredients, searc
 import { BEER_BRANDS, SPIRIT_TYPES, COCKTAILS, alcKcal } from '../lib/alcohol.js'
 import { useStore } from '../store.jsx'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import BarcodeScanner from './BarcodeScanner.jsx'
 
 const round1 = (n) => +n.toFixed(1)
 const num = (v) => {
@@ -62,6 +63,7 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
   const [manualDrink, setManualDrink] = useState({ name: '', ml: '250', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '', caffeine: '' })
   const [drinkBasis, setDrinkBasis] = useState('per100') // 'per100' | 'perServing'
   const [mode, setMode] = useState('search')
+  const [scanning, setScanning] = useState(false)
   const [toast, setToast] = useState(null)
 
   const showToast = (msg) => {
@@ -178,6 +180,35 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
   const startManual = () => {
     setManual((m) => ({ ...m, name: m.name || query.trim() }))
     setMode('manual')
+  }
+
+  // ── Штрихкод ───────────────────────────────────────────────────────────────
+  // Считанный товар попадает ровно на тот же экран количества, что и продукт,
+  // выбранный поиском, — отдельной ветки добавления у сканера нет.
+  const pickScanned = (food) => {
+    setScanning(false)
+    setMode('search')
+    setQuery('')
+    setSection(null)
+    setAlcItem(null)
+    setMethod(null)
+    setSugar(0)
+    setSelected(food)
+    // Порция с упаковки, если производитель её указал. Поле открыто для правки —
+    // человек всё равно съедает не «порцию по ГОСТу», а сколько съел.
+    const fallback = food.unit === 'мл' ? '250' : '100'
+    setGrams(food.defaultGrams ? String(food.defaultGrams) : fallback)
+  }
+
+  // Товара нет в базе (или у него нет состава) — уходим на ручной ввод. Если
+  // название удалось узнать, оно уже подставлено: повторно его никто не печатает.
+  const manualFromScan = (name, drink) => {
+    setScanning(false)
+    setSelected(null)
+    setMode('manual')
+    setManualKind(drink ? 'drink' : 'food')
+    if (drink) setManualDrink((d) => ({ ...d, name: name || d.name }))
+    else setManual((m) => ({ ...m, name: name || m.name }))
   }
 
   const clearFood = () => {
@@ -307,6 +338,7 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
         <div className="seg" style={{ marginBottom: 18 }}>
           <button className={mode === 'search' ? 'on' : ''} onClick={() => setMode('search')}>Поиск</button>
           <button className={mode === 'manual' ? 'on' : ''} onClick={() => setMode('manual')}>Вручную</button>
+          <button className="seg-scan" onClick={() => setScanning(true)} aria-label="Сканировать штрихкод" title="Сканировать штрихкод">📷</button>
         </div>
 
         {mode === 'search' && !selected && !alcItem && (
@@ -642,6 +674,16 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
           </div>
         )}
       </div>
+
+      {/* Сканер живёт рядом с листом, а не внутри: лист двигает transform, и
+          position:fixed внутри него отсчитывался бы от листа, а не от экрана. */}
+      {scanning && (
+        <BarcodeScanner
+          onClose={() => setScanning(false)}
+          onFound={pickScanned}
+          onManual={manualFromScan}
+        />
+      )}
     </div>
   )
 }
