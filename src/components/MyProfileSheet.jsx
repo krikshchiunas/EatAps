@@ -2,7 +2,75 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../store.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
 import { getMyPublicId } from '../lib/supabase.js'
+import { formatPublicId } from '../lib/publicId.js'
+import { addProfileListItem, removeProfileListItem, normalizeProfileList, MAX_LEN } from '../lib/profileLists.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+
+// Редактор списка «не ем» / «люблю». Пункты добавляются по Enter или кнопкой,
+// удаляются крестиком на чипе — отдельного режима редактирования нет: список
+// короткий, и лишний экран здесь только мешал бы.
+function ListEditor({ label, hint, placeholder, items, onChange, tone }) {
+  const [draft, setDraft] = useState('')
+  const [err, setErr] = useState(null)
+
+  const add = () => {
+    const res = addProfileListItem(items, draft)
+    setErr(res.error)
+    if (!res.error) setDraft('')
+    onChange(res.list)
+  }
+
+  return (
+    <div className="field">
+      <label>{label}{hint ? <span className="muted" style={{ fontWeight: 400 }}> — {hint}</span> : null}</label>
+      {items.length > 0 && (
+        <div className="row wrap gap8" style={{ marginBottom: 10 }}>
+          {items.map((x) => (
+            <span
+              key={x}
+              className="chip"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                ...(tone === 'no'
+                  ? { background: 'var(--surface-2)', color: 'var(--ink-2)' }
+                  : { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' }),
+              }}
+            >
+              {x}
+              <button
+                onClick={() => onChange(removeProfileListItem(items, x))}
+                aria-label={`Убрать «${x}»`}
+                style={{ fontSize: 13, opacity: 0.65, lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="row gap8">
+        <input
+          className="input"
+          placeholder={placeholder}
+          value={draft}
+          maxLength={MAX_LEN}
+          onChange={(e) => { setDraft(e.target.value); setErr(null) }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
+          style={{ flex: 1 }}
+        />
+        <button
+          className="btn ghost"
+          style={{ width: 'auto', flex: '0 0 auto', padding: '0 18px' }}
+          onClick={add}
+          disabled={!draft.trim()}
+        >
+          ＋
+        </button>
+      </div>
+      {err && <p style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6 }}>{err}</p>}
+    </div>
+  )
+}
 
 export default function MyProfileSheet({ onClose }) {
   const { user, profile, setProfile } = useStore()
@@ -20,11 +88,17 @@ export default function MyProfileSheet({ onClose }) {
     bio: profile?.bio || '',
     favRestaurant: profile?.favRestaurant || '',
     favDish: profile?.favDish || '',
+    noGos: normalizeProfileList(profile?.noGos),
+    toGos: normalizeProfileList(profile?.toGos),
   })
 
   const set = (p) => setDraft((d) => ({ ...d, ...p }))
 
   const save = () => {
+    // Пустой список пишем как undefined, а не []: профиль — обычный объект в
+    // синхронизируемом состоянии, и пустые ключи там ни к чему.
+    const noGos = normalizeProfileList(draft.noGos)
+    const toGos = normalizeProfileList(draft.toGos)
     setProfile({
       ...(profile || {}),
       name: draft.name.trim() || undefined,
@@ -32,14 +106,21 @@ export default function MyProfileSheet({ onClose }) {
       bio: draft.bio.trim() || undefined,
       favRestaurant: draft.favRestaurant.trim() || undefined,
       favDish: draft.favDish.trim() || undefined,
+      noGos: noGos.length ? noGos : undefined,
+      toGos: toGos.length ? toGos : undefined,
     })
     onClose()
   }
 
+  // В базе код лежит без разделителей, человеку показываем и копируем
+  // сгруппированный вид — его проще перенабрать и продиктовать. Обратно
+  // normalizePublicId снимает дефисы, поэтому вставить можно любой из двух.
+  const shownId = publicId ? formatPublicId(publicId) : null
+
   const copy = async () => {
-    if (!publicId) return
+    if (!shownId) return
     try {
-      await navigator.clipboard.writeText(publicId)
+      await navigator.clipboard.writeText(shownId)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
@@ -78,6 +159,24 @@ export default function MyProfileSheet({ onClose }) {
           />
         </div>
 
+        <ListEditor
+          label="Не ем"
+          hint="увидят друзья"
+          placeholder="Напр. Молоко"
+          items={draft.noGos}
+          onChange={(noGos) => set({ noGos })}
+          tone="no"
+        />
+
+        <ListEditor
+          label="Люблю"
+          hint="и хочу попробовать"
+          placeholder="Напр. Суши"
+          items={draft.toGos}
+          onChange={(toGos) => set({ toGos })}
+          tone="yes"
+        />
+
         <div className="field">
           <label>Любимый ресторан</label>
           <input className="input" placeholder="Напр. Dodo Pizza" value={draft.favRestaurant} onChange={(e) => set({ favRestaurant: e.target.value })} maxLength={60} />
@@ -94,11 +193,11 @@ export default function MyProfileSheet({ onClose }) {
             <input
               className="input"
               readOnly
-              value={publicId ?? '…'}
-              style={{ flex: 1, fontSize: 18, fontWeight: 650, letterSpacing: '0.06em', textAlign: 'center' }}
+              value={shownId ?? '…'}
+              style={{ flex: 1, fontSize: 17, fontWeight: 650, letterSpacing: '0.04em', textAlign: 'center' }}
               onFocus={(e) => e.target.select()}
             />
-            <button className="iconbtn" onClick={copy} title="Копировать ID" aria-label="Копировать ID" disabled={!publicId} style={{ flex: '0 0 auto' }}>
+            <button className="iconbtn" onClick={copy} title="Копировать ID" aria-label="Копировать ID" disabled={!shownId} style={{ flex: '0 0 auto' }}>
               {copied ? '✓' : (
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="9" y="9" width="11" height="11" rx="2" />

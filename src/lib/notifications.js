@@ -42,6 +42,18 @@ const LS = {
   deficit: 'eataps:notif:deficit', // дата последнего пуша про недобор
 }
 
+// В приватном режиме iOS Safari (и при запрете сторонних данных) setItem
+// бросает исключение. Планировщик ниже работает по таймеру раз в минуту, то
+// есть необёрнутая запись означала бы ошибку каждую минуту. Отметка «сегодня
+// уже показывали» тогда просто не сохраняется — уведомление может повториться,
+// но приложение не ломается.
+function readMark(key) {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+function writeMark(key, value) {
+  try { localStorage.setItem(key, value) } catch {}
+}
+
 export function notificationsSupported() {
   return typeof window !== 'undefined' && 'Notification' in window
 }
@@ -98,9 +110,9 @@ function maybeShowLunch() {
   const hour = now.getHours()
   if (hour < 15 || hour >= 18) return
   const today = keyOf(now)
-  if (localStorage.getItem(LS.lunch) === today) return
+  if (readMark(LS.lunch) === today) return
   show('EatAps', pickLunch(), 'eataps-lunch')
-  localStorage.setItem(LS.lunch, today)
+  writeMark(LS.lunch, today)
 }
 
 // Проверить сильный недобор (>35%) вечером. Окно 18:00–22:59.
@@ -111,7 +123,7 @@ function maybeShowDeficit(profile, day) {
   const hour = now.getHours()
   if (hour < 18 || hour >= 23) return
   const today = keyOf(now)
-  if (localStorage.getItem(LS.deficit) === today) return
+  if (readMark(LS.deficit) === today) return
 
   const meals = day?.meals || []
   const totals = sumDay(meals)
@@ -135,7 +147,7 @@ function maybeShowDeficit(profile, day) {
 
   const body = `Сегодня сильно не хватает: ${deficits.join(', ')}. Ужин ещё впереди — успеешь.`
   show('Ты сильно недобираешь!', body, 'eataps-deficit')
-  localStorage.setItem(LS.deficit, today)
+  writeMark(LS.deficit, today)
 }
 
 // Запустить фоновый планировщик. Возвращает функцию остановки.
@@ -167,6 +179,37 @@ export function startScheduler(getState) {
 let activeChatUserId = null
 export function setActiveChat(userId) { activeChatUserId = userId || null }
 
+// ── Заглушённые собеседники ──────────────────────────────────────────────────
+// Список живёт здесь, а не на экране друзей: читать его должен тот, кто решает
+// показывать пуш. Раньше он лежал в FriendsScreen и не читался вообще — кнопка
+// «Заглушить» меняла только иконку, а уведомления приходили как обычно.
+const MUTED_KEY = 'eataps:friends:muted'
+
+export function getMutedFriends() {
+  try { return JSON.parse(localStorage.getItem(MUTED_KEY) || '[]') } catch { return [] }
+}
+
+export function isFriendMuted(userId) {
+  return !!userId && getMutedFriends().includes(userId)
+}
+
+function writeMuted(next) {
+  try { localStorage.setItem(MUTED_KEY, JSON.stringify(next)) } catch {}
+  return next
+}
+
+// Переключить и вернуть новый список — вызывающему не нужно перечитывать.
+export function toggleFriendMuted(userId) {
+  const arr = getMutedFriends()
+  return writeMuted(arr.includes(userId) ? arr.filter((x) => x !== userId) : [...arr, userId])
+}
+
+// Друга удалили — забываем и его заглушение, иначе список копит id людей,
+// которых давно нет, и растёт без предела.
+export function forgetMutedFriend(userId) {
+  return writeMuted(getMutedFriends().filter((x) => x !== userId))
+}
+
 // Русская плюрализация: 1 сообщение, 2 сообщения, 5 сообщений.
 function pluralize(n, one, few, many) {
   const n100 = n % 100
@@ -186,6 +229,7 @@ export function notifyIncomingMessage({ senderId, senderName, senderAvatar, unre
   // входящего сообщения.
   if (notificationPermission() !== 'granted') return
   if (senderId && senderId === activeChatUserId) return
+  if (isFriendMuted(senderId)) return
   const n = Math.max(1, Number(unreadCount) || 1)
   const name = (senderName && senderName.trim()) || 'Пользователь'
   const word = pluralize(n, 'сообщение', 'сообщения', 'сообщений')

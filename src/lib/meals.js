@@ -74,11 +74,33 @@ export function resolvedTime(section, foods) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+// «Без категории» — секция-приёмник. Отдельной функцией, потому что нужна в
+// двух местах: в обычном списке секций и в группировке для профиля, где в неё
+// падают продукты из приёмов, которых в этом дне нет (см. groupDayByMeal).
+function otherSection(day) {
+  const ov = overrideFor(day, OTHER_ID)
+  return {
+    id: OTHER_ID,
+    type: 'custom',
+    label: OTHER_LABEL,
+    emoji: OTHER_EMOJI,
+    customName: OTHER_LABEL,
+    time: ov?.time ?? null,
+    showTime: ov?.showTime ?? true,
+    createdAt: ov?.createdAt ?? null,
+    sortOrder: STANDARD_TYPES.length,
+    deletable: false,
+    renameable: false,
+  }
+}
+
 // Полный упорядоченный список секций дня: 4 стандартные (с учётом override),
 // «Без категории» (только если в неё реально попадают продукты), затем
 // пользовательские секции по sortOrder.
 export function getMealSections(day) {
-  const foods = day?.meals || []
+  // Array.isArray, а не `|| []`: сюда приходит и день, собранный из данных
+  // друга, то есть из сети. Один битый meals не должен ронять экран профиля.
+  const foods = Array.isArray(day?.meals) ? day.meals : []
   const sections = []
 
   STANDARD_TYPES.forEach((type, i) => {
@@ -101,22 +123,7 @@ export function getMealSections(day) {
   })
 
   const hasOther = foods.some((f) => effectiveMealId(f) === OTHER_ID)
-  if (hasOther) {
-    const ov = overrideFor(day, OTHER_ID)
-    sections.push({
-      id: OTHER_ID,
-      type: 'custom',
-      label: OTHER_LABEL,
-      emoji: OTHER_EMOJI,
-      customName: OTHER_LABEL,
-      time: ov?.time ?? null,
-      showTime: ov?.showTime ?? true,
-      createdAt: ov?.createdAt ?? null,
-      sortOrder: STANDARD_TYPES.length,
-      deletable: false,
-      renameable: false,
-    })
-  }
+  if (hasOther) sections.push(otherSection(day))
 
   const customs = (day?.mealSections || [])
     .filter((s) => s.type === 'custom' && s.id !== OTHER_ID)
@@ -136,6 +143,40 @@ export function getMealSections(day) {
     .sort((a, b) => a.sortOrder - b.sortOrder)
 
   return [...sections, ...customs]
+}
+
+// Группировка дня по приёмам пищи для ПОКАЗА (профиль — свой и чужой).
+// Возвращает [{ section, foods }] в том же порядке, что getMealSections.
+//
+// Отличие от «getMealSections + foodsForMeal» одно, но принципиальное: здесь
+// гарантируется, что ни один продукт не пропадёт с экрана. Другу приезжает
+// только day.meals — friend_state отдаёт из дня ровно список еды и ничего
+// больше (см. migrations/2026-08-08_hardening.sql), — а значит его
+// пользовательские приёмы («После тренировки») в объекте дня отсутствуют.
+// Продукт, ссылающийся на такой приём, не совпал бы ни с одной секцией и
+// молча исчез бы: человек видел бы у друга неполный день и неверную сумму по
+// секциям. Такие продукты собираем в «Без категории».
+export function groupDayByMeal(day) {
+  const groups = getMealSections(day).map((s) => ({ section: s, foods: [] }))
+  const byId = new Map(groups.map((g) => [g.section.id, g]))
+  const orphans = []
+
+  for (const f of Array.isArray(day?.meals) ? day.meals : []) {
+    const g = byId.get(effectiveMealId(f))
+    if (g) g.foods.push(f)
+    else orphans.push(f)
+  }
+
+  if (orphans.length) {
+    let other = byId.get(OTHER_ID)
+    if (!other) {
+      other = { section: otherSection(day), foods: [] }
+      groups.splice(STANDARD_TYPES.length, 0, other) // сразу после стандартных
+    }
+    other.foods.push(...orphans)
+  }
+
+  return groups
 }
 
 export function nextSortOrder(day) {

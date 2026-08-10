@@ -31,6 +31,15 @@ export function createServer() {
       row = { state: clone(state), revision: (row?.revision || 0) + 1 }
       notify()
     },
+    // То же самое, но событие приходит БЕЗ состояния: Realtime обрезает
+    // крупные строки (лимит размера записи), и подписчик обязан дочитать
+    // строку сам. Отдельный метод нужен потому, что это единственный путь,
+    // на котором движок ходит в pull из обработчика события.
+    writeTruncated(state) {
+      row = { state: clone(state), revision: (row?.revision || 0) + 1 }
+      const evt = { revision: row.revision, state: null, updatedAt: new Date().toISOString() }
+      for (const cb of [...subscribers]) cb(evt)
+    },
     async pull() {
       log.pulls += 1
       if (failNext) { const e = failNext; failNext = null; throw e }

@@ -3,7 +3,7 @@ import { useStore } from '../store.jsx'
 import {
   listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage,
   markChatRead, listFriendships,
-  markMessagesRead, subscribeToSentUpdates, hideMessageLocally,
+  markMessagesRead, subscribeToSentUpdates, hideMessageLocally, hideMessagesLocally,
   createTypingChannel, watchPresence, fetchLastSeen,
   toggleMessageReaction,
 } from '../lib/supabase.js'
@@ -106,6 +106,26 @@ export default function ChatView({ friend, onClose }) {
 
   const { panelProps, scrimProps, close: handleClose } = useSwipeBack(onClose)
   useScrollLock()
+
+  // Локальные превью отправляемых фото. Освободить URL сразу после отправки
+  // можно только при успехе: у неудачного сообщения этот самый blob и стоит в
+  // image_url, и досрочный revoke оставил бы вместо превью битую картинку.
+  // Поэтому держим их до закрытия чата, а там отпускаем все разом — иначе
+  // каждое непережитое фото оставалось бы в памяти до перезагрузки страницы.
+  const blobUrlsRef = useRef(new Set())
+  const takeBlobUrl = useCallback((file) => {
+    const url = URL.createObjectURL(file)
+    blobUrlsRef.current.add(url)
+    return url
+  }, [])
+  const releaseBlobUrl = useCallback((url) => {
+    if (!url || !blobUrlsRef.current.delete(url)) return
+    URL.revokeObjectURL(url)
+  }, [])
+  useEffect(() => {
+    const urls = blobUrlsRef.current
+    return () => { for (const u of urls) URL.revokeObjectURL(u); urls.clear() }
+  }, [])
 
   const flash = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 1600) }, [])
 
@@ -344,7 +364,7 @@ export default function ChatView({ friend, onClose }) {
     const r = reply
     setReply(null)
     const tempId = 'temp-' + (crypto.randomUUID?.() || Date.now() + Math.random())
-    const localUrl = file ? URL.createObjectURL(file) : null
+    const localUrl = file ? takeBlobUrl(file) : null
     const temp = {
       id: tempId, sender: myId, recipient: friend.id,
       text: text || null, image_url: localUrl, meal_ref: null,
@@ -363,11 +383,11 @@ export default function ChatView({ friend, onClose }) {
       })
       if (res.error) throw new Error(res.error)
       setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...res.ok, status: 'sent' } : m)))
-      if (localUrl) URL.revokeObjectURL(localUrl)
+      releaseBlobUrl(localUrl)
     } catch (e) {
       setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...m, status: 'failed', _payload: { text, file } } : m)))
     }
-  }, [reply, myId, friend.id])
+  }, [reply, myId, friend.id, takeBlobUrl, releaseBlobUrl])
 
   // Отправка карточки приёма пищи — оптимистично, как обычное сообщение.
   const sendMeal = useCallback(async (mealRef) => {
@@ -455,9 +475,9 @@ export default function ChatView({ friend, onClose }) {
   const toggleReactionRef = useRef(toggleReaction)
   toggleReactionRef.current = toggleReaction
 
-  // «Удалить у меня» — ТОЛЬКО локальное скрытие, БД не трогаем. Раньше для
-  // своих сообщений вызывался deleteChatMessage, и строка исчезала у обоих —
-  // это поведение пункта «Удалить у всех», а не того, что написано на кнопке.
+  // «Удалить у меня» — ТОЛЬКО локальное скрытие, БД не трогаем: удаление строки
+  // из базы убрало бы сообщение и у собеседника, а это поведение пункта
+  // «Удалить у всех», которого в интерфейсе нет.
   // temp-сообщений в БД нет, для них достаточно убрать из списка.
   const doDeleteForMe = useCallback((m) => {
     setMessages((cur) => cur.filter((x) => x.id !== m.id))
@@ -468,7 +488,7 @@ export default function ChatView({ friend, onClose }) {
   // У собеседника история остаётся — как «удалить у меня» для одного сообщения.
   const clearChatForMe = useCallback(() => {
     const ids = messagesRef.current.map((m) => m.id).filter((id) => !String(id).startsWith('temp-'))
-    ids.forEach(hideMessageLocally)
+    hideMessagesLocally(ids)
     setMessages([])
     flash('Переписка очищена у вас')
   }, [flash])
@@ -944,6 +964,12 @@ function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
   const stopRef = useRef(stopTyping)
   stopRef.current = stopTyping
   useEffect(() => () => stopRef.current(), [])
+
+  // Прикреплённое, но не отправленное фото: превью освобождается при отправке и
+  // по крестику, но не при закрытии чата — тогда blob оставался висеть.
+  const photoRef = useRef(photo)
+  photoRef.current = photo
+  useEffect(() => () => { if (photoRef.current?.url) URL.revokeObjectURL(photoRef.current.url) }, [])
 
   const grow = () => {
     const el = taRef.current

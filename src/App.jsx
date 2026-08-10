@@ -138,7 +138,7 @@ export default function App() {
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={(mealId, mealLabel) => setSheet({ mealId, mealLabel })} onOpenCalendar={() => setCalendarOpen(true)} onOpenStats={() => setStatsOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
       {tab === 'ai' && <AITab />}
       {tab === 'friends' && <FriendsScreen unreadCounts={unreadCounts} onChatClosed={refreshUnread} setTab={setTab} />}
-      {tab === 'profile' && <ProfileScreen />}
+      {tab === 'profile' && <ProfileScreen setTab={setTab} />}
 
       <BottomNav tab={tab} setTab={setTab} onAdd={() => {
         setTab('day')

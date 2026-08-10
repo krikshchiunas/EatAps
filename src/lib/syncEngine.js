@@ -234,6 +234,30 @@ export function createSyncEngine({
     return { merged: true }
   }
 
+  // Контрольная сверка с сервером: после возврата сети, после долгого фона и
+  // при переподключении Realtime. Realtime сам по себе не гарантия — событие
+  // могло не дойти, пока вкладка спала.
+  //
+  // Объявлена именно функцией в замыкании, а не только методом возвращаемого
+  // объекта: её вызывает handleRemote ниже, а метод объекта из области
+  // видимости не виден — такой вызов падал с ReferenceError, и обрезанное
+  // realtime-событие тихо не дочитывалось.
+  async function refresh() {
+    if (stopped || !started) return
+    try {
+      await hydrate()
+      if (dirty) schedule(0)
+      else setStatus(SYNC.SYNCED)
+      attempt = 0
+    } catch (e) {
+      if (stopped) return
+      const err = normalizeError(e)
+      if (err.category === ERR.SESSION) { onFatal(err); return }
+      setStatus(err.category === ERR.NETWORK ? SYNC.OFFLINE : SYNC.ERROR)
+      backoff()
+    }
+  }
+
   // ── Realtime ──────────────────────────────────────────────────────────────
 
   function handleRemote(evt) {
@@ -342,24 +366,7 @@ export function createSyncEngine({
       return !dirty
     },
 
-    // Контрольная сверка с сервером: после возврата сети, после долгого фона и
-    // при переподключении Realtime. Realtime сам по себе не гарантия — событие
-    // могло не дойти, пока вкладка спала.
-    async refresh() {
-      if (stopped || !started) return
-      try {
-        await hydrate()
-        if (dirty) schedule(0)
-        else setStatus(SYNC.SYNCED)
-        attempt = 0
-      } catch (e) {
-        if (stopped) return
-        const err = normalizeError(e)
-        if (err.category === ERR.SESSION) { onFatal(err); return }
-        setStatus(err.category === ERR.NETWORK ? SYNC.OFFLINE : SYNC.ERROR)
-        backoff()
-      }
-    },
+    refresh,
 
     // Сеть вернулась / пользователь нажал «повторить».
     retryNow() {

@@ -33,8 +33,10 @@ globalThis.localStorage = {
 }
 
 asIPhoneSafari()
-const { startScheduler, notifyIncomingMessage, notificationsSupported, notificationPermission } =
-  await import('./notifications.js')
+const {
+  startScheduler, notifyIncomingMessage, notificationsSupported, notificationPermission,
+  toggleFriendMuted, isFriendMuted, setActiveChat,
+} = await import('./notifications.js')
 
 afterEach(() => { store.clear() })
 
@@ -87,4 +89,33 @@ test('окружение без window (сервер, сборка) тоже п�
   assert.equal(notificationsSupported(), false)
   assert.doesNotThrow(() => startScheduler(getState)())
   assert.doesNotThrow(() => notifyIncomingMessage({ senderId: 'x', unreadCount: 1 }))
+})
+
+// Кнопка «Заглушить» на экране друзей раньше меняла только иконку: список
+// заглушённых лежал в компоненте и не читался никем. Уведомления от такого
+// друга приходили как обычно — то есть интерфейс говорил неправду.
+test('заглушённый собеседник не присылает пуш, остальные присылают', () => {
+  const shown = []
+  function N(title, options) { shown.push({ title, options }) }
+  N.permission = 'granted'
+  N.requestPermission = async () => 'granted'
+  globalThis.Notification = N
+  globalThis.window = { Notification: N }
+  setActiveChat(null)
+
+  notifyIncomingMessage({ senderId: 'u2', senderName: 'Аня', unreadCount: 1 })
+  assert.equal(shown.length, 1, 'обычный собеседник — пуш приходит')
+
+  toggleFriendMuted('u2')
+  assert.equal(isFriendMuted('u2'), true)
+  notifyIncomingMessage({ senderId: 'u2', senderName: 'Аня', unreadCount: 2 })
+  assert.equal(shown.length, 1, 'от заглушённого пуша больше нет')
+
+  notifyIncomingMessage({ senderId: 'u3', senderName: 'Борис', unreadCount: 1 })
+  assert.equal(shown.length, 2, 'заглушение точечное, а не глобальное выключение')
+
+  toggleFriendMuted('u2')
+  assert.equal(isFriendMuted('u2'), false, 'повторное нажатие снимает заглушение')
+  notifyIncomingMessage({ senderId: 'u2', senderName: 'Аня', unreadCount: 3 })
+  assert.equal(shown.length, 3)
 })

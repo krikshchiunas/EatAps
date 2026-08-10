@@ -4,7 +4,7 @@
 // чужой домен.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { safeOrigin, CANONICAL_ORIGIN } from './origin.js'
+import { safeOrigin, isAllowedOrigin, CANONICAL_ORIGIN } from './origin.js'
 
 const req = (host = 'www.eataps.com') => ({ headers: { host } })
 
@@ -35,6 +35,59 @@ test('локальная разработка работает, но тольк�
   assert.equal(safeOrigin(req(), 'http://127.0.0.1:5199'), 'http://127.0.0.1:5199')
   // Чужой хост, притворяющийся локальным именем, — не петлевой адрес.
   assert.equal(safeOrigin(req(), 'http://localhost.evil.com'), CANONICAL_ORIGIN)
+})
+
+// Послабление ради разработки не должно уезжать в развёрнутое окружение: на
+// боевом домене никто не возвращается после оплаты на свой localhost, а вот
+// отправить туда чужую сессию Checkout — вполне рабочий сценарий.
+function withEnv(vars, fn) {
+  const before = {}
+  for (const [k, v] of Object.entries(vars)) {
+    before[k] = process.env[k]
+    if (v === undefined) delete process.env[k]
+    else process.env[k] = v
+  }
+  try { fn() } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+  }
+}
+
+test('в продакшене петлевой адрес больше не разрешён', () => {
+  withEnv({ VERCEL_ENV: 'production' }, () => {
+    assert.equal(safeOrigin(req(), 'http://localhost:5173'), CANONICAL_ORIGIN)
+    assert.equal(safeOrigin(req(), 'http://127.0.0.1:5199'), CANONICAL_ORIGIN)
+    assert.equal(isAllowedOrigin('http://localhost:5199'), false)
+    assert.equal(isAllowedOrigin('http://127.0.0.1:3000'), false)
+    // Свои домены при этом работают как раньше.
+    assert.equal(safeOrigin(req(), 'https://www.eataps.com'), 'https://www.eataps.com')
+    assert.equal(isAllowedOrigin('https://eataps.com'), true)
+  })
+})
+
+test('превью-развёртывание — тоже не место для localhost', () => {
+  withEnv({ VERCEL_ENV: 'preview' }, () => {
+    assert.equal(safeOrigin(req(), 'http://localhost:5173'), CANONICAL_ORIGIN)
+    assert.equal(isAllowedOrigin('http://localhost:5173'), false)
+  })
+})
+
+test('vercel dev и обычный локальный запуск петлевой адрес сохраняют', () => {
+  withEnv({ VERCEL_ENV: 'development' }, () => {
+    assert.equal(safeOrigin(req(), 'http://localhost:5173'), 'http://localhost:5173')
+    assert.equal(isAllowedOrigin('http://localhost:5173'), true)
+  })
+  // Не на Vercel вовсе: ориентир — NODE_ENV.
+  withEnv({ VERCEL_ENV: undefined, NODE_ENV: 'production' }, () => {
+    assert.equal(safeOrigin(req(), 'http://localhost:5173'), CANONICAL_ORIGIN)
+    assert.equal(isAllowedOrigin('http://localhost:5173'), false)
+  })
+  withEnv({ VERCEL_ENV: undefined, NODE_ENV: undefined }, () => {
+    assert.equal(safeOrigin(req(), 'http://localhost:5173'), 'http://localhost:5173')
+    assert.equal(isAllowedOrigin('http://localhost:5173'), true)
+  })
 })
 
 test('дополнительные домены задаются переменной окружения', () => {

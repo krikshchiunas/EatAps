@@ -3,9 +3,11 @@ import { EthersAdapter } from '@reown/appkit-adapter-ethers'
 import { SolanaAdapter } from '@reown/appkit-adapter-solana'
 import { mainnet, solana } from '@reown/appkit/networks'
 
-const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || ''
+import { WALLETCONNECT_PROJECT_ID as projectId, web3Enabled } from './web3Config.js'
 
-export const web3Enabled = Boolean(projectId)
+// Реэкспорт для совместимости: признак включённости спрашивают у web3Config.js,
+// который ничего тяжёлого не тянет.
+export { web3Enabled }
 
 // Инициализируем один раз при импорте модуля. Модалка со списком кошельков
 // (MetaMask, Phantom, Coinbase, Rabby… + WalletConnect QR) и подключение

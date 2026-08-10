@@ -21,6 +21,25 @@ async function findUserByCustomer(customerId) {
   return data?.user_id || null
 }
 
+// Конец оплаченного периода. В API-версии 2025-03-31 (basil) и новее это поле
+// у самой подписки убрали — оно переехало на элемент подписки. Читаем оба
+// места, чтобы код не зависел от того, какая версия API вшита в SDK и какая
+// настроена у вебхука: иначе current_period_end молча писался бы как NULL.
+function periodEndOf(subscription) {
+  const ts = subscription?.current_period_end
+    ?? subscription?.items?.data?.[0]?.current_period_end
+  return ts ? new Date(ts * 1000).toISOString() : null
+}
+
+// Ссылка на подписку в счёте — та же история: в basil поле invoice.subscription
+// заменено на invoice.parent.subscription_details.subscription. Возвращаем id
+// строкой (в part версий поле приходит развёрнутым объектом).
+function subscriptionIdOf(invoice) {
+  const raw = invoice?.subscription
+    ?? invoice?.parent?.subscription_details?.subscription
+  return typeof raw === 'string' ? raw : raw?.id || null
+}
+
 // Приводим Stripe-подписку к строке в нашей таблице. Если статус не «живой»
 // (canceled/incomplete_expired/…) — тир сбрасываем в FREE, чтобы фронт закрыл
 // доступ.
@@ -37,9 +56,7 @@ async function upsertSubscription({ userId, customerId, subscription }) {
     status: subscription.status,
     stripe_customer_id: customerId,
     stripe_subscription_id: subscription.id,
-    current_period_end: subscription.current_period_end
-      ? new Date(subscription.current_period_end * 1000).toISOString()
-      : null,
+    current_period_end: periodEndOf(subscription),
     cancel_at_period_end: !!subscription.cancel_at_period_end,
     updated_at: new Date().toISOString(),
   })
@@ -89,9 +106,9 @@ export default async function handler(req, res) {
         break
       }
       case 'invoice.payment_failed': {
-        const inv = event.data.object
-        if (inv.subscription) {
-          const sub = await stripe().subscriptions.retrieve(inv.subscription)
+        const subId = subscriptionIdOf(event.data.object)
+        if (subId) {
+          const sub = await stripe().subscriptions.retrieve(subId)
           const userId = sub.metadata?.user_id || (await findUserByCustomer(sub.customer))
           await upsertSubscription({ userId, customerId: sub.customer, subscription: sub })
         }

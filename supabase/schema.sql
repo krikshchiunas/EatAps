@@ -113,11 +113,41 @@ drop policy if exists "friendship delete" on public.friendships;
 create policy "friendship delete" on public.friendships
   for delete using (auth.uid() = requester or auth.uid() = addressee);
 
--- ---------------- Публичные ID (серия AA + 6 цифр) ----------------
--- Читаемый ID для добавления в друзья: AA000001, AA000002, … AA999999,
--- затем AB000001 и так далее. Выдаётся по порядку регистрации.
+-- ---------------- Публичные ID (12 символов, случайные) ----------------
+-- Короткий код для добавления в друзья. Единственное, что по нему можно
+-- сделать, — найти UUID владельца и отправить заявку.
+--
+-- ID выдаётся СЛУЧАЙНО из 32-символьного алфавита длиной 12 символов:
+-- 32^12 ≈ 1.15·10^18 вариантов. Так было не всегда: сначала коды выдавались
+-- подряд (AA000001, AA000002…), и перебор находил всех зарегистрированных
+-- пользователей за столько запросов, сколько их в базе. Подробности и
+-- перевыдача старых кодов — в migrations/2026-08-09_unpredictable_public_id.sql.
 
-create sequence if not exists public.public_id_seq start 1;
+create table if not exists public.profiles (
+  user_id   uuid primary key references auth.users(id) on delete cascade,
+  public_id text unique not null
+);
+
+-- Приведение пользовательского ввода к каноническому виду: разделители,
+-- пробелы и регистр значения не имеют, неоднозначные буквы сворачиваются по
+-- Крокфорду (I и L → 1, O → 0). Зеркало живёт в src/lib/publicId.js — алфавит
+-- и длина обязаны совпадать.
+create or replace function public.normalize_public_id(p_raw text)
+returns text
+language sql
+immutable
+as $$
+  select v from (
+    select translate(
+             upper(regexp_replace(coalesce(p_raw, ''), '[^0-9A-Za-z]', '', 'g')),
+             'ILO', '110'
+           ) as v
+  ) t
+  where v ~ '^[0-9A-HJKMNP-TV-Z]{12}$';
+$$;
+
+revoke all on function public.normalize_public_id(text) from public, anon;
+grant execute on function public.normalize_public_id(text) to authenticated;
 
 create or replace function public.generate_public_id()
 returns text
@@ -126,21 +156,38 @@ security definer
 set search_path = public
 as $$
 declare
-  n          bigint;
-  series_idx int;
-  num        int;
+  -- Крокфордов base32: цифры и латиница без I, L, O и U.
+  alphabet constant text := '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  hex       text;
+  candidate text;
+  byte      int;
+  i         int;
+  attempt   int := 0;
 begin
-  n          := nextval('public.public_id_seq');
-  series_idx := ((n - 1) / 999999)::int;
-  num        := ((n - 1) % 999999 + 1)::int;
-  return chr(65 + series_idx / 26) || chr(65 + series_idx % 26) || lpad(num::text, 6, '0');
+  loop
+    -- gen_random_uuid() — функция ядра PostgreSQL 13+, доступна всегда.
+    -- gen_random_bytes() из pgcrypto здесь не годится: в Supabase расширение
+    -- живёт в схеме extensions, а тут закреплён search_path = public, и вызов
+    -- упал бы прямо в триггере регистрации. md5 — не защита, а равномерный
+    -- расширитель двух uuid (по 122 бита случайности) до 128 бит.
+    hex := md5(gen_random_uuid()::text || gen_random_uuid()::text);
+    candidate := '';
+    for i in 1..12 loop
+      byte := ('x' || substr(hex, i * 2 - 1, 2))::bit(8)::int;  -- 0..255
+      -- 256 делится на 32 нацело — остаток не смещает распределение.
+      candidate := candidate || substr(alphabet, 1 + (byte % 32), 1);
+    end loop;
+
+    exit when not exists (select 1 from public.profiles where public_id = candidate);
+
+    attempt := attempt + 1;
+    if attempt >= 20 then
+      raise exception 'could not generate a unique public id after % attempts', attempt;
+    end if;
+  end loop;
+  return candidate;
 end;
 $$;
-
-create table if not exists public.profiles (
-  user_id   uuid primary key references auth.users(id) on delete cascade,
-  public_id text unique not null
-);
 
 alter table public.profiles enable row level security;
 
@@ -168,14 +215,17 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- Поиск UUID по публичному ID (для заявок в друзья; обходит RLS).
+-- Если ввод не похож на публичный ID, normalize_public_id вернёт NULL, сравнение
+-- с NULL не даст ни одной строки — функция честно ответит «не найдено».
 create or replace function public.find_user_by_public_id(p_public_id text)
 returns uuid
 language sql
+stable
 security definer
 set search_path = public
 as $$
   select user_id from public.profiles
-  where public_id = upper(trim(p_public_id))
+  where public_id = public.normalize_public_id(p_public_id)
   limit 1;
 $$;
 

@@ -13,6 +13,8 @@ const FULL = {
     bio: 'Люблю супы',
     favRestaurant: 'У Ашота',
     favDish: 'Харчо',
+    noGos: ['Молоко', 'Свинина'],
+    toGos: ['Суши', 'Авокадо'],
     sex: 'female',
     age: 30,
     height: 170,
@@ -48,6 +50,14 @@ test('видимая часть профиля сохраняется полно
   assert.equal(p.bio, 'Люблю супы')
   assert.equal(p.favRestaurant, 'У Ашота')
   assert.equal(p.favDish, 'Харчо')
+  assert.deepEqual(p.noGos, ['Молоко', 'Свинина'])
+  assert.deepEqual(p.toGos, ['Суши', 'Авокадо'])
+})
+
+test('битые списки «не ем»/«люблю» не уезжают другу и не роняют экран', () => {
+  const p = projectFriendProfile({ noGos: 'молоко', toGos: [42, '', '  Суши  ', 'суши'] })
+  assert.equal(p.noGos, undefined, 'строка вместо списка — не список')
+  assert.deepEqual(p.toGos, ['Суши'], 'мусор отброшен, дубликат схлопнут')
 })
 
 test('из целей отдаётся только норма калорий', () => {

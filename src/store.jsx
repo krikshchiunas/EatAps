@@ -578,10 +578,6 @@ export function StoreProvider({ children }) {
     setState((s) => ({ ...s, prefs: { ...s.prefs, [key]: val }, meta: setPrefTs(s.meta, key, ts) }))
   }, [])
 
-  const setSubscription = useCallback((sub) => {
-    setState((s) => ({ ...s, subscription: { ...defaultSubscription(), ...sub } }))
-  }, [])
-
   const refreshSubscription = useCallback(async () => {
     if (!uid) return null
     const row = await pullSubscription(uid)
@@ -618,7 +614,12 @@ export function StoreProvider({ children }) {
       try { flushed = engine ? await engine.flush() : true } catch { flushed = false }
     }
 
-    const owner = engineOwnerRef.current
+    // Чей кэш чистить. Обычно это владелец движка, но перед удалением аккаунта
+    // вызывается stopSync(), и он уже обнулил ссылку — тогда владельца берём из
+    // сессии. Без этого запаса дневник, вес и возраст удалённого аккаунта
+    // навсегда оставались в localStorage: ровно тот путь, где их обязано не
+    // остаться в первую очередь.
+    const owner = engineOwnerRef.current || authRef.current.userId
     engine?.stop()
     engineRef.current = null
     engineOwnerRef.current = null
@@ -706,7 +707,6 @@ export function StoreProvider({ children }) {
     removeCustomFood,
     addCustomIngredient,
     setPref,
-    setSubscription,
     purchaseSubscription,
     openSubscriptionPortal,
     refreshSubscription,
@@ -739,7 +739,7 @@ export function StoreProvider({ children }) {
     state, auth, phase, recovering, syncStatus,
     setProfile, setTheme, addFood, removeFood, editFood, upsertMealSection, deleteMealSection,
     moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient,
-    setPref, setSubscription, purchaseSubscription, openSubscriptionPortal, refreshSubscription,
+    setPref, purchaseSubscription, openSubscriptionPortal, refreshSubscription,
     resetAll, signOut, stopSync, beginSignIn, endSignIn, completeRecovery, cancelRecovery,
     retryData, retrySync, dismissAuthError,
   ])

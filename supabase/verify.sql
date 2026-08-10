@@ -251,6 +251,148 @@ with checks(порядок, проверка, ok, деталь) as (
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname='public' and p.proname='guard_message_update' limit 1), false),
     'иначе прямой запрос в обход RPC мог бы дописать реакцию под чужим ключом'
+
+  -- 12. Непредсказуемые публичные ID
+  union all
+  select 39, 'public_id выдаётся случайно, а не по счётчику',
+    coalesce((
+      select pg_get_functiondef(p.oid) not like '%nextval%'
+         and pg_get_functiondef(p.oid) like '%gen_random_uuid%'
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='generate_public_id' limit 1
+    ), false),
+    'последовательные ID позволяли перебором получить список всех пользователей'
+
+  union all
+  select 40, 'последовательность public_id_seq удалена',
+    to_regclass('public.public_id_seq') is null,
+    'оставленная последовательность — готовый механизм выдачи предсказуемых ID'
+
+  union all
+  select 41, 'формат public_id закреплён ограничением',
+    exists (select 1 from pg_constraint
+      where conname = 'profiles_public_id_format'
+        and conrelid = 'public.profiles'::regclass),
+    'без него любой путь записи мог бы вернуть короткий предсказуемый код'
+
+  union all
+  select 42, 'у всех пользователей ID нового формата',
+    not exists (
+      select 1 from public.profiles
+      where public_id !~ '^[0-9A-HJKMNP-TV-Z]{12}$'
+    ),
+    'старых кодов осталось: '
+      || (select count(*)::text from public.profiles
+          where public_id !~ '^[0-9A-HJKMNP-TV-Z]{12}$')
+
+  union all
+  select 43, 'find_user_by_public_id нормализует ввод на сервере',
+    coalesce((
+      select pg_get_functiondef(p.oid) like '%normalize_public_id%'
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='find_user_by_public_id' limit 1
+    ), false),
+    'дефисы, регистр и рукописные O/I/L разбирает база, а не клиент'
+
+  -- 13. Публичный профиль и «Мои мысли»
+  union all
+  select 44, 'friend_state отдаёт списки «не ем» и «люблю»',
+    coalesce((
+      select pg_get_functiondef(p.oid) like '%noGos%'
+         and pg_get_functiondef(p.oid) like '%toGos%'
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='friend_state' limit 1
+    ), false),
+    'без этого друг видит профиль без того, что человек ест и не ест'
+
+  union all
+  select 45, 'friend_state по-прежнему НЕ отдаёт вес, рост и возраст',
+    coalesce((
+      select pg_get_functiondef(p.oid) not like '%''weight''%'
+         and pg_get_functiondef(p.oid) not like '%''height''%'
+         and pg_get_functiondef(p.oid) not like '%''age''%'
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='friend_state' limit 1
+    ), false),
+    'список полей белый: новый экран не должен был расширить его молча'
+
+  union all
+  select 46, 'таблицы posts / post_reactions / post_comments созданы',
+    to_regclass('public.posts') is not null
+      and to_regclass('public.post_reactions') is not null
+      and to_regclass('public.post_comments') is not null,
+    'мысли живут вне app_state — у них своё версионирование и свои права'
+
+  union all
+  select 47, 'RLS включена на всех трёх таблицах мыслей',
+    coalesce((
+      select bool_and(c.relrowsecurity)
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relname in ('posts', 'post_reactions', 'post_comments')
+    ), false),
+    'без RLS любая строка читается любым авторизованным'
+
+  union all
+  select 48, 'пост виден только автору и принятому другу',
+    coalesce((
+      select pg_get_expr(pol.polqual, pol.polrelid) like '%friendships%'
+      from pg_policy pol
+      where pol.polrelid = 'public.posts'::regclass and pol.polname = 'posts select'
+    ), false),
+    'тот же круг, что у app_state: публичных постов в приложении нет'
+
+  union all
+  select 49, 'реакцию видно ТОЛЬКО свою',
+    coalesce((
+      select pg_get_expr(pol.polqual, pol.polrelid) like '%auth.uid()%'
+         and pg_get_expr(pol.polqual, pol.polrelid) not like '%friendships%'
+      from pg_policy pol
+      where pol.polrelid = 'public.post_reactions'::regclass
+        and pol.polname = 'post reactions select own'
+    ), false),
+    'иначе по чужому посту читается поимённый список отреагировавших'
+
+  union all
+  select 50, 'toggle_post_reaction работает от auth.uid(), а не от присланного id',
+    coalesce((
+      select p.prosecdef
+         and pg_get_function_identity_arguments(p.oid) = 'uuid, text'
+         and pg_get_functiondef(p.oid) like '%auth.uid()%'
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='toggle_post_reaction' limit 1
+    ), false),
+    'реакцию нельзя поставить под чужим именем'
+
+  union all
+  select 51, 'реакции ограничены списком 🥕/🥦',
+    exists (
+      select 1 from pg_constraint
+      where conrelid = 'public.post_reactions'::regclass and contype = 'c'
+        and pg_get_constraintdef(oid) like '%reaction%'
+    ),
+    'поле реакции — не свободный ввод в чужую строку'
+
+  union all
+  select 52, 'комментарий нельзя отредактировать (нет UPDATE-политики)',
+    not exists (
+      select 1 from pg_policy
+      where polrelid = 'public.post_comments'::regclass and polcmd = 'w'
+    ),
+    'отсутствие политики надёжнее списка разрешённых полей'
+
+  union all
+  select 53, 'list_posts доступен authenticated и закрыт для анонима',
+    has_function_privilege('authenticated', 'public.list_posts(uuid, int, timestamptz)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.list_posts(uuid, int, timestamptz)', 'EXECUTE'),
+    ''
+
+  union all
+  select 54, 'бакет post-images ограничен по размеру и типу файла',
+    coalesce((
+      select file_size_limit is not null and allowed_mime_types is not null
+      from storage.buckets where id = 'post-images'
+    ), false),
+    'иначе хранилище проекта превращается в бесплатный файлообменник'
 )
 
 select

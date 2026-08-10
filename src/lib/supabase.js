@@ -5,6 +5,7 @@ import { normalizeError } from './authErrors.js'
 import { isMissingColumn } from './pgErrors.js'
 import { log } from './log.js'
 import { newId } from './uuid.js'
+import { normalizePublicId } from './publicId.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -168,8 +169,9 @@ export function subscribeToSubscription(userId, onChange) {
   }
 }
 
-// ---------------- Публичные ID (AA000001) ----------------
-const PUBLIC_ID_RE = /^[A-Z]{2}\d{6}$/i
+// ---------------- Публичные ID ----------------
+// Формат и нормализация — в lib/publicId.js, там же объяснение, почему ID
+// случайный, а не последовательный.
 
 // Получить читаемый публичный ID текущего пользователя.
 //
@@ -186,15 +188,18 @@ export async function getMyPublicId(userId) {
 }
 
 // Найти UUID по публичному ID через RPC (обходит RLS).
+// На вход — уже канонический код из normalizePublicId; серверная функция всё
+// равно нормализует ввод сама, клиенту тут доверия нет.
 async function resolvePublicId(publicId) {
-  const { data } = await supabase.rpc('find_user_by_public_id', { p_public_id: publicId.toUpperCase() })
+  const { data } = await supabase.rpc('find_user_by_public_id', { p_public_id: publicId })
   return data || null
 }
 
 // ---------------- Друзья ----------------
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// Отправить запрос в друзья по ID. Принимает как публичный ID (AA000001), так и UUID.
+// Отправить запрос в друзья по ID. Принимает как публичный ID (7K4M-9XPQ-2RTV),
+// так и UUID.
 // Если встречный запрос уже есть — принимает его.
 // Возвращает { ok } или { error } (сообщение по-русски).
 export async function sendFriendRequest({ myId, myName, targetId }) {
@@ -202,13 +207,14 @@ export async function sendFriendRequest({ myId, myName, targetId }) {
   const raw = (targetId || '').trim()
 
   let t
-  if (PUBLIC_ID_RE.test(raw)) {
-    t = await resolvePublicId(raw)
+  const publicId = normalizePublicId(raw)
+  if (publicId) {
+    t = await resolvePublicId(publicId)
     if (!t) return { error: 'Пользователь с таким ID не найден' }
   } else if (UUID_RE.test(raw)) {
     t = raw.toLowerCase()
   } else {
-    return { error: 'Неверный формат ID (ожидается AA000001)' }
+    return { error: 'Неверный формат ID (12 символов, например 7K4M-9XPQ-2RTV)' }
   }
 
   if (t === myId) return { error: 'Это ваш собственный ID' }
@@ -326,6 +332,107 @@ export async function fetchUserBrief(userId) {
   return briefs[userId] || null
 }
 
+// ---------------- Мысли (posts) ----------------
+// Отдельная таблица, а не app_state: см. migrations/2026-08-11_profile_and_thoughts.sql.
+// Все чтения идут через RPC, потому что наружу отдаются только счётчики
+// реакций — поимённый список отреагировавших не должен покидать сервер.
+
+// Признак «миграция ещё не прогнана»: функции/таблицы нет. Тогда раздел просто
+// недоступен — это не ошибка приложения и не повод показывать красный текст.
+function isMissingRelation(error) {
+  const code = error?.code
+  return code === '42883' || code === '42P01' || code === 'PGRST202' || code === 'PGRST205'
+}
+
+// Лента мыслей одного человека. Возвращает { posts, unavailable }.
+export async function listPosts(userId, { limit = 20, before = null } = {}) {
+  if (!supabase || !userId) return { posts: [] }
+  const { data, error } = await supabase.rpc('list_posts', {
+    p_user_id: userId,
+    p_limit: limit,
+    p_before: before,
+  })
+  if (error) {
+    if (isMissingRelation(error)) return { posts: [], unavailable: true }
+    throw error
+  }
+  return { posts: data || [] }
+}
+
+export async function createPost({ userId, text, imageUrl }) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const payload = {
+    user_id: userId,
+    text: text?.trim() ? text.trim() : null,
+    image_url: imageUrl || null,
+  }
+  if (!payload.text && !payload.image_url) return { error: 'Пустая мысль' }
+  const { data, error } = await supabase.from('posts').insert(payload).select('*').single()
+  if (error) return { error: normalizeError(error).message }
+  return { ok: { ...data, carrots: 0, broccoli: 0, my_reaction: null, comments_count: 0 } }
+}
+
+export async function updatePost(postId, { text, imageUrl }) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const payload = {
+    text: text?.trim() ? text.trim() : null,
+    image_url: imageUrl || null,
+  }
+  if (!payload.text && !payload.image_url) return { error: 'Пустая мысль' }
+  const { data, error } = await supabase.from('posts').update(payload).eq('id', postId).select('*').single()
+  if (error) return { error: normalizeError(error).message }
+  return { ok: data }
+}
+
+export async function deletePost(postId) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase.from('posts').delete().eq('id', postId)
+  return error ? { error: normalizeError(error).message } : { ok: true }
+}
+
+// Реакция переключается на сервере по auth.uid() — ровно как в чате. Клиент
+// не сообщает, кто он и что сейчас стоит: он просит «переключить на 🥕/🥦»,
+// остальное решает состояние строки.
+export async function togglePostReaction(postId, reaction) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { data, error } = await supabase.rpc('toggle_post_reaction', {
+    p_post_id: postId,
+    p_reaction: reaction,
+  })
+  if (error) return { error: normalizeError(error).message }
+  const row = Array.isArray(data) ? data[0] : data
+  return { ok: row || null }
+}
+
+export async function listPostComments(postId, limit = 100) {
+  if (!supabase || !postId) return []
+  const { data, error } = await supabase.rpc('list_post_comments', { p_post_id: postId, p_limit: limit })
+  if (error) {
+    if (isMissingRelation(error)) return []
+    throw error
+  }
+  return data || []
+}
+
+export async function addPostComment({ postId, userId, text }) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const body = (text || '').trim()
+  if (!body) return { error: 'Пустой ответ' }
+  const { data, error } = await supabase
+    .from('post_comments')
+    .insert({ post_id: postId, user_id: userId, text: body })
+    .select('id, post_id, user_id, text, created_at')
+    .single()
+  if (error) return { error: normalizeError(error).message }
+  return { ok: data }
+}
+
+export async function deletePostComment(commentId) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase.from('post_comments').delete().eq('id', commentId)
+  return error ? { error: normalizeError(error).message } : { ok: true }
+}
+
 // ---------------- Чат ----------------
 // Сжать фото до ~1280px по длинной стороне, JPEG q=0.8 — быстро уходит по сети.
 async function compressImageFile(file, maxSize = 1280, quality = 0.8) {
@@ -351,17 +458,26 @@ async function compressImageFile(file, maxSize = 1280, quality = 0.8) {
   }
 }
 
-export async function uploadChatImage(userId, file) {
+// Заливка в бакет. Путь всегда начинается с папки пользователя — политики
+// хранилища разрешают запись только туда (см. schema.sql и миграции).
+async function uploadImage(bucket, userId, file) {
   if (!supabase) throw new Error('Нет подключения')
   const blob = await compressImageFile(file)
-  const id = newId()
-  const path = `${userId}/${id}.jpg`
-  const { error } = await supabase.storage.from('chat-images').upload(path, blob, {
+  const path = `${userId}/${newId()}.jpg`
+  const { error } = await supabase.storage.from(bucket).upload(path, blob, {
     contentType: 'image/jpeg',
     upsert: false,
   })
   if (error) throw error
-  return supabase.storage.from('chat-images').getPublicUrl(path).data.publicUrl
+  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
+}
+
+export function uploadChatImage(userId, file) {
+  return uploadImage('chat-images', userId, file)
+}
+
+export function uploadPostImage(userId, file) {
+  return uploadImage('post-images', userId, file)
 }
 
 // ---------------- Непрочитанные сообщения ----------------
@@ -375,7 +491,9 @@ function getChatReadMap() {
 export function markChatRead(friendId) {
   const map = getChatReadMap()
   map[friendId] = new Date().toISOString()
-  localStorage.setItem(CHAT_READ_KEY, JSON.stringify(map))
+  // Вызывается на каждое входящее сообщение. В приватном режиме iOS Safari
+  // setItem бросает — необёрнутый вызов ронял бы обработчик realtime-события.
+  try { localStorage.setItem(CHAT_READ_KEY, JSON.stringify(map)) } catch {}
 }
 
 // ── «Удалить у меня» ──────────────────────────────────────────────────────────
@@ -388,22 +506,38 @@ export function getHiddenMessageIds() {
   try { return new Set(JSON.parse(localStorage.getItem(CHAT_HIDDEN_KEY) || '[]')) } catch { return new Set() }
 }
 
-export function hideMessageLocally(id) {
+// Скрыть сразу несколько сообщений (очистка переписки). Отдельная функция, а
+// не цикл по hideMessageLocally: тот на каждый id заново разбирает и сериализует
+// весь список, и очистка чата на три сотни сообщений превращалась в три сотни
+// полных проходов по массиву из двух тысяч элементов.
+export function hideMessagesLocally(ids) {
   const set = getHiddenMessageIds()
-  set.add(String(id))
+  for (const id of ids) set.add(String(id))
   // Держим список ограниченным, чтобы localStorage не разрастался бесконечно.
   const arr = [...set].slice(-2000)
   try { localStorage.setItem(CHAT_HIDDEN_KEY, JSON.stringify(arr)) } catch {}
 }
 
+export function hideMessageLocally(id) {
+  hideMessagesLocally([id])
+}
+
 // Возвращает { [senderId]: count } — только сообщения моложе 30 дней.
+//
+// Фильтр read_at is null делает сервер: раньше сюда приезжала вся входящая
+// переписка за месяц, и она пересчитывалась на клиенте при каждом новом
+// сообщении. Теперь запрос ложится на частичный индекс messages_unread_idx и
+// возвращает ровно непрочитанное — обычно единицы строк вместо тысяч.
+// Локальная отметка остаётся вторым условием: она работает офлайн и переживает
+// неудачный вызов mark_messages_read.
 export async function fetchUnreadCounts(myId) {
   if (!supabase || !myId) return {}
   const cutoff = new Date(Date.now() - 30 * 86400000).toISOString()
   const { data } = await supabase
     .from('messages')
-    .select('id, sender, created_at')
+    .select('sender, created_at')
     .eq('recipient', myId)
+    .is('read_at', null)
     .gt('created_at', cutoff)
   if (!data) return {}
   const readMap = getChatReadMap()
@@ -418,16 +552,20 @@ export async function fetchUnreadCounts(myId) {
 }
 
 // Realtime-подписка на ВСЕ входящие сообщения (для бейджа в BottomNav).
+// Имя канала стабильное — как и у остальных подписок в этом файле. Клиент
+// Realtime возвращает уже существующий канал с таким же именем, поэтому
+// повторная подписка не плодит дубликаты; Date.now() в имени, наоборот,
+// оставлял бы висеть по каналу на каждое пересоздание эффекта.
 export function subscribeToIncoming(myId, onNew) {
   if (!supabase || !myId) return () => {}
   const channel = supabase
-    .channel(`incoming:${myId}:${Date.now()}`)
+    .channel(`incoming:${myId}`)
     .on('postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'messages', filter: `recipient=eq.${myId}` },
       onNew,
     )
     .subscribe()
-  return () => supabase.removeChannel(channel)
+  return () => { try { supabase.removeChannel(channel) } catch {} }
 }
 
 const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at, read_at, reactions'
@@ -509,12 +647,6 @@ export async function sendChatMessage({ sender, recipient, text, imageUrl, mealR
   }
   if (error) return { error: normalizeError(error).message }
   return { ok: data }
-}
-
-export async function deleteChatMessage(id) {
-  if (!supabase) return { error: 'Нет подключения' }
-  const { error } = await supabase.from('messages').delete().eq('id', id)
-  return error ? { error: normalizeError(error).message } : { ok: true }
 }
 
 export async function listMessagesWith(myId, friendId, limit = 300) {
@@ -668,6 +800,14 @@ export async function deleteAccount(userId) {
   }
   if (uid) {
     await supabase.from('friendships').delete().or(`requester.eq.${uid},addressee.eq.${uid}`)
+    // Мысли, ответы и реакции стираем явно, хотя они и уходят каскадом вместе
+    // с auth.users: если удаление самого аккаунта не пройдёт (partial), данные
+    // человека всё равно не должны остаться видимыми его друзьям.
+    // Порядок: сначала посты — вместе с ними каскадом уходят чужие ответы и
+    // реакции на них, — потом собственные следы в чужих ветках.
+    await supabase.from('posts').delete().eq('user_id', uid)
+    await supabase.from('post_comments').delete().eq('user_id', uid)
+    await supabase.from('post_reactions').delete().eq('user_id', uid)
     await supabase.from('app_state').delete().eq('user_id', uid)
   }
   const { error } = await supabase.rpc('delete_current_user')

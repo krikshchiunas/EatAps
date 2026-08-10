@@ -1,18 +1,29 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { listFriendships, listConversations, acceptFriend, removeFriendship } from '../lib/supabase.js'
+import { getMutedFriends, toggleFriendMuted, forgetMutedFriend } from '../lib/notifications.js'
 import AddFriendSheet from './AddFriendSheet.jsx'
 import ChatView from './ChatView.jsx'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
+// Список заглушённых живёт в notifications.js: его читает не этот экран, а
+// обработчик входящих сообщений. Здесь только закрепление.
 const PINNED_KEY = 'eataps:friends:pinned'
-const MUTED_KEY  = 'eataps:friends:muted'
 
 const getArr = (key) => { try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } }
-const setArr = (key, arr) => localStorage.setItem(key, JSON.stringify(arr))
+// В приватном режиме iOS Safari setItem бросает — закрепление тогда не
+// сохранится между запусками, но экран не упадёт.
+const setArr = (key, arr) => { try { localStorage.setItem(key, JSON.stringify(arr)) } catch {} }
 
 function getPinned() { return getArr(PINNED_KEY) }
-function getMuted()  { return getArr(MUTED_KEY) }
+
+// Друга удалили — убираем его и из закреплённых. Иначе список копит id людей,
+// которых уже нет: они не мешают, но занимают одну из десяти позиций.
+function forgetPinned(id) {
+  const next = getPinned().filter((x) => x !== id)
+  setArr(PINNED_KEY, next)
+  return next
+}
 
 function togglePin(id) {
   let arr = getPinned()
@@ -23,11 +34,6 @@ function togglePin(id) {
   if (arr.length >= 10) return { error: 'Максимум 10 закреплённых' }
   setArr(PINNED_KEY, [id, ...arr])
   return { ok: true }
-}
-
-function toggleMute(id) {
-  const arr = getMuted()
-  setArr(MUTED_KEY, arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id])
 }
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
@@ -113,7 +119,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const [dropUp, setDropUp] = useState(false)    // раскрывать меню вверх
   const [menuErr, setMenuErr] = useState(null)
   const [pinned, setPinned] = useState(getPinned)
-  const [muted, setMuted] = useState(getMuted)
+  const [muted, setMuted] = useState(getMutedFriends)
   const screenRef = useRef(null)
   const gestureRef = useRef(null)
   const navigatingRef = useRef(false)
@@ -230,12 +236,14 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   }
 
   const handleMute = (id) => {
-    toggleMute(id); setMuted(getMuted()); setOpenMenu(null)
+    setMuted(toggleFriendMuted(id)); setOpenMenu(null)
   }
 
-  const handleRemove = async (rowId) => {
+  const handleRemove = async (rowId, friendId) => {
     setOpenMenu(null); setBusy(true)
     await removeFriendship(rowId)
+    setPinned(forgetPinned(friendId))
+    setMuted(forgetMutedFriend(friendId))
     setBusy(false); reload()
   }
 
@@ -378,7 +386,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
                 dropUp={dropUp}
                 onPin={() => handlePin(f.id)}
                 onMute={() => handleMute(f.id)}
-                onRemove={() => handleRemove(f.rowId)}
+                onRemove={() => handleRemove(f.rowId, f.id)}
                 onClose={() => setOpenMenu(null)}
               />
             )}

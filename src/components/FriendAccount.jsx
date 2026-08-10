@@ -1,22 +1,20 @@
+// Профиль друга = оболочка (панель, свайп-назад, шапка с ⋯) вокруг общего
+// UserProfileView. Всё, что рисуется внутри, — тот же компонент, что рисует
+// собственный профиль: свой и чужой профиль обязаны совпадать визуально, иначе
+// человек не понимает, что именно видят о нём другие.
+//
+// Здесь остаётся только то, что специфично для чужого аккаунта: загрузка
+// friend_state, меню «заглушить / удалить из друзей» и реакция на конкретную
+// еду, которая уходит ЛИЧНЫМ сообщением в чат (MealReactSheet).
 import { useState, useEffect, useRef } from 'react'
 import { pullFriendState, removeFriendship, sendChatMessage } from '../lib/supabase.js'
 import { normalizeError } from '../lib/authErrors.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
-import { sumDay } from '../lib/nutrition.js'
-import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { mealCardFromMeal } from '../lib/mealCard.js'
 import { Avatar } from './FriendsScreen.jsx'
+import UserProfileView from './UserProfileView.jsx'
 import { useStore } from '../store.jsx'
-
-function Stat({ label, v }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div className="tabular" style={{ fontSize: 20, fontWeight: 700 }}>{Math.round(v || 0)}</div>
-      <div className="muted" style={{ fontSize: 12 }}>{label}</div>
-    </div>
-  )
-}
 
 function DotsMenu({ onMute, onRemove, onClose }) {
   return (
@@ -139,11 +137,8 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const myId = user?.id || ''
   const [state, setState] = useState(null)
   const [err, setErr] = useState(null)
-  const [date, setDate] = useState(keyOf())
   const [menuOpen, setMenuOpen] = useState(false)
-  const [expandedMeal, setExpandedMeal] = useState(null)
-  const [reactingMeal, setReactingMeal] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [reacting, setReacting] = useState(null) // { meal, date }
   const menuRef = useRef(null)
 
   const { panelProps, scrimProps, close: handleClose } = useSwipeBack(onClose)
@@ -160,8 +155,6 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
       if (next <= 0) el.classList.remove('has-overlay')
     }
   }, [])
-
-  const today = keyOf()
 
   useEffect(() => {
     let cancelled = false
@@ -189,9 +182,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   }, [menuOpen])
 
   const handleRemove = async () => {
-    setBusy(true)
     await removeFriendship(friend.rowId)
-    setBusy(false)
     onRemoved()
   }
 
@@ -203,9 +194,6 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   const p = state?.profile || {}
   const name = p.name || friend.name || 'Друг'
   const avatar = p.avatar || friend.avatar
-  const day = state?.days?.[date] || { meals: [] }
-  const totals = sumDay(day.meals || [])
-  const target = p.targets?.calories
 
   return (
     <>
@@ -250,127 +238,27 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
         ) : !state ? (
           <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
         ) : (
-          <>
-            {/* Профиль */}
-            {(p.bio || p.favRestaurant || p.favDish) && (
-              <div className="card" style={{ marginBottom: 16 }}>
-                {p.bio && (
-                  <p style={{ fontSize: 14, lineHeight: 1.45, marginBottom: p.favRestaurant || p.favDish ? 10 : 0, whiteSpace: 'pre-wrap' }}>{p.bio}</p>
-                )}
-                {p.favRestaurant && (
-                  <div className="row gap8" style={{ alignItems: 'center', marginTop: p.bio ? 8 : 0 }}>
-                    <span>🍴</span>
-                    <div>
-                      <div className="muted" style={{ fontSize: 11 }}>Любимый ресторан</div>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{p.favRestaurant}</div>
-                    </div>
-                  </div>
-                )}
-                {p.favDish && (
-                  <div className="row gap8" style={{ alignItems: 'center', marginTop: 8 }}>
-                    <span>🍲</span>
-                    <div>
-                      <div className="muted" style={{ fontSize: 11 }}>Любимое блюдо</div>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{p.favDish}</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Навигация по дням */}
-            <div className="row between" style={{ alignItems: 'center', marginBottom: 14 }}>
-              <button className="iconbtn" onClick={() => setDate(addDays(date, -1))} aria-label="Раньше">‹</button>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontWeight: 600 }}>{humanDay(date, today)}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{humanDow(date)}</div>
-              </div>
-              <button className="iconbtn" onClick={() => setDate(addDays(date, 1))} disabled={date >= today} aria-label="Позже">›</button>
-            </div>
-
-            {/* Нутриенты */}
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div className="row gap8" style={{ justifyContent: 'space-around' }}>
-                <Stat label="ккал" v={totals.kcal} />
-                <Stat label="белки" v={totals.protein} />
-                <Stat label="угл." v={totals.carbs} />
-                <Stat label="жиры" v={totals.fat} />
-              </div>
-              {target && (
-                <p className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 8 }}>Цель: {target} ккал</p>
-              )}
-            </div>
-
-            {/* Приёмы пищи */}
-            <div style={{ fontSize: 13, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
-              Приёмы пищи
-            </div>
-            {(day.meals || []).length === 0 ? (
-              <p className="muted" style={{ fontSize: 14 }}>В этот день ничего не записано.</p>
-            ) : (
-              (day.meals || []).map((m) => {
-                const customFood = (state.customFoods || []).find(
-                  (f) => f.name === m.name && f.kind === 'composite' && f.recipe
-                )
-                const isExpanded = expandedMeal === m.id
-                return (
-                  <div key={m.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <div className="row between" style={{ alignItems: 'center', padding: '10px 2px' }}>
-                      <div className="row gap10" style={{ alignItems: 'center', minWidth: 0, flex: 1 }}>
-                        <span style={{ fontSize: 22 }}>{m.emoji || '🍽️'}</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</div>
-                          <div className="row gap8" style={{ alignItems: 'center' }}>
-                            {m.grams != null && <span className="muted" style={{ fontSize: 12 }}>{m.grams} {m.unit || 'г'}</span>}
-                            {customFood && (
-                              <button
-                                style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 550 }}
-                                onClick={() => setExpandedMeal(isExpanded ? null : m.id)}
-                              >
-                                {isExpanded ? 'Скрыть ▲' : 'Состав ▼'}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="row gap10" style={{ alignItems: 'center', flex: '0 0 auto' }}>
-                        <span className="tabular" style={{ fontWeight: 600 }}>{m.kcal} ккал</span>
-                        <button
-                          onClick={() => setReactingMeal(m)}
-                          style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}
-                          aria-label="Отреагировать"
-                        >
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                    {isExpanded && customFood && (
-                      <div style={{ padding: '6px 8px 10px 36px', background: 'var(--surface-2)', borderRadius: 10, marginBottom: 6 }}>
-                        <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Состав блюда:</div>
-                        <div style={{ fontSize: 13, marginBottom: 4 }}>🍞 {customFood.recipe.base} × {customFood.recipe.slices} шт.</div>
-                        {(customFood.recipe.items || []).filter((i) => i.count > 0).map((i) => (
-                          <div key={i.name} style={{ fontSize: 13, marginBottom: 2 }}>· {i.name} × {i.count}</div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })
-            )}
-          </>
+          <UserProfileView
+            isOwnProfile={false}
+            userId={friend.id}
+            profile={{ ...p, name, avatar }}
+            // Друг присылает дни без своих приёмов пищи — groupDayByMeal об
+            // этом знает и ничего не теряет.
+            dayOf={(date) => state.days?.[date] || { meals: [] }}
+            customFoods={state.customFoods || []}
+            onReactToMeal={(meal, date) => setReacting({ meal, date })}
+          />
         )}
       </div>
     </div>
 
-    {reactingMeal && (
+    {reacting && (
       <MealReactSheet
-        meal={reactingMeal}
-        mealDate={date}
+        meal={reacting.meal}
+        mealDate={reacting.date}
         friend={friend}
         myId={myId}
-        onClose={() => setReactingMeal(null)}
+        onClose={() => setReacting(null)}
       />
     )}
     </>

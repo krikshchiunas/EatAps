@@ -1,54 +1,28 @@
-import { useState, useEffect, useRef, Component } from 'react'
-import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from '@reown/appkit/react'
+import { useState, useEffect, useRef, Component, Suspense } from 'react'
 import { useStore } from '../store.jsx'
-import { web3Enabled } from '../lib/appkit.js'
+import { web3Enabled } from '../lib/web3Config.js'
+import { lazyWithReload } from '../lib/lazyWithReload.js'
 import { normalizeError } from '../lib/authErrors.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 
-// ── Web3-кнопка вынесена в отдельный компонент ────────────────────────────────
-// AppKit-хуки (useAppKit, useAppKitAccount…) бросают исключение, если
-// createAppKit не был вызван (т.е. VITE_WALLETCONNECT_PROJECT_ID не задан).
-// Чтобы это не ронило весь AuthSheet через LazyBoundary, хуки живут ТОЛЬКО
-// здесь — и рендерится компонент тоже только при web3Enabled === true.
+// Кнопка кошелька — отдельным чанком: вместе с ней уезжает весь @reown/appkit
+// (≈2.7 МБ). Пока он едет, форма входа уже нарисована и работает — почта,
+// Google и вход по ссылке не ждут Web3-стек.
+const Web3Button = lazyWithReload(() => import('./Web3Button.jsx'))
+
+// Хуки AppKit бросают исключение, если createAppKit не отработал. Чтобы это не
+// ронило весь AuthSheet через LazyBoundary, граница стоит вокруг кнопки, а сама
+// кнопка рендерится только при web3Enabled === true.
 class Web3ErrorBoundary extends Component {
   state = { failed: false }
   static getDerivedStateFromError() { return { failed: true } }
   render() { return this.state.failed ? null : this.props.children }
 }
 
-function Web3Button({ busy, run, auth }) {
-  const { open } = useAppKit()
-  const { isConnected, caipAddress } = useAppKitAccount()
-  const { walletProvider: ethProvider } = useAppKitProvider('eip155')
-  const { walletProvider: solProvider } = useAppKitProvider('solana')
-  const { disconnect } = useDisconnect()
-  const [awaitingWeb3, setAwaitingWeb3] = useState(false)
-
-  const openWeb3 = async () => {
-    if (isConnected) { try { await disconnect() } catch {} }
-    setAwaitingWeb3(true)
-    open()
-  }
-
-  useEffect(() => {
-    if (!awaitingWeb3 || !isConnected || !caipAddress) return
-    const ns = caipAddress.split(':')[0]
-    const chain = ns === 'eip155' ? 'ethereum' : ns === 'solana' ? 'solana' : null
-    const provider = ns === 'eip155' ? ethProvider : solProvider
-    if (!chain || !provider) return
-    setAwaitingWeb3(false)
-    run(async () => {
-      const res = await auth.signInWeb3(chain, provider)
-      if (res?.error) disconnect().catch(() => {})
-      return res
-    })
-  }, [awaitingWeb3, isConnected, caipAddress, ethProvider, solProvider]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <button className="btn ghost" disabled={busy} onClick={openWeb3}>
-      👛 Web3 кошелёк
-    </button>
-  )
+// Заглушка на время загрузки чанка: те же класс и текст, поэтому кнопка не
+// «прыгает» и высота листа не меняется, когда кошельки доедут.
+function Web3ButtonPlaceholder() {
+  return <button className="btn ghost" disabled>👛 Web3 кошелёк</button>
 }
 
 export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onRegistered }) {
@@ -136,7 +110,9 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
           </button>
           {web3Enabled && (
             <Web3ErrorBoundary>
-              <Web3Button busy={busy} run={run} auth={auth} />
+              <Suspense fallback={<Web3ButtonPlaceholder />}>
+                <Web3Button busy={busy} run={run} auth={auth} />
+              </Suspense>
             </Web3ErrorBoundary>
           )}
         </div>

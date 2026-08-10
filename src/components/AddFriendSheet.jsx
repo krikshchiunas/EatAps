@@ -35,12 +35,14 @@ export default function AddFriendSheet({ onClose, onSent }) {
 
         <div className="field">
           <label>ID друга</label>
+          {/* maxLength с запасом на дефисы: код 12 символов, вид — XXXX-XXXX-XXXX.
+              Разделители и регистр всё равно снимает normalizePublicId. */}
           <input
             className="input"
-            placeholder="Напр. AB000042"
+            placeholder="Напр. 7K4M-9XPQ-2RTV"
             value={targetId}
             onChange={(e) => setTargetId(e.target.value.toUpperCase())}
-            maxLength={8}
+            maxLength={14}
             style={{ marginBottom: 10, fontSize: 18, fontWeight: 650, letterSpacing: '0.06em', textAlign: 'center' }}
           />
           <button className="btn" disabled={busy || !targetId.trim()} onClick={send}>Отправить заявку</button>
@@ -49,7 +51,7 @@ export default function AddFriendSheet({ onClose, onSent }) {
         {msg && (
           <p style={{ marginTop: 6, fontSize: 14, color: msg.type === 'err' ? 'var(--danger)' : 'var(--primary-strong)' }}>{msg.text}</p>
         )}
-        <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>Свой ID можно скопировать в «Профиль → Мой профиль». Формат: 2 буквы + 6 цифр.</p>
+        <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>Свой ID можно скопировать в «Профиль → Мой профиль». Формат: 12 символов, например 7K4M-9XPQ-2RTV.</p>
       </div>
     </div>
   )

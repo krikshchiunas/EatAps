@@ -6,11 +6,19 @@
 // если функция вернёт лишнее (старая миграция, откат политики, ручной запрос),
 // в приложение оно не попадёт.
 //
-// Список полей ровно соответствует тому, что рисует FriendAccount. Вес, рост,
+// Список полей ровно соответствует тому, что рисует UserProfileView. Вес, рост,
 // возраст, пол, цель, уровень активности, настройки и история поиска в него не
 // входят и входить не должны: их нет на экране друга.
 
+import { normalizeProfileList } from './profileLists.js'
+
 const PROFILE_FIELDS = ['name', 'avatar', 'bio', 'favRestaurant', 'favDish']
+
+// Списки «не ем» / «люблю». Они на экране профиля с обеих сторон — свой профиль
+// и профиль друга рисует один компонент, — поэтому уезжают другу так же, как
+// bio. Это осознанное расширение видимого, а не побочный эффект: по смыслу это
+// то же «пара слов о себе», только структурированное.
+const PROFILE_LIST_FIELDS = ['noGos', 'toGos']
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v)
 
@@ -19,6 +27,10 @@ export function projectFriendProfile(raw) {
   const out = {}
   for (const k of PROFILE_FIELDS) {
     if (typeof p[k] === 'string' && p[k]) out[k] = p[k]
+  }
+  for (const k of PROFILE_LIST_FIELDS) {
+    const list = normalizeProfileList(p[k])
+    if (list.length) out[k] = list
   }
   // Из целей — только норма калорий: она показана как ориентир под кольцом.
   const calories = Number(p.targets?.calories)

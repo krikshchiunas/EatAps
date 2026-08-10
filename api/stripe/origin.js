@@ -15,6 +15,24 @@ export function allowedOrigins() {
   return new Set([CANONICAL_ORIGIN, 'https://eataps.com', ...extra])
 }
 
+// Петлевой адрес (localhost / 127.0.0.1) — послабление ради локальной разработки,
+// и в развёрнутом виде оно вредно: на боевом домене никто не возвращается после
+// оплаты на свой localhost, а вот отправить туда чужую сессию Checkout можно.
+// Поэтому послабление действует только там, где оно и задумано.
+//
+// VERCEL_ENV задан на любом развёртывании: 'production', 'preview' либо
+// 'development' (это `vercel dev`, то есть локальный запуск). Если переменной
+// нет вовсе — мы не на Vercel: это локальный node или прогон тестов, и тогда
+// ориентируемся на NODE_ENV.
+//
+// Читаем окружение при каждом вызове, а не один раз при загрузке модуля: так
+// функция остаётся честной в тестах и не зависит от порядка импортов.
+function loopbackAllowed() {
+  const vercelEnv = process.env.VERCEL_ENV
+  if (vercelEnv) return vercelEnv === 'development'
+  return process.env.NODE_ENV !== 'production'
+}
+
 // ВАЖНО: returnUrl приходит из тела запроса, то есть полностью под контролем
 // вызывающего. Прежняя проверка требовала лишь https — под неё подходил ЛЮБОЙ
 // чужой домен. Практический риск: человек создаёт у себя сессию оплаты с
@@ -28,9 +46,10 @@ export function safeOrigin(req, fallbackFromBody) {
     if (!raw || typeof raw !== 'string') return null
     try {
       const u = new URL(raw)
-      // Локальная разработка: только петлевой адрес, порт любой.
+      // Локальная разработка: только петлевой адрес, порт любой — и только вне
+      // развёрнутого окружения (см. loopbackAllowed).
       if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.protocol === 'http:') {
-        return `${u.protocol}//${u.host}`
+        return loopbackAllowed() ? `${u.protocol}//${u.host}` : null
       }
       if (u.protocol !== 'https:') return null
       const origin = `${u.protocol}//${u.host}`
@@ -55,7 +74,9 @@ export function isAllowedOrigin(value) {
   if (!value || typeof value !== 'string') return false
   try {
     const u = new URL(value)
-    if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.protocol === 'http:') return true
+    if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.protocol === 'http:') {
+      return loopbackAllowed()
+    }
     return allowedOrigins().has(`${u.protocol}//${u.host}`)
   } catch {
     return false

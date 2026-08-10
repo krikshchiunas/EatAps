@@ -266,14 +266,12 @@ test('обрезанный realtime-payload вызывает дочитыван�
   await timers.advance(0)
 
   const pullsBefore = server.log.pulls
-  server.write(normalizeState({ days: { [DATE]: { ...blankDay(), meals: [{ id: 'm7', name: 'Большое состояние', updatedAt: '000000000009000-00000-zzzzzzzz' }] } } }))
-  // Симулируем событие без состояния (лимит размера записи в Realtime).
-  server.subscribe('u1', () => {})
+  // Событие приходит без состояния — ровно как при превышении лимита размера
+  // записи в Realtime. Единственный правильный ответ: сходить за строкой.
+  server.writeTruncated(normalizeState({ days: { [DATE]: { ...blankDay(), meals: [{ id: 'm7', name: 'Большое состояние', updatedAt: '000000000009000-00000-zzzzzzzz' }] } } }))
   await timers.advance(0)
 
-  // Отдельно проверяем ветку «state отсутствует».
-  const engineHandledPull = server.log.pulls >= pullsBefore
-  assert.ok(engineHandledPull)
+  assert.equal(server.log.pulls, pullsBefore + 1, 'движок дочитал строку сам')
   assert.deepEqual(dev.mealNames(), ['Большое состояние'])
 })
 
