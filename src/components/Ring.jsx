@@ -9,8 +9,10 @@ export default function Ring({ value, max, size = 168, stroke = 14, children }) 
   const c = 2 * Math.PI * r
   const dash = c * pct
   const color = over ? 'var(--warn)' : 'var(--primary)'
+  // margin auto: блок с фиксированной шириной не центрируется text-align'ом
+  // родителя — без этого кольцо прижималось к левому краю карточки.
   return (
-    <div style={{ position: 'relative', width: size, height: size }}>
+    <div style={{ position: 'relative', width: size, height: size, margin: '0 auto' }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }} aria-hidden="true">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--track)" strokeWidth={stroke} />
         <circle

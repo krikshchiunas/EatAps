@@ -549,59 +549,79 @@ function ChipStat({ label, value, accent }) {
 }
 
 const ACTION_W = 80
-const SNAP = 55
+const SNAP = 32
 
 function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit }) {
   const [offsetX, setOffsetX] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  // Зафиксированное положение строки: -ACTION_W (удалить) | 0 | ACTION_W (изменить).
+  // Каждый жест считается ОТ него, а не от нуля — иначе строка,
+  // уже открытая на одну сторону, перескакивала на противоположную.
+  const openRef = useRef(0)
   const startRef = useRef(null)
-  const isDraggingRef = useRef(false)
   const timerRef = useRef(null)
   const contentRef = useRef(null)
 
+  const settle = (to) => { openRef.current = to; setDragging(false); setOffsetX(to) }
+
   const handlePointerDown = (e) => {
     if (e.button !== 0) return
-    startRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId }
-    isDraggingRef.current = false
+    startRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId, base: openRef.current, moved: false }
     timerRef.current = setTimeout(() => {
       navigator.vibrate?.(40)
       setClipboard({ type: m.type, name: m.name, emoji: m.emoji, cat: m.cat, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat, sugar: m.sugar, satFat: m.satFat })
       startRef.current = null
+      settle(openRef.current)
     }, 600)
   }
 
   const handlePointerMove = (e) => {
-    if (!startRef.current) return
-    const dx = e.clientX - startRef.current.x
-    const dy = Math.abs(e.clientY - startRef.current.y)
-    if (!isDraggingRef.current) {
+    const s = startRef.current
+    if (!s) return
+    const dx = e.clientX - s.x
+    const dy = Math.abs(e.clientY - s.y)
+    if (!s.moved) {
       if (dy > Math.abs(dx) + 4) { clearTimeout(timerRef.current); startRef.current = null; return }
       if (Math.abs(dx) < 8) return
-      isDraggingRef.current = true
+      s.moved = true
       clearTimeout(timerRef.current)
-      try { contentRef.current?.setPointerCapture(startRef.current.id) } catch {}
+      setDragging(true)
+      try { contentRef.current?.setPointerCapture(s.id) } catch {}
     }
-    setOffsetX(Math.max(-ACTION_W, Math.min(ACTION_W, dx)))
+    // Дальше одной кнопки не пускаем — за границей сопротивление, а не стоп.
+    let x = s.base + dx
+    if (x > ACTION_W) x = ACTION_W + (x - ACTION_W) * 0.2
+    else if (x < -ACTION_W) x = -ACTION_W + (x + ACTION_W) * 0.2
+    setOffsetX(x)
   }
 
   const handlePointerUp = (e) => {
     clearTimeout(timerRef.current)
-    if (!isDraggingRef.current) { startRef.current = null; return }
-    isDraggingRef.current = false
-    const dx = startRef.current ? e.clientX - startRef.current.x : 0
+    const s = startRef.current
     startRef.current = null
-    if (dx <= -SNAP) setOffsetX(-ACTION_W)
-    else if (dx >= SNAP) setOffsetX(ACTION_W)
-    else setOffsetX(0)
+    try { contentRef.current?.releasePointerCapture(e.pointerId) } catch {}
+    if (!s) { settle(openRef.current); return }
+    if (!s.moved) {
+      // Тап по открытой строке — закрываем; по закрытой — ничего.
+      if (openRef.current !== 0) settle(0)
+      return
+    }
+    // Порог отсчитываем от положения до жеста: встречное движение закрывает,
+    // движение от центра открывает. Промежуточных состояний нет.
+    const dx = e.clientX - s.x
+    let to = s.base
+    if (dx <= -SNAP) to = s.base > 0 ? 0 : -ACTION_W
+    else if (dx >= SNAP) to = s.base < 0 ? 0 : ACTION_W
+    settle(to)
   }
 
   const handlePointerCancel = () => {
     clearTimeout(timerRef.current)
-    isDraggingRef.current = false
     startRef.current = null
-    setOffsetX(0)
+    settle(openRef.current)
   }
 
-  const reset = () => setOffsetX(0)
+  const reset = () => settle(0)
 
   return (
     <div style={{ position: 'relative', overflow: 'hidden' }}>
@@ -618,7 +638,7 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit }) {
       <div
         ref={contentRef}
         data-swipeable="true"
-        style={{ transform: `translateX(${offsetX}px)`, transition: isDraggingRef.current ? 'none' : 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)', touchAction: 'pan-y', userSelect: 'none', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
+        style={{ transform: `translateX(${offsetX}px)`, transition: dragging ? 'none' : 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)', touchAction: 'pan-y', userSelect: 'none', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
