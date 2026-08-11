@@ -424,8 +424,23 @@ export function StoreProvider({ children }) {
     setState((s) => ({ ...s, profile, meta: { ...s.meta, profileTs: ts } }))
   }, [])
 
+  // theme === null означает «как в системе». Такой выбор обязан СТЕРЕТЬ
+  // зеркало: оно хранит последний явный выбор ради первой отрисовки без
+  // мигания, и эффект ниже читает его, когда state.theme пуст. Без очистки
+  // человек выбирал «как в системе», а экран оставался в прежней теме.
+  //
+  // Чистим именно здесь, а не в эффекте: setTheme вызывает только человек, а
+  // state.theme пуст ещё и при загрузке — очистка в эффекте убила бы зеркало
+  // на каждом старте, то есть ровно тот белый кадр, ради которого оно есть.
   const setTheme = useCallback((theme) => {
     const ts = clock.tick()
+    if (!theme) {
+      try { localStorage.removeItem(THEME_MIRROR) } catch {}
+      // Атрибут ставим здесь же, а не ждём эффект: он висит на [state.theme],
+      // а при выборе «как в системе» повторно значение не меняется (null → null)
+      // — эффект бы не сработал, и экран остался бы в прежней теме.
+      document.documentElement.setAttribute('data-theme', effectiveTheme(null))
+    }
     setState((s) => ({ ...s, theme, meta: { ...s.meta, themeTs: ts } }))
   }, [])
 

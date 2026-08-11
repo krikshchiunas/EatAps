@@ -98,7 +98,12 @@ export default function ProfileScreen({ setTab }) {
 
       {settingsOpen && (
         <PushScreen onClose={() => setSettingsOpen(false)}>
-          {(close) => <SettingsScreen onClose={close} />}
+          {(close) => (
+            <SettingsScreen
+              onClose={close}
+              onOpenFriends={setTab ? () => { close(); setTab('friends') } : null}
+            />
+          )}
         </PushScreen>
       )}
 

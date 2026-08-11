@@ -759,6 +759,61 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   padding: 0 20px; /* возвращаем внутренние отступы контенту дня */
 }
 
+/* ── Настройки: секции и строки ──
+   Знакомый паттерн «заголовок секции + список строк со стрелкой». Никаких
+   новых токенов: те же surface/border/ink и то же скругление, что у .card. */
+.set-group { margin-bottom: 22px; }
+
+.set-title {
+  font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 650; margin: 0 4px 8px;
+}
+
+.set-list {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.set-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 14px 16px;
+  text-align: left; font-size: 15.5px; color: var(--ink);
+}
+.set-row + .set-row { border-top: 1px solid var(--border); }
+.set-row:active:not(:disabled) { background: var(--surface-2); }
+.set-row:disabled { opacity: 0.45; }
+.set-row.danger { color: var(--danger); }
+
+.set-row .set-val { margin-left: auto; color: var(--ink-3); font-size: 14px; flex: 0 0 auto; }
+.set-row .set-chev { color: var(--ink-3); flex: 0 0 auto; margin-left: auto; }
+.set-row .set-val + .set-chev { margin-left: 0; }
+
+.set-note { font-size: 12.5px; color: var(--ink-3); line-height: 1.45; margin: 8px 4px 0; }
+
+/* Переключатель. В приложении его раньше не было — сегменты и чипы не годятся
+   для «включено/выключено» в строке списка. */
+.set-switch {
+  margin-left: auto; flex: 0 0 auto;
+  width: 46px; height: 28px; border-radius: 999px;
+  background: var(--track); border: 1px solid var(--border);
+  padding: 2px; display: flex; align-items: center;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.set-switch .knob {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--surface); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s ease;
+}
+.set-switch.on { background: var(--primary); border-color: var(--primary); }
+.set-switch.on .knob { transform: translateX(18px); }
+.set-switch:disabled { opacity: 0.4; }
+
+@media (prefers-reduced-motion: reduce) {
+  .set-switch, .set-switch .knob { transition: none; }
+}
+
 /* ── Push-screen оверлеи (Chat / FriendAccount / Календарь) ── */
 
 /* Скрываем BottomNav, пока открыт любой оверлей */

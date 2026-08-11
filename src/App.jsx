@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
 import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief, startPresence, touchLastSeen } from './lib/supabase.js'
-import { startScheduler, notifyIncomingMessage } from './lib/notifications.js'
+import { startScheduler, notifyIncomingMessage, setNotificationPrefs } from './lib/notifications.js'
 import { autoStandardMealId, labelForMealId, typeOfMealId } from './lib/meals.js'
 import Onboarding from './components/Onboarding.jsx'
 import BootScreen from './components/BootScreen.jsx'
@@ -21,7 +21,7 @@ import AITab from './components/AITab.jsx'
 
 export default function App() {
   const store = useStore()
-  const { profile, days, dayOf, addFood, recovery, booting, user } = store
+  const { profile, days, dayOf, addFood, recovery, booting, user, prefs } = store
   const [tab, setTab] = useState('day')
   const [slowBoot, setSlowBoot] = useState(false)
   const [date, setDate] = useState(keyOf())
@@ -34,6 +34,11 @@ export default function App() {
   // Актуальный стор для планировщика (не пересоздаём таймер при каждом изменении).
   const stateRef = useRef({ profile, days })
   stateRef.current = { profile, days }
+
+  // Настройки уведомлений едут в модуль, который решает, показывать пуш или
+  // нет. Отдельным эффектом: prefs синхронизируются между устройствами, и
+  // выключенное на телефоне не должно продолжать пищать на ноутбуке.
+  useEffect(() => { setNotificationPrefs(prefs) }, [prefs])
 
   // Локальные напоминания в 15:00 (обед) и 18:00 (недобор). Один раз в день.
   useEffect(() => {

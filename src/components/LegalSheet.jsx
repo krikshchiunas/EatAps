@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 
 // ВАЖНО: это ШАБЛОНЫ. Замените все [плейсхолдеры] своими реальными данными
@@ -138,7 +139,9 @@ function AGB() {
 export default function LegalSheet({ onClose, initial = 'impressum' }) {
   const [tab, setTab] = useState(initial)
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
-  return (
+  // Портал в body — по той же причине, что у ConfirmDialog: внутри
+  // прокрученной push-панели position: fixed считается от неё, а не от экрана.
+  return createPortal(
     <div className="sheet-backdrop" {...backdropProps} onClick={close} style={{ zIndex: 60 }}>
       <div className="sheet" ref={sheetProps.ref} style={sheetProps.style} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
@@ -153,6 +156,7 @@ export default function LegalSheet({ onClose, initial = 'impressum' }) {
         </div>
         {tab === 'impressum' ? <Impressum /> : tab === 'agb' ? <AGB /> : <Datenschutz />}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

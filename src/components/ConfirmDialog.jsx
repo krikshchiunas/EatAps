@@ -1,10 +1,17 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 
 // Общий диалог подтверждения «Да / Нет».
 //
 // captcha={true} добавляет второй шаг с вводом кода — для необратимых действий
 // (удаление аккаунта, сброс профиля), чтобы их нельзя было запустить случайным
 // тапом. Для обычных подтверждений шаг не нужен и включать его не надо.
+//
+// Рисуется порталом в body. Это не украшательство: у панелей (.push-screen,
+// .chat-overlay) стоит will-change: transform, а он делает их containing block
+// для position: fixed. Диалог, отрисованный внутри прокрученной панели,
+// оказывался на 600 px выше экрана — кнопка «Удалить аккаунт» выглядела просто
+// неработающей. Модальному окну место на body, а не в поддереве вызывающего.
 export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesLabel = 'Да', noLabel = 'Нет' }) {
   const [step, setStep] = useState('confirm') // 'confirm' | 'captcha'
   const [code] = useState(() => String(Math.floor(1000 + Math.random() * 9000)))
@@ -12,7 +19,7 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
 
   const confirmYes = () => (captcha ? setStep('captcha') : onYes())
 
-  return (
+  return createPortal(
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000,
       background: 'rgba(0,0,0,0.45)',
@@ -71,6 +78,7 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

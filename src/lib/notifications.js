@@ -54,6 +54,25 @@ function writeMark(key, value) {
   try { localStorage.setItem(key, value) } catch {}
 }
 
+// ── Что именно человек разрешил показывать ───────────────────────────────────
+// Зеркало настроек из prefs. Модульная переменная, как activeChatUserId ниже:
+// решение «показывать или нет» принимается здесь, значит и знание о настройках
+// должно жить здесь, а не растекаться по вызывающим.
+//
+// Типов ровно три, потому что ровно три уведомления в приложении и существуют.
+// Заявок в друзья, реакций и ответов среди них нет — для них нет ни триггера,
+// ни доставки, поэтому переключателя для них не будет, пока не появится сама
+// функция: тумблер, который ничего не выключает, хуже его отсутствия.
+const notifPrefs = { lunch: true, deficit: true, messages: true }
+
+export function setNotificationPrefs(prefs) {
+  // Значение по умолчанию — «включено»: у людей, которые ничего не настраивали,
+  // поведение обязано остаться прежним.
+  notifPrefs.lunch = prefs?.notifLunch !== false
+  notifPrefs.deficit = prefs?.notifDeficit !== false
+  notifPrefs.messages = prefs?.notifMessages !== false
+}
+
 export function notificationsSupported() {
   return typeof window !== 'undefined' && 'Notification' in window
 }
@@ -106,6 +125,7 @@ function pickLunch() {
 // Показываем один раз в день, окно 15:00–17:59 (чтобы поймать пользователя,
 // который зашёл позже 15:00).
 function maybeShowLunch() {
+  if (!notifPrefs.lunch) return
   const now = new Date()
   const hour = now.getHours()
   if (hour < 15 || hour >= 18) return
@@ -118,6 +138,7 @@ function maybeShowLunch() {
 // Проверить сильный недобор (>35%) вечером. Окно 18:00–22:59.
 // Показываем один раз в день. Профиль и день передаются актуальные из стора.
 function maybeShowDeficit(profile, day) {
+  if (!notifPrefs.deficit) return
   if (!profile || !profile.targets) return
   const now = new Date()
   const hour = now.getHours()
@@ -228,6 +249,7 @@ export function notifyIncomingMessage({ senderId, senderName, senderAvatar, unre
   // приложения Notification не существует, и прямое обращение роняет обработчик
   // входящего сообщения.
   if (notificationPermission() !== 'granted') return
+  if (!notifPrefs.messages) return
   if (senderId && senderId === activeChatUserId) return
   if (isFriendMuted(senderId)) return
   const n = Math.max(1, Number(unreadCount) || 1)
