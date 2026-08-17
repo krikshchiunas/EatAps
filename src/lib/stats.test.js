@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   computeStats,
+  foodHabits,
   mealSugar,
   realSugar,
   normalizeName,
@@ -242,4 +243,112 @@ test('dayNutrients устойчив к строкам и отсутствующ�
   assert.equal(r.carbs, 0)
   assert.equal(r.fat, 0)
   assert.ok(Number.isFinite(r.sugar))
+})
+
+// ── Привычки профиля: «чаще всего ем» / «реже всего ем» ──────────────────────
+// Проверяем не только правильный ответ, но и то, что редкая случайность не
+// становится характеристикой человека, а ничьи разводятся одинаково при каждом
+// пересчёте (иначе у себя и у друга профиль показывал бы разное).
+
+// n употреблений продукта, начиная с даты и дальше в прошлое по дню на приём.
+function uses(target, name, n, from) {
+  let k = from
+  for (let i = 0; i < n; i++) {
+    const d = target[k] || (target[k] = day())
+    d.meals.push(meal({ name, emoji: '🍽️' }))
+    k = `2026-08-${String(Number(k.slice(-2)) - 1).padStart(2, '0')}`
+  }
+}
+
+test('привычки: без истории еды — ни частого, ни редкого продукта', () => {
+  for (const input of [undefined, null, {}, { '2026-08-05': day() }]) {
+    const h = foodHabits(input)
+    assert.equal(h.most, null)
+    assert.equal(h.rare, null)
+    assert.equal(h.products, 0)
+    assert.equal(h.totalMeals, 0)
+  }
+})
+
+test('привычки: один продукт один раз — он самый частый, редкого нет', () => {
+  const h = foodHabits({ '2026-08-05': day(meal({ name: 'Овсянка' })) })
+  assert.equal(h.most.name, 'Овсянка')
+  assert.equal(h.most.count, 1)
+  assert.equal(h.rare, null) // из одного продукта «реже всего» не выводится
+})
+
+test('привычки: явный лидер побеждает по числу употреблений', () => {
+  const days = {}
+  uses(days, 'Овсянка', 5, '2026-08-05')
+  uses(days, 'Кофе', 3, '2026-08-05')
+  uses(days, 'Яблоко', 2, '2026-08-05')
+  const h = foodHabits(days)
+  assert.equal(h.most.name, 'Овсянка')
+  assert.equal(h.most.count, 5)
+  assert.equal(h.products, 3)
+  assert.equal(h.totalMeals, 10)
+})
+
+test('привычки: съеденное однажды не становится «реже всего»', () => {
+  const days = {}
+  uses(days, 'Овсянка', 5, '2026-08-10')
+  uses(days, 'Кофе', 4, '2026-08-10')
+  uses(days, 'Яблоко', 3, '2026-08-10')
+  uses(days, 'Колбаса', 1, '2026-08-10') // единичный случай за всю историю
+  const h = foodHabits(days)
+  assert.equal(h.most.name, 'Овсянка')
+  assert.notEqual(h.rare.name, 'Колбаса')
+  assert.equal(h.rare.name, 'Кофе') // самый редкий среди привычного (медиана = 3.5)
+})
+
+test('привычки: всё съедено по разу — редкого продукта нет вовсе', () => {
+  const days = {
+    '2026-08-05': day(meal({ name: 'Колбаса' })),
+    '2026-08-04': day(meal({ name: 'Пахлава' })),
+    '2026-08-03': day(meal({ name: 'Устрицы' })),
+  }
+  const h = foodHabits(days)
+  assert.equal(h.most.name, 'Колбаса') // ничья по счётчику → съеденное позже
+  assert.equal(h.rare, null)
+})
+
+test('привычки: одинаковая частота — ответ детерминирован и не совпадает сам с собой', () => {
+  const days = {}
+  uses(days, 'Кефир', 2, '2026-08-03')
+  uses(days, 'Гречка', 2, '2026-08-04')
+  uses(days, 'Творог', 2, '2026-08-05')
+  const h = foodHabits(days)
+  assert.equal(h.most.name, 'Творог') // ели позже всех
+  assert.equal(h.rare.name, 'Гречка') // из оставшихся — та, что свежее
+  assert.notEqual(h.most.name, h.rare.name)
+  assert.deepEqual(foodHabits(days), h) // повторный расчёт даёт то же самое
+})
+
+test('привычки: из двух продуктов «реже всего» не выводится', () => {
+  const days = {}
+  uses(days, 'Овсянка', 5, '2026-08-05')
+  uses(days, 'Кофе', 4, '2026-08-05')
+  const h = foodHabits(days)
+  assert.equal(h.most.name, 'Овсянка')
+  assert.equal(h.rare, null)
+})
+
+test('привычки: одинаковые продукты агрегируются как в аналитике', () => {
+  const days = {
+    '2026-08-05': day(meal({ name: 'Гречка' }), meal({ name: 'гречка ' })),
+    '2026-08-04': day(meal({ name: 'Гречка' }), meal({ name: 'Кофе' })),
+  }
+  const h = foodHabits(days)
+  assert.equal(h.products, 2)
+  assert.equal(h.most.name, 'Гречка') // самое частое написание
+  assert.equal(h.most.count, 3)
+})
+
+test('привычки: новые приёмы пищи меняют результат сами по себе', () => {
+  const days = {}
+  uses(days, 'Овсянка', 3, '2026-08-05')
+  uses(days, 'Кофе', 2, '2026-08-05')
+  assert.equal(foodHabits(days).most.name, 'Овсянка')
+  uses(days, 'Кофе', 4, '2026-08-12') // человек записал ещё четыре кофе
+  assert.equal(foodHabits(days).most.name, 'Кофе')
 })

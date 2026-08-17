@@ -33,7 +33,7 @@ function GearIcon() {
 }
 
 export default function ProfileScreen({ setTab }) {
-  const { profile, dayOf, customFoods, user, supabaseEnabled } = useStore()
+  const { profile, days, dayOf, customFoods, user, supabaseEnabled } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
@@ -89,6 +89,7 @@ export default function ProfileScreen({ setTab }) {
         profile={profile || {}}
         publicId={publicId ? formatPublicId(publicId) : null}
         dayOf={dayOf}
+        days={days}
         customFoods={customFoods}
         friendsCount={friendsCount}
         onOpenFriends={setTab ? () => setTab('friends') : null}

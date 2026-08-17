@@ -6,7 +6,7 @@ import { formatPublicId } from '../lib/publicId.js'
 import { addProfileListItem, removeProfileListItem, normalizeProfileList, MAX_LEN } from '../lib/profileLists.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 
-// Редактор списка «не ем» / «люблю». Пункты добавляются по Enter или кнопкой,
+// Редактор списка «да в еде» / «нет в еде». Пункты добавляются по Enter или кнопкой,
 // удаляются крестиком на чипе — отдельного режима редактирования нет: список
 // короткий, и лишний экран здесь только мешал бы.
 function ListEditor({ label, hint, placeholder, items, onChange, tone }) {
@@ -146,8 +146,10 @@ export default function MyProfileSheet({ onClose }) {
           <input className="input" placeholder="Напр. Денис" value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
         </div>
 
+        {/* Порядок полей — тот же, что в профиле: человек правит их сверху вниз
+            ровно в том виде, в каком они потом стоят на витрине. */}
         <div className="field">
-          <label>О себе</label>
+          <label>Био</label>
           <textarea
             className="input"
             placeholder="Пара слов о себе — увидят друзья"
@@ -159,33 +161,33 @@ export default function MyProfileSheet({ onClose }) {
           />
         </div>
 
-        <ListEditor
-          label="Не ем"
-          hint="увидят друзья"
-          placeholder="Напр. Молоко"
-          items={draft.noGos}
-          onChange={(noGos) => set({ noGos })}
-          tone="no"
-        />
-
-        <ListEditor
-          label="Люблю"
-          hint="и хочу попробовать"
-          placeholder="Напр. Суши"
-          items={draft.toGos}
-          onChange={(toGos) => set({ toGos })}
-          tone="yes"
-        />
+        <div className="field">
+          <label>Любимое блюдо</label>
+          <input className="input" placeholder="Напр. Паста карбонара" value={draft.favDish} onChange={(e) => set({ favDish: e.target.value })} maxLength={60} />
+        </div>
 
         <div className="field">
           <label>Любимый ресторан</label>
           <input className="input" placeholder="Напр. Dodo Pizza" value={draft.favRestaurant} onChange={(e) => set({ favRestaurant: e.target.value })} maxLength={60} />
         </div>
 
-        <div className="field">
-          <label>Любимое блюдо</label>
-          <input className="input" placeholder="Напр. Паста карбонара" value={draft.favDish} onChange={(e) => set({ favDish: e.target.value })} maxLength={60} />
-        </div>
+        <ListEditor
+          label="Да в еде"
+          hint="увидят друзья"
+          placeholder="Напр. Суши"
+          items={draft.toGos}
+          onChange={(toGos) => set({ toGos })}
+          tone="yes"
+        />
+
+        <ListEditor
+          label="Нет в еде"
+          hint="увидят друзья"
+          placeholder="Напр. Молоко"
+          items={draft.noGos}
+          onChange={(noGos) => set({ noGos })}
+          tone="no"
+        />
 
         <div className="field">
           <label>Ваш ID — отправьте другу, чтобы он вас добавил</label>

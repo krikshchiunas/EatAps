@@ -298,6 +298,7 @@ function productStats(days, keys) {
           names: new Map(),
           emoji: '',
           count: 0,
+          lastUsed: '',
           grams: 0,
           gramUses: 0,
           kcal: 0,
@@ -314,6 +315,10 @@ function productStats(days, keys) {
       g.count += 1
       g.names.set(m.name, (g.names.get(m.name) || 0) + 1)
       if (!g.emoji && m.emoji) g.emoji = m.emoji
+      // Дата последнего употребления — ею разводятся ничьи в привычках профиля
+      // (см. foodHabits). Ключи периода приходят по возрастанию, но полагаться
+      // на порядок вызова не хочется: сравниваем строки дат явно.
+      if (k > g.lastUsed) g.lastUsed = k
       if (m.unit !== 'мл' && Number(m.grams) > 0) {
         g.grams += Number(m.grams)
         g.gramUses += 1
@@ -358,6 +363,7 @@ function productStats(days, keys) {
       name: display,
       emoji: g.emoji || '🍽️',
       count: g.count,
+      lastUsed: g.lastUsed,
       grams: g.grams,
       avgGrams: g.gramUses ? g.grams / g.gramUses : null,
       shareOfMeals: totalMeals ? g.count / totalMeals : 0,
@@ -403,6 +409,71 @@ function productStats(days, keys) {
       sugar: sourcesFor('sugar'),
     },
   }
+}
+
+// ── Пищевые привычки профиля: «чаще всего ем» и «реже всего ем» ──────────────
+//
+// Считается из той же истории (store.days) и тем же агрегатором, что аналитика:
+// «продукт» — это запись в дневнике, одинаковыми считаются записи с одинаковым
+// normalizeName (регистр, ё→е, пробелы), показываем самое частое написание.
+// Отдельного поля в профиле нет и быть не должно: это факт о питании, а не
+// анкета, и он обязан меняться сам при каждом новом приёме пищи.
+//
+// Период — вся история, что есть на руках. У себя это весь дневник, у друга —
+// ровно то, что отдаёт friend_state (тоже весь дневник). Скользящее окно здесь
+// было бы хуже: характеристика профиля не должна пропадать у человека, который
+// неделю не заполнял дневник.
+//
+// «Реже всего» — не минимум по счётчику. Иначе один кусок колбасы, съеденный
+// однажды за всю жизнь, навсегда занимал бы эту строку. Поэтому сначала
+// отсекаем случайное: в претенденты попадает только то, что человек ест не
+// реже медианы (и хотя бы дважды), а уже среди этого «привычного» берётся
+// самое редкое. Медиана устойчива к выбросам — десяток разовых продуктов её
+// почти не двигает, в отличие от среднего.
+export const HABIT_MIN_USES = 2     // одно употребление — случайность, не привычка
+export const HABIT_MIN_PRODUCTS = 3 // из двух продуктов «самый редкий» не выводится
+
+function median(values) {
+  if (!values.length) return 0
+  const s = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(s.length / 2)
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2
+}
+
+// Ничьи разводим детерминированно: сначала то, что ели позже (свежая привычка
+// честнее старой), затем по имени. Иначе одинаковые счётчики давали бы разный
+// ответ при каждом пересчёте — у себя одно, у друга другое.
+function fresher(a, b) {
+  if (a.lastUsed !== b.lastUsed) return a.lastUsed > b.lastUsed ? a : b
+  return a.norm < b.norm ? a : b
+}
+
+const habitOf = (p) => (p ? { name: p.name, emoji: p.emoji, count: p.count, lastUsed: p.lastUsed } : null)
+
+export function foodHabits(days) {
+  const D = days && typeof days === 'object' ? days : {}
+  const keys = Object.keys(D).sort()
+  const { frequent, totalMeals } = productStats(D, keys)
+
+  let most = null
+  for (const p of frequent) {
+    if (!most || p.count > most.count) most = p
+    else if (p.count === most.count) most = fresher(most, p)
+  }
+
+  let rare = null
+  if (frequent.length >= HABIT_MIN_PRODUCTS) {
+    const threshold = Math.max(HABIT_MIN_USES, median(frequent.map((p) => p.count)))
+    for (const p of frequent) {
+      // Сам «чаще всего» в претенденты не идёт: одна и та же еда не может быть
+      // одновременно самой частой и самой редкой.
+      if (p === most || p.count < threshold) continue
+      if (!rare || p.count < rare.count) rare = p
+      else if (p.count === rare.count) rare = fresher(rare, p)
+    }
+  }
+
+  return { most: habitOf(most), rare: habitOf(rare), products: frequent.length, totalMeals }
 }
 
 // ── Главная точка входа: собрать всю статистику за период ─────────────────────
