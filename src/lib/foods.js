@@ -964,6 +964,7 @@ export function searchIngredients(query) {
 const OFF_FIELDS = [
   'product_name', 'product_name_ru', 'generic_name', 'brands', 'quantity',
   'product_quantity', 'serving_size', 'serving_quantity', 'nutriments', 'categories_tags',
+  'image_front_url', 'image_front_small_url', 'image_url', 'image_small_url',
 ].join(',')
 
 const DRINK_TAGS = /(beverages|boissons|drinks|напитки|waters|juices|sodas|milks)/i
@@ -1055,6 +1056,12 @@ export async function lookupBarcode(code, signal) {
     barcode: code,
     portions,
   }
+  // Фото упаковки. База отдаёт лицевую сторону в нескольких размерах и на
+  // разных языках (на русском поддомене — сразу русскую этикетку, если она
+  // залита). Поля может не быть вовсе — тогда ключа photo просто нет.
+  const photo = product.image_front_url || product.image_front_small_url || product.image_url || product.image_small_url
+  if (photo) food.photo = photo
+
   const sugar = per100(n, 'sugars', serving)
   if (sugar != null) food.sugar = +(+sugar).toFixed(1)
   const satFat = per100(n, 'saturated-fat', serving)

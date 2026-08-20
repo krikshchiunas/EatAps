@@ -473,7 +473,7 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
         {mode === 'search' && selected && !selected.builder && selected.kind !== 'composite' && !selected.dairy && (
           <div>
             <div className="row gap12" style={{ marginBottom: 18 }}>
-              <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
+              <FoodThumb key={selected.photo || selected.name} food={selected} />
               <div style={{ flex: 1 }}>
                 <div className="meal-name" style={{ fontSize: 18 }}>{selected.name}</div>
                 <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={clearFood}>← выбрать другой</button>
@@ -1390,6 +1390,36 @@ function FoodRow({ f, onClick, onDelete }) {
         <button onClick={onDelete} aria-label="Удалить" style={{ color: 'var(--ink-3)', fontSize: 18, flex: '0 0 auto', padding: '0 4px' }}>✕</button>
       )}
     </div>
+  )
+}
+
+// Плитка выбранного продукта. У товара со штрихкодом Open Food Facts обычно
+// есть фото упаковки — показываем его вместо эмодзи. Фото нет, не загрузилось
+// или человек офлайн — остаётся ровно прежняя плитка с эмодзи: размер тот же,
+// интерфейс не прыгает.
+const THUMB = 52
+
+function FoodThumb({ food }) {
+  const [failed, setFailed] = useState(false)
+  return (
+    <span className="meal-emoji" style={{ width: THUMB, height: THUMB, fontSize: 24, overflow: 'hidden', padding: 0 }}>
+      {food.photo && !failed ? (
+        // Размер в пикселях, а не в процентах: плитка — grid с выравниванием по
+        // центру, её потомок не растягивается, и проценту не от чего считаться —
+        // фото вылезало вверх (у бутылок оно вытянутое) и обрезалось по этикетке.
+        <img
+          src={food.photo}
+          alt=""
+          loading="lazy"
+          width={THUMB}
+          height={THUMB}
+          onError={() => setFailed(true)}
+          style={{ width: THUMB, height: THUMB, objectFit: 'cover', display: 'block' }}
+        />
+      ) : (
+        food.emoji
+      )}
+    </span>
   )
 }
 
