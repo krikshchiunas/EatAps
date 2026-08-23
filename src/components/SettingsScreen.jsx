@@ -17,11 +17,13 @@ import { lazyWithReload } from '../lib/lazyWithReload.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import {
   Group, Row,
-  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel,
+  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel,
 } from './SettingsPanels.jsx'
 
 // AuthSheet тянет тяжёлый Web3-стек — грузим только когда его открывают.
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
+// Экран тренера нужен меньшинству — не тянем его в стартовый бандл.
+const CoachScreen = lazyWithReload(() => import('./CoachScreen.jsx'))
 
 export default function SettingsScreen({ onClose, onOpenFriends }) {
   const { user, supabaseEnabled, theme } = useStore()
@@ -62,6 +64,8 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       </Group>
 
       <Group title="О приложении">
+        <Row label="Тренер и клиенты" onClick={() => setPanel('coach')} />
+        <Row label="Поддержка" onClick={() => setPanel('support')} />
         <Row label="Помощь и правовая информация" onClick={() => setPanel('about')} />
       </Group>
 
@@ -74,6 +78,14 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       {panel === 'notifications' && <NotificationsPanel onClose={close} />}
       {panel === 'appearance' && <AppearancePanel onClose={close} />}
       {panel === 'data' && <DataPanel onClose={close} />}
+      {panel === 'coach' && (
+        <LazyBoundary onClose={close}>
+          <Suspense fallback={null}>
+            <CoachScreen onClose={close} />
+          </Suspense>
+        </LazyBoundary>
+      )}
+      {panel === 'support' && <SupportPanel onClose={close} />}
       {panel === 'about' && <AboutPanel onClose={close} />}
 
       {authOpen && (

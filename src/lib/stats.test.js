@@ -11,11 +11,21 @@ import {
   normalizeName,
   dayNutrients,
   statusOf,
+  isLowLogged,
+  countsInStats,
 } from './stats.js'
 
 const TODAY = '2026-08-05'
 const meal = (o = {}) => ({ id: Math.random().toString(36).slice(2), name: 'Еда', kcal: 0, protein: 0, carbs: 0, fat: 0, ...o })
-const day = (...meals) => ({ meals, mood: null, wellbeing: [], note: '' })
+// Дни-фикстуры маленькие (десятки-сотни калорий против цели 1500), поэтому по
+// правилу «день внесён не полностью» (см. countsInStats) они выпали бы из
+// статистики. Эти тесты про другое — группировку, проценты, сахар, тренды, —
+// поэтому дни помечены подтверждёнными. Сам механизм отсева проверяется
+// отдельными тестами в конце файла, где он и есть предмет проверки.
+const day = (...meals) => ({ meals, mood: null, wellbeing: [], note: '', statsConfirmed: true })
+
+// День БЕЗ подтверждения — для тестов самого механизма отсева.
+const rawDay = (...meals) => ({ meals, mood: null, wellbeing: [], note: '' })
 const withTargets = { targets: { calories: 1500, protein: 100, fat: 50, carbs: 150 } }
 
 // Рекурсивно проверяем, что все ЧИСЛА в объекте конечны (null/строки допустимы).
@@ -351,4 +361,132 @@ test('привычки: новые приёмы пищи меняют резул
   assert.equal(foodHabits(days).most.name, 'Овсянка')
   uses(days, 'Кофе', 4, '2026-08-12') // человек записал ещё четыре кофе
   assert.equal(foodHabits(days).most.name, 'Кофе')
+})
+
+// ── Учёт дня в статистике ─────────────────────────────────────────────────────
+// Смысл механизма: человеку было лень записать всё съеденное, статистика
+// занижается и врёт. Такие дни не должны молча портить средние.
+
+test('isLowLogged: калорий сильно меньше цели → день выглядит недозаполненным', () => {
+  // 400 из 1500 — меньше 40% цели.
+  assert.equal(isLowLogged(rawDay(meal({ kcal: 400 })), withTargets), true)
+  // 1200 из 1500 — нормальный день.
+  assert.equal(isLowLogged(rawDay(meal({ kcal: 1200 })), withTargets), false)
+  // Без цели по калориям судить не о чем.
+  assert.equal(isLowLogged(rawDay(meal({ kcal: 400 })), {}), false)
+  // Пустой день — не «недозаполненный», он просто пустой.
+  assert.equal(isLowLogged(rawDay(), withTargets), false)
+})
+
+test('isLowLogged использует переданную цель дня, а не цель профиля', () => {
+  const d = rawDay(meal({ kcal: 900 }))
+  // При цели профиля 1500 — 900 это 60%, нормально.
+  assert.equal(isLowLogged(d, withTargets), false)
+  // Но в активный день цель была 2500 — те же 900 это уже 36%.
+  assert.equal(isLowLogged(d, withTargets, 2500), true)
+})
+
+test('countsInStats: недозаполненный день не считается, пока не подтверждён', () => {
+  const low = rawDay(meal({ kcal: 400 }))
+  assert.equal(countsInStats(low, withTargets), false)
+  assert.equal(countsInStats({ ...low, statsConfirmed: true }, withTargets), true)
+})
+
+test('countsInStats: «пропустить день» исключает независимо от калорий', () => {
+  const full = rawDay(meal({ kcal: 1500 }))
+  assert.equal(countsInStats(full, withTargets), true)
+  assert.equal(countsInStats({ ...full, statsExcluded: true }, withTargets), false)
+  // Пустой день не считается никогда.
+  assert.equal(countsInStats(rawDay(), withTargets), false)
+})
+
+test('пропущенный день не портит средние', () => {
+  const days = {
+    '2026-08-05': day(meal({ kcal: 1500 })),
+    '2026-08-04': day(meal({ kcal: 1500 })),
+    '2026-08-03': { ...day(meal({ kcal: 200 })), statsExcluded: true }, // забыл записать
+  }
+  const s = computeStats(days, withTargets, '7d', TODAY)
+  assert.equal(s.loggedDays, 2, 'пропущенный день не считается заполненным')
+  assert.equal(s.excludedDays, 1)
+  assert.equal(s.nutrients.kcal.avg, 1500, 'среднее не должно проседать из-за пропуска')
+})
+
+test('недозаполненные дни ждут решения и видны в сводке', () => {
+  const days = {
+    '2026-08-05': day(meal({ kcal: 1500 })),
+    '2026-08-04': rawDay(meal({ kcal: 200 })), // записал только кофе и бросил
+  }
+  const s = computeStats(days, withTargets, '7d', TODAY)
+  assert.equal(s.loggedDays, 1)
+  assert.equal(s.pendingLowDays, 1)
+  assert.equal(s.excludedDays, 0)
+  assert.equal(s.nutrients.kcal.avg, 1500)
+})
+
+test('график и средние отсеивают одни и те же дни', () => {
+  const days = {
+    '2026-08-05': day(meal({ kcal: 1500 })),
+    '2026-08-04': rawDay(meal({ kcal: 100 })), // недозаполненный
+  }
+  const s = computeStats(days, withTargets, '7d', TODAY)
+  const points = s.nutrients.kcal.series.filter((b) => b.value != null)
+  assert.equal(points.length, s.loggedDays, 'на графике не должно быть дней, которых нет в средних')
+})
+
+// ── Цели, пересчитанные на каждый день ────────────────────────────────────────
+// Вес и активность живут в дне, поэтому дневная цель — не константа.
+
+const bodyProfile = { sex: 'male', age: 30, height: 180, weight: 80, activity: 'light', goal: 'maintain', targets: { calories: 2500, protein: 128, fat: 75, carbs: 320 } }
+
+test('в активный день цель по калориям выше, чем в день на диване', () => {
+  // Мужчина 30 лет, 180 см, 80 кг, поддержание веса:
+  // активный день → ≈3070 ккал, день на диване → ≈2140 ккал.
+  const days = {
+    '2026-08-05': { ...rawDay(meal({ kcal: 3000 })), activity: 'high' },
+    '2026-08-04': { ...rawDay(meal({ kcal: 3000 })), activity: 'sedentary' },
+  }
+  const s = computeStats(days, bodyProfile, '7d', TODAY)
+  const busy = s.nutrients.kcal.series.find((b) => b.id === '2026-08-05')
+  const lazy = s.nutrients.kcal.series.find((b) => b.id === '2026-08-04')
+
+  assert.ok(busy.target > lazy.target, 'цель активного дня должна быть выше')
+  // Одинаково съеденные 3000 ккал: в активный день это норма, в ленивый — перебор.
+  assert.equal(busy.status, 'in')
+  assert.equal(lazy.status, 'over')
+  assert.equal(s.summary.calTargetVaried, true, 'цель менялась — UI обязан это показать')
+})
+
+test('вес дня влияет на цель и переносится вперёд', () => {
+  const days = {
+    '2026-08-01': { ...rawDay(meal({ kcal: 2000 })), weight: 100 },
+    '2026-08-05': rawDay(meal({ kcal: 2000 })), // взвешивания нет — держится 100 кг
+  }
+  const s = computeStats(days, bodyProfile, '7d', TODAY)
+  const first = s.nutrients.kcal.series.find((b) => b.id === '2026-08-01')
+  const later = s.nutrients.kcal.series.find((b) => b.id === '2026-08-05')
+  assert.equal(first.target, later.target, 'последний известный вес держится до нового взвешивания')
+  assert.ok(first.target > bodyProfile.targets.calories, 'при 100 кг цель выше, чем при 80 кг из профиля')
+})
+
+test('свод по весу и активности считается по всем дням периода', () => {
+  const days = {
+    '2026-08-05': { ...rawDay(), weight: 79, activity: 'high' }, // взвесился, но не ел
+    '2026-08-01': { ...rawDay(), weight: 81 },
+  }
+  const s = computeStats(days, bodyProfile, '7d', TODAY)
+  assert.equal(s.body.weight.entries, 2, 'день без еды всё равно даёт точку веса')
+  assert.equal(s.body.weight.current, 79)
+  assert.equal(s.body.weight.delta, -2)
+  assert.equal(s.body.activity.markedDays, 1)
+  assert.equal(s.hasData, false, 'еды нет — статистики питания тоже')
+})
+
+test('недельный срез: неполная неделя помечена', () => {
+  const days = { '2026-08-05': day(meal({ kcal: 1500 })) }
+  const s = computeStats(days, withTargets, '7d', TODAY)
+  assert.ok(s.weekly.length >= 1)
+  assert.ok(s.weekly.every((w) => typeof w.partial === 'boolean'))
+  const current = s.weekly[s.weekly.length - 1]
+  assert.equal(current.partial, true, 'текущая неделя ещё не закончилась')
 })

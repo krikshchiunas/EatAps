@@ -20,6 +20,7 @@ import {
   getMutedFriends, toggleFriendMuted,
 } from '../lib/notifications.js'
 import { normalizeError } from '../lib/authErrors.js'
+import { TOUR_PREF, TIPS, resetTips, seenCount } from '../lib/tour.js'
 import PushScreen from './PushScreen.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import LegalSheet from './LegalSheet.jsx'
@@ -562,6 +563,163 @@ export function DataPanel({ onClose }) {
   )
 }
 
+// ── Поддержка и заявка на роль тренера ────────────────────────────────────────
+// Отличается от анонимной «обратной связи» ниже тем, что требует входа: чтобы
+// разбирать обращение и при необходимости заблокировать нарушителя, нужно
+// знать, кто написал. Ограничение «раз в час» — серверное; здесь мы лишь
+// показываем оставшееся время, чтобы человек не писал письмо впустую.
+function SupportForm({ kind, placeholder, cta }) {
+  const { session, signedIn } = useStore()
+  const [text, setText] = useState('')
+  const [status, setStatus] = useState('idle') // idle | sending | sent
+  const [error, setError] = useState(null)
+  const [nextAt, setNextAt] = useState(null) // когда снова можно писать
+  const [, tick] = useState(0)
+
+  // Пока действует ограничение, раз в секунду перерисовываем таймер.
+  useEffect(() => {
+    if (!nextAt) return
+    const t = setInterval(() => {
+      if (new Date(nextAt) <= new Date()) setNextAt(null)
+      else tick((n) => n + 1)
+    }, 1000)
+    return () => clearInterval(t)
+  }, [nextAt])
+
+  if (!signedIn) {
+    return (
+      <p className="set-note" style={{ marginTop: 0 }}>
+        Чтобы написать, войдите в аккаунт — так мы сможем ответить именно вам.
+      </p>
+    )
+  }
+
+  const waitLeft = nextAt ? Math.max(0, new Date(nextAt) - Date.now()) : 0
+  const waiting = waitLeft > 0
+  const mins = Math.floor(waitLeft / 60000)
+  const secs = Math.floor((waitLeft % 60000) / 1000)
+
+  const send = async () => {
+    const body = text.trim()
+    if (body.length < 10) { setError('Опишите вопрос подробнее — хотя бы несколько слов'); return }
+    setStatus('sending')
+    setError(null)
+    try {
+      const r = await fetch('/api/support', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.access_token || ''}`,
+        },
+        body: JSON.stringify({ text: body, kind }),
+      })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        setStatus('idle')
+        setError(data.error || 'Не удалось отправить')
+        // Сервер сам сообщает, когда можно снова — не гадаем на клиенте.
+        if (data.nextAllowedAt) setNextAt(data.nextAllowedAt)
+        return
+      }
+      setStatus('sent')
+      setText('')
+      // Следующее обращение — через час: показываем это сразу, не дожидаясь отказа.
+      setNextAt(new Date(Date.now() + 3600_000).toISOString())
+      setTimeout(() => setStatus('idle'), 2500)
+    } catch {
+      setStatus('idle')
+      setError('Нет связи с сервером')
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginTop: -12, marginBottom: 22 }}>
+      <textarea
+        className="input"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={placeholder}
+        rows={4}
+        maxLength={2000}
+        disabled={waiting}
+        style={{ resize: 'vertical', minHeight: 92, paddingTop: 12, lineHeight: 1.45, marginBottom: 10 }}
+      />
+      <button className="btn" disabled={status === 'sending' || waiting || text.trim().length < 10} onClick={send}>
+        {status === 'sending' ? 'Отправка…'
+          : status === 'sent' ? 'Отправлено ✓'
+          : waiting ? `Можно через ${mins}:${String(secs).padStart(2, '0')}`
+          : cta}
+      </button>
+      {error && <p className="set-note" style={{ color: 'var(--danger)', marginBottom: 0 }}>{error}</p>}
+      {!error && !waiting && (
+        <p className="set-note" style={{ marginBottom: 0 }}>
+          Одно обращение в час. К сообщению прикладываются ваш ник и ID — иначе мы не поймём, кому отвечать.
+        </p>
+      )}
+    </div>
+  )
+}
+
+export function SupportPanel({ onClose }) {
+  const [tab, setTab] = useState('support') // support | coach
+
+  return (
+    <Panel title="Поддержка" onClose={onClose}>
+      <div className="seg" style={{ marginBottom: 18 }}>
+        <button className={tab === 'support' ? 'on' : ''} onClick={() => setTab('support')}>Вопрос</button>
+        <button className={tab === 'coach' ? 'on' : ''} onClick={() => setTab('coach')}>Стать тренером</button>
+      </div>
+
+      {tab === 'support' ? (
+        <SupportForm
+          kind="support"
+          placeholder="Что случилось? Опишите как можно подробнее…"
+          cta="Отправить в поддержку"
+        />
+      ) : (
+        <>
+          <p className="set-note" style={{ marginTop: 0 }}>
+            Тренер и нутрициолог могут по приглашению клиента смотреть его дневник и
+            оставлять комментарии к дням. Расскажите о себе: образование, опыт, ссылки.
+            Заявку рассматривает человек, ответ придёт в поддержку.
+          </p>
+          <SupportForm
+            kind="coach_application"
+            placeholder="Кто вы, чем занимаетесь, какой опыт и где вас можно проверить…"
+            cta="Отправить заявку"
+          />
+        </>
+      )}
+    </Panel>
+  )
+}
+
+// Возврат обучающих подсказок. Без этой строки подсказка, закрытая по ошибке
+// (или уже забытая), исчезала бы навсегда — а жесты у нас невидимые.
+function TipsRow() {
+  const { prefs, setPref } = useStore()
+  const seen = seenCount(prefs)
+  const [done, setDone] = useState(false)
+
+  const reset = () => {
+    setPref(TOUR_PREF, resetTips())
+    setDone(true)
+    setTimeout(() => setDone(false), 2200)
+  }
+
+  return (
+    <>
+      <Row
+        label={done ? 'Подсказки вернутся' : 'Показать подсказки заново'}
+        value={`${seen} из ${TIPS.length}`}
+        onClick={reset}
+        disabled={seen === 0}
+        chevron={false}
+      />
+    </>
+  )
+}
+
 // ── О приложении ──────────────────────────────────────────────────────────────
 export function AboutPanel({ onClose }) {
   const [legal, setLegal] = useState(null) // null | 'impressum' | 'privacy' | 'agb'
@@ -614,6 +772,10 @@ export function AboutPanel({ onClose }) {
           </button>
         </div>
       )}
+
+      <Group title="Подсказки">
+        <TipsRow />
+      </Group>
 
       <Group title="Правовая информация">
         <Row label="Политика конфиденциальности" onClick={() => setLegal('privacy')} />

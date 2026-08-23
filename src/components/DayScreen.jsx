@@ -1,10 +1,14 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
+import { targetsForDay, ACTIVITY_ORDER, ACTIVITY_DAY, dayWeight, hasDayActivity, effectiveActivity } from '../lib/body.js'
+import { isLowLogged } from '../lib/stats.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { getMealSections, foodsForMeal, resolvedTime, newCustomSection } from '../lib/meals.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import MealSectionSheet from './MealSectionSheet.jsx'
+import ShareCardSheet from './ShareCardSheet.jsx'
+import CoachMark from './CoachMark.jsx'
 import Ring from './Ring.jsx'
 import MacroBar from './MacroBar.jsx'
 
@@ -13,13 +17,31 @@ const EASING = 'cubic-bezier(0.32, 0.72, 0, 1)'
 
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, onOpenStats, clipboard, setClipboard }) {
   const store = useStore()
-  const { profile, dayOf, removeFood, editFood, toggleWellbeing, addFood, upsertMealSection, deleteMealSection, moveMealSection } = store
+  const {
+    profile, days, dayOf, removeFood, editFood, toggleWellbeing, addFood,
+    upsertMealSection, deleteMealSection, moveMealSection,
+    setDayWeight, setDayActivity, setDayStatsExcluded, confirmDayStats,
+    repeatDay, repeatMeal,
+  } = store
   const [editingFood, setEditingFood] = useState(null)
   const [sectionSheet, setSectionSheet] = useState(null) // null | { mode, section }
+  const [dayMenuOpen, setDayMenuOpen] = useState(false)
+  const [toast, setToast] = useState(null)
+  const [shareOpen, setShareOpen] = useState(false)
   const today = keyOf()
+  const day = dayOf(date)
 
   const prevDate = addDays(date, -1)
   const nextDate = addDays(date, 1)
+  // Повторять нечего, если в предыдущем дне пусто — не показываем мёртвый пункт.
+  const prevHasMeals = (dayOf(prevDate).meals || []).length > 0
+
+  // Факты для обучающих подсказок: учим жестам только тогда, когда им уже
+  // есть где примениться (см. lib/tour.js).
+  const tourFacts = useMemo(() => ({
+    loggedDays: Object.values(days || {}).filter((d) => (d?.meals || []).length > 0).length,
+    mealsToday: (day.meals || []).length,
+  }), [days, day.meals])
   const canNext = date <= today // вперёд не дальше завтрашнего дня
 
   // ── Интерактивный пейджер: трек из 3 страниц, центр = текущий день ──────────
@@ -179,9 +201,11 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
   }
 
   const bodyProps = {
-    profile, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
+    profile, days, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
     clipboard, setClipboard, onOpenAdd, onEditFood: setEditingFood, onEditSection: openEditSection,
     onCreateSection: openCreateSection, today,
+    setDayWeight, setDayActivity, setDayStatsExcluded, confirmDayStats,
+    repeatMeal, prevDate, onToast: setToast,
   }
 
   const sheetHasFoods = sectionSheet?.section
@@ -212,6 +236,29 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
               <path d="M4 20V10M10 20V4M16 20v-7M4 20h16" />
             </svg>
           </button>
+          <div style={{ position: 'relative' }}>
+            <button className="iconbtn" onClick={() => setDayMenuOpen((o) => !o)} aria-label="Действия с днём" aria-expanded={dayMenuOpen}>⋯</button>
+            {dayMenuOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 19 }} onClick={() => setDayMenuOpen(false)} />
+                <div className="friend-menu" style={{ minWidth: 250, right: 0 }}>
+                  {prevHasMeals && (
+                    <button onClick={() => { const n = repeatDay(prevDate, date); setDayMenuOpen(false); setToast(n ? `Скопировано: ${n} ${plural(n, 'продукт', 'продукта', 'продуктов')}` : 'Копировать нечего') }}>
+                      ♻️ Повторить {date === today ? 'вчерашний день' : 'предыдущий день'}
+                    </button>
+                  )}
+                  {day.meals.length > 0 && (
+                    <button onClick={() => { setShareOpen(true); setDayMenuOpen(false) }}>
+                      📤 Поделиться днём
+                    </button>
+                  )}
+                  <button onClick={() => { setDayStatsExcluded(date, !day.statsExcluded); setDayMenuOpen(false) }}>
+                    {day.statsExcluded ? '📊 Учитывать день в статистике' : '🚫 Не учитывать день в статистике'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -232,6 +279,12 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
         />
       )}
 
+      {toast && <Toast text={toast} onDone={() => setToast(null)} />}
+
+      {shareOpen && <ShareCardSheet date={date} onClose={() => setShareOpen(false)} />}
+
+      <CoachMark facts={tourFacts} paused={Boolean(shareOpen || sectionSheet || editingFood || dayMenuOpen)} />
+
       {sectionSheet && (
         <MealSectionSheet
           mode={sectionSheet.mode}
@@ -251,15 +304,19 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 
 // ── Контент одного дня (переиспользуется тремя страницами пейджера) ────────────
 function DayBody({
-  date, interactive, profile, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
+  date, interactive, profile, days, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
   clipboard, setClipboard, onOpenAdd, onEditFood, onEditSection, onCreateSection, today,
+  setDayWeight, setDayActivity, setDayStatsExcluded, confirmDayStats,
+  repeatMeal, prevDate, onToast,
 }) {
   const day = dayOf(date)
+  const prevDay = dayOf(prevDate)
   const totals = sumDay(day.meals)
   const advanced = sumAdvanced(day.meals)
-  // Цели могут отсутствовать/быть неполными (частичный онбординг, битые данные).
-  // Приводим к конечным числам, чтобы в кольцо/бары не попали NaN/undefined.
-  const t = profile?.targets || {}
+  // Цель считается НА ЭТОТ ДЕНЬ: из веса, актуального на эту дату, и активности
+  // этого дня. День на диване и день с тренировкой — разные цели по калориям
+  // (см. lib/body.js). Без записей вес и активность берутся из профиля, как раньше.
+  const t = useMemo(() => targetsForDay(days, date, profile) || profile?.targets || {}, [days, date, profile])
   const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0)
   const calGoal = num(t.calories)
   const proteinGoal = num(t.protein)
@@ -295,6 +352,24 @@ function DayBody({
         </div>
       </div>
 
+      <StatsFlagBanner
+        date={date}
+        day={day}
+        profile={profile}
+        calGoal={calGoal}
+        setDayStatsExcluded={setDayStatsExcluded}
+        confirmDayStats={confirmDayStats}
+      />
+
+      <BodyCard
+        date={date}
+        day={day}
+        profile={profile}
+        calGoal={calGoal}
+        setDayWeight={setDayWeight}
+        setDayActivity={setDayActivity}
+      />
+
       {grade.level !== 'none' && (
         <QualityCard quality={quality} grade={grade} sugarMax={sugarMax} fiberMax={fiberMax} carbsLeft={carbsLeft} carbsTotal={totals.carbs} />
       )}
@@ -319,6 +394,10 @@ function DayBody({
           onEditSection={onEditSection}
           canMoveUp={section.renameable && i > 0 && sections[i - 1].renameable}
           canMoveDown={section.renameable && i < sections.length - 1 && sections[i + 1].renameable}
+          repeatMeal={repeatMeal}
+          prevDate={prevDate}
+          prevCount={foodsForMeal(prevDay, section.id).length}
+          onToast={onToast}
         />
       ))}
 
@@ -381,6 +460,7 @@ function DayBody({
 function MealSectionCard({
   date, section, foods, clipboard, setClipboard, addFood, removeFood, moveMealSection,
   onOpenAdd, onEditFood, onEditSection, canMoveUp, canMoveDown,
+  repeatMeal, prevDate, prevCount, onToast,
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const totals = sumDay(foods)
@@ -412,6 +492,15 @@ function MealSectionCard({
                 <button onClick={() => { onEditSection(section); setMenuOpen(false) }}>
                   ✏️ {section.renameable ? 'Название и время' : 'Изменить время'}
                 </button>
+                {prevCount > 0 && (
+                  <button onClick={() => {
+                    const n = repeatMeal(prevDate, date, section.id)
+                    setMenuOpen(false)
+                    onToast?.(`${section.label} повторён: ${n} ${plural(n, 'продукт', 'продукта', 'продуктов')}`)
+                  }}>
+                    ♻️ Повторить вчерашний
+                  </button>
+                )}
                 {canMoveUp && <button onClick={() => { moveMealSection(date, section.id, -1); setMenuOpen(false) }}>⬆️ Выше</button>}
                 {canMoveDown && <button onClick={() => { moveMealSection(date, section.id, 1); setMenuOpen(false) }}>⬇️ Ниже</button>}
               </div>
@@ -537,6 +626,147 @@ function QualityBar({ label, value, max, invert, hint }) {
       {hint && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>{hint}</div>}
     </div>
   )
+}
+
+// ── Вес и режим дня ───────────────────────────────────────────────────────────
+// Смысл: цель по калориям больше не константа из анкеты. Один день человек
+// лежит на кровати, другой много ходит — и норма у этих дней разная. Здесь он
+// отмечает то и другое за пару касаний, а кольцо калорий выше сразу
+// пересчитывается (см. targetsForDay в lib/body.js).
+function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivity }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+  const weight = dayWeight(day)
+  const marked = hasDayActivity(day)
+  const current = effectiveActivity(day, profile)
+
+  // Черновик синхронизируем с днём: при свайпе на другую дату поле не должно
+  // показывать вес соседнего дня.
+  useEffect(() => { setDraft(weight != null ? String(weight) : '') }, [date, weight])
+
+  const commitWeight = () => {
+    const raw = draft.trim().replace(',', '.')
+    if (raw === '') { setDayWeight(date, null); return }
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n < 20 || n > 400) { setDraft(weight != null ? String(weight) : ''); return }
+    setDayWeight(date, n)
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, textAlign: 'left' }}
+      >
+        <span className="h2" style={{ fontSize: 17 }}>Вес и активность</span>
+        <span className="row gap8" style={{ alignItems: 'center', flex: '0 0 auto' }}>
+          <span className="tabular" style={{ fontSize: 13, color: weight != null ? 'var(--ink-2)' : 'var(--ink-3)' }}>
+            {weight != null ? `${weight} кг` : 'вес не указан'}
+          </span>
+          <span style={{ fontSize: 15 }}>{ACTIVITY_DAY[current].emoji}</span>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 16 }}>
+          <div className="field" style={{ marginBottom: 16 }}>
+            <label className="label" htmlFor={`w-${date}`}>Вес утром, кг</label>
+            <input
+              id={`w-${date}`}
+              className="input"
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              placeholder="например 78.4"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commitWeight}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+              style={{ marginTop: 6 }}
+            />
+            <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6, lineHeight: 1.45 }}>
+              Взвешиваться каждый день не нужно. Последний записанный вес держится до следующего взвешивания.
+            </p>
+          </div>
+
+          <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 8 }}>Каким был день</div>
+          <div className="row wrap gap8">
+            {ACTIVITY_ORDER.map((k) => {
+              const on = marked && day.activity === k
+              return (
+                <button
+                  key={k}
+                  className={`chip ${on ? 'on' : ''}`}
+                  onClick={() => setDayActivity(date, on ? null : k)}
+                  style={on ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}
+                >
+                  {ACTIVITY_DAY[k].emoji} {ACTIVITY_DAY[k].short}
+                </button>
+              )
+            })}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8, lineHeight: 1.45 }}>
+            {marked
+              ? `${ACTIVITY_DAY[day.activity].desc}. Цель на этот день — ${calGoal > 0 ? `${calGoal} ккал` : 'по вашей анкете'}.`
+              : `Не отмечено — берём «${ACTIVITY_DAY[current].short.toLowerCase()}» из анкеты. Отметьте день, и норма калорий пересчитается под него.`}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Учёт дня в статистике ─────────────────────────────────────────────────────
+// Три состояния:
+// 1. День явно пропущен — не считается, пока не вернуть.
+// 2. День похож на не полностью внесённый (калорий сильно меньше цели) — не
+//    считается по умолчанию, пока человек явно не решит.
+// 3. Подтверждённый низкий день — тихая пометка, что он всё же учитывается.
+function StatsFlagBanner({ date, day, profile, calGoal, setDayStatsExcluded, confirmDayStats }) {
+  const low = isLowLogged(day, profile, calGoal)
+
+  if (day.statsExcluded) {
+    return (
+      <div className="card" style={{ marginTop: 14, background: 'var(--surface-2)', boxShadow: 'none' }}>
+        <div className="row between" style={{ alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 13.5, color: 'var(--ink-2)' }}>🚫 День не учитывается в статистике</span>
+          <button style={{ color: 'var(--primary)', fontWeight: 600, fontSize: 13.5, flex: '0 0 auto' }} onClick={() => setDayStatsExcluded(date, false)}>
+            Учитывать
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (low && !day.statsConfirmed) {
+    return (
+      <div className="card" style={{ marginTop: 14, borderColor: 'var(--warn)' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>⚠️ Похоже, день внесён не полностью</div>
+        <p className="muted" style={{ fontSize: 13, lineHeight: 1.45, marginBottom: 12 }}>
+          Калорий заметно меньше цели — возможно, вы записали не всё. Такой день не идёт в статистику, пока вы не решите:
+          иначе средние занизятся и аналитика будет врать.
+        </p>
+        <div className="row gap8">
+          <button className="btn soft" style={{ height: 40, fontSize: 13.5, width: 'auto', flex: 1 }} onClick={() => confirmDayStats(date)}>Я правда столько съел</button>
+          <button className="btn ghost" style={{ height: 40, fontSize: 13.5, width: 'auto', flex: 1 }} onClick={() => setDayStatsExcluded(date, true)}>Не учитывать</button>
+        </div>
+      </div>
+    )
+  }
+
+  if (low && day.statsConfirmed) {
+    return (
+      <div className="card" style={{ marginTop: 14, background: 'var(--surface-2)', boxShadow: 'none' }}>
+        <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>✓ Подтверждено: день учитывается, несмотря на низкие калории</span>
+      </div>
+    )
+  }
+
+  return null
 }
 
 function ChipStat({ label, value, accent }) {
@@ -693,6 +923,41 @@ function EditFoodSheet({ food, onSave, onClose }) {
           Сохранить
         </button>
       </div>
+    </div>
+  )
+}
+
+// Русские окончания для счётных подписей («1 продукт / 2 продукта / 5 продуктов»).
+function plural(n, one, few, many) {
+  const m10 = n % 10
+  const m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few
+  return many
+}
+
+// Короткое подтверждение действия. Нужно именно потому, что «повторить день»
+// добавляет продукты ВНИЗ списка, за пределами экрана: без ответа кажется,
+// что кнопка не сработала, и человек жмёт её второй раз.
+function Toast({ text, onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 2600)
+    return () => clearTimeout(t)
+  }, [text, onDone])
+  return (
+    <div
+      role="status"
+      style={{
+        position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+        bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+        zIndex: 600, maxWidth: 'calc(100vw - 48px)',
+        background: 'var(--ink)', color: 'var(--bg)',
+        padding: '10px 18px', borderRadius: 999,
+        fontSize: 13.5, fontWeight: 550, boxShadow: 'var(--shadow-float)',
+        pointerEvents: 'none',
+      }}
+    >
+      {text}
     </div>
   )
 }

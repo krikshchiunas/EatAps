@@ -479,6 +479,61 @@ export function StoreProvider({ children }) {
     })
   }, [])
 
+  // Пакетное добавление продуктов. Одним setState и одной меткой времени:
+  // «повторить вчерашний день» — это одно действие пользователя, а не двадцать
+  // отдельных, и в облако оно должно уехать одной записью.
+  const addFoods = useCallback((date, foods) => {
+    const list = (foods || []).filter((f) => f && f.name)
+    if (list.length === 0) return 0
+    const ts = clock.tick()
+    const createdAt = new Date().toISOString()
+    const entries = list.map((food) => ({ id: newId(), createdAt, ...food, updatedAt: ts }))
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      const days = { ...s.days, [date]: { ...day, meals: [...day.meals, ...entries] } }
+      // Недавние обновляем теми же правилами, что и одиночное добавление.
+      let recents = s.recents || []
+      for (const food of list) {
+        const snap = {
+          name: food.name,
+          emoji: food.emoji || '🍽️',
+          unit: food.unit || 'г',
+          grams: food.grams ?? null,
+          kcal: food.kcal,
+          protein: food.protein,
+          carbs: food.carbs,
+          fat: food.fat,
+        }
+        const prev = recents.find((r) => r.name === food.name)
+        recents = [{ ...snap, count: (prev?.count || 0) + 1, ts: Date.now() }, ...recents.filter((r) => r.name !== food.name)]
+      }
+      return { ...s, days, recents: recents.slice(0, 40) }
+    })
+    return entries.length
+  }, [])
+
+  // ── Повторить прошлый день / приём пищи ─────────────────────────────────────
+  // Копируем СНИМКИ продуктов, а не ссылки: новые записи получают свои id,
+  // время и метку, поэтому правка копии не трогает оригинал в прошлом дне.
+  // Поля синхронизации (id/updatedAt/createdAt) специально отбрасываем — иначе
+  // копия унесла бы чужой id и слияние сочло бы её тем же самым продуктом.
+  const repeatDay = useCallback((fromDate, toDate) => {
+    const src = stateRef.current.days?.[fromDate]
+    if (!src?.meals?.length) return 0
+    const copies = src.meals.map(({ id, createdAt, updatedAt, ...rest }) => rest)
+    return addFoods(toDate, copies)
+  }, [addFoods])
+
+  // targetMealId позволяет перенести «вчерашний обед» в сегодняшний ужин.
+  const repeatMeal = useCallback((fromDate, toDate, mealId, targetMealId) => {
+    const src = stateRef.current.days?.[fromDate]
+    if (!src?.meals?.length) return 0
+    const copies = src.meals
+      .filter((m) => effectiveMealId(m) === mealId)
+      .map(({ id, createdAt, updatedAt, ...rest }) => ({ ...rest, mealId: targetMealId || mealId }))
+    return addFoods(toDate, copies)
+  }, [addFoods])
+
   // Удаление оставляет тумбстоун: без него запись «воскресала» из копии другого
   // устройства при следующем слиянии.
   const removeFood = useCallback((date, id) => {
@@ -551,6 +606,75 @@ export function StoreProvider({ children }) {
         days: { ...s.days, [date]: { ...day, wellbeing } },
         meta: setDayFieldTs(s.meta, date, 'wellbeing', ts),
       }
+    })
+  }, [])
+
+  // Один общий помощник для всех скаляров дня: кладёт значение и метку времени
+  // именно этого поля. Отдельная метка на поле — то, ради чего существует
+  // dayFieldTs: взвешивание на телефоне не конфликтует с едой на компьютере.
+  const setDayField = useCallback((date, field, value) => {
+    const ts = clock.tick()
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      if (day[field] === value) return s // ничего не изменилось — не жжём метку
+      return {
+        ...s,
+        days: { ...s.days, [date]: { ...day, [field]: value } },
+        meta: setDayFieldTs(s.meta, date, field, ts),
+      }
+    })
+  }, [])
+
+  // ── Тело и режим дня ──────────────────────────────────────────────────────
+  // Вес и активность живут В ДНЕ, а не в профиле: человек один день лежит, а
+  // другой много ходит, и вес меняется. Цель по калориям пересчитывается на
+  // каждый день из веса, актуального на этот день, и активности этого дня
+  // (см. lib/body.js). null стирает запись — «я передумал», а не «я вешу 0».
+  const setDayWeight = useCallback((date, kg) => {
+    const n = kg == null || kg === '' ? null : Number(kg)
+    const valid = Number.isFinite(n) && n >= 20 && n <= 400 ? Math.round(n * 10) / 10 : null
+    setDayField(date, 'weight', valid)
+  }, [setDayField])
+
+  const setDayActivity = useCallback((date, key) => {
+    const valid = ['sedentary', 'light', 'moderate', 'high'].includes(key) ? key : null
+    setDayField(date, 'activity', valid)
+  }, [setDayField])
+
+  // ── Учёт дня в статистике ─────────────────────────────────────────────────
+  // «Пропустить день» — против самой частой причины вранья в статистике: было
+  // лень записать всё съеденное, и средние поехали вниз. Продукты дня при этом
+  // НЕ трогаем: они остаются видны на самом дне, просто не идут в аналитику.
+  const setDayStatsExcluded = useCallback((date, excluded) => {
+    setDayField(date, 'statsExcluded', excluded === true)
+  }, [setDayField])
+
+  // «Учитывать всё равно» для дня, который выглядит недозаполненным.
+  const confirmDayStats = useCallback((date) => {
+    const ts = clock.tick()
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      let meta = setDayFieldTs(s.meta, date, 'statsConfirmed', ts)
+      meta = setDayFieldTs(meta, date, 'statsExcluded', ts)
+      return {
+        ...s,
+        days: { ...s.days, [date]: { ...day, statsConfirmed: true, statsExcluded: false } },
+        meta,
+      }
+    })
+  }, [])
+
+  // Целевой вес — долгая цель, поэтому живёт в профиле, а не в дне.
+  const setWeightGoal = useCallback((kg) => {
+    const ts = clock.tick()
+    setState((s) => {
+      if (!s.profile) return s
+      const profile = { ...s.profile }
+      const n = kg == null || kg === '' ? null : Number(kg)
+      if (n == null) delete profile.weightGoal
+      else if (Number.isFinite(n) && n >= 20 && n <= 400) profile.weightGoal = Math.round(n * 10) / 10
+      else return s
+      return { ...s, profile, meta: { ...s.meta, profileTs: ts } }
     })
   }, [])
 
@@ -711,6 +835,9 @@ export function StoreProvider({ children }) {
     setProfile,
     setTheme,
     addFood,
+    addFoods,
+    repeatDay,
+    repeatMeal,
     removeFood,
     editFood,
     upsertMealSection,
@@ -718,6 +845,13 @@ export function StoreProvider({ children }) {
     moveMealSection,
     setMood,
     toggleWellbeing,
+    // тело и режим дня
+    setDayWeight,
+    setDayActivity,
+    setWeightGoal,
+    // учёт дня в статистике
+    setDayStatsExcluded,
+    confirmDayStats,
     addCustomFood,
     removeCustomFood,
     addCustomIngredient,
@@ -752,8 +886,9 @@ export function StoreProvider({ children }) {
     deviceId: clock.deviceId,
   }), [
     state, auth, phase, recovering, syncStatus,
-    setProfile, setTheme, addFood, removeFood, editFood, upsertMealSection, deleteMealSection,
+    setProfile, setTheme, addFood, addFoods, repeatDay, repeatMeal, removeFood, editFood, upsertMealSection, deleteMealSection,
     moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient,
+    setDayWeight, setDayActivity, setWeightGoal, setDayStatsExcluded, confirmDayStats,
     setPref, purchaseSubscription, openSubscriptionPortal, refreshSubscription,
     resetAll, signOut, stopSync, beginSignIn, endSignIn, completeRecovery, cancelRecovery,
     retryData, retrySync, dismissAuthError,

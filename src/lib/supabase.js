@@ -824,3 +824,224 @@ export function removeAllRealtimeChannels() {
     for (const ch of supabase.getChannels()) supabase.removeChannel(ch)
   } catch {}
 }
+
+// ── Тренеры и клиенты ────────────────────────────────────────────────────────
+// Роль тренера выдаёт владелец проекта после заявки (см. api/support.js и
+// телеграм-бота). Доступ к дневнику всегда отдаёт КЛИЕНТ: приглашение исходит
+// от него, тренер лишь принимает. Обратный порядок означал бы, что чужой
+// человек может подписаться на ваш дневник и ждать, пока вы не заметите.
+
+// Я — одобренный тренер? Ответ решает, показывать ли вкладку «Мои клиенты».
+export async function amICoach(userId) {
+  if (!supabase || !userId) return false
+  const { data } = await supabase.from('coaches').select('user_id').eq('user_id', userId).maybeSingle()
+  return Boolean(data)
+}
+
+// Пригласить тренера по его публичному ID (AA000001) или UUID.
+export async function inviteCoach({ myId, targetId }) {
+  if (!supabase) return { error: 'Нет подключения к серверу' }
+  const raw = (targetId || '').trim()
+
+  // Тот же разбор ID, что и у заявки в друзья: публичный код или UUID.
+  let coach
+  const publicId = normalizePublicId(raw)
+  if (publicId) {
+    coach = await resolvePublicId(publicId)
+    if (!coach) return { error: 'Пользователь с таким ID не найден' }
+  } else if (UUID_RE.test(raw)) {
+    coach = raw.toLowerCase()
+  } else {
+    return { error: 'Неверный формат ID (12 символов, например 7K4M-9XPQ-2RTV)' }
+  }
+
+  if (coach === myId) return { error: 'Это ваш собственный ID' }
+
+  const { error } = await supabase.from('coach_links').insert({ coach, client: myId })
+  if (error) {
+    if (error.code === '23505') return { error: 'Приглашение этому тренеру уже отправлено' }
+    // Политика insert требует, чтобы приглашаемый был в таблице coaches.
+    // Отдельного кода у отказа RLS нет, поэтому объясняем самую вероятную причину.
+    if (error.code === '42501') return { error: 'Этот пользователь не подтверждён как тренер' }
+    return { error: error.message }
+  }
+  return { ok: 'Приглашение отправлено' }
+}
+
+// Связи текущего пользователя: где он клиент и где он тренер.
+export async function listCoachLinks(myId) {
+  if (!supabase || !myId) return { coaches: [], clients: [], invites: [] }
+  const { data, error } = await supabase
+    .from('coach_links')
+    .select('id, coach, client, status, created_at')
+    .or(`coach.eq.${myId},client.eq.${myId}`)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+
+  const coaches = [] // мои тренеры (я клиент)
+  const clients = [] // мои клиенты (я тренер, связь принята)
+  const invites = [] // приглашения мне как тренеру, ждут решения
+  for (const r of data || []) {
+    if (r.client === myId) coaches.push({ rowId: r.id, id: r.coach, status: r.status })
+    else if (r.status === 'accepted') clients.push({ rowId: r.id, id: r.client })
+    else invites.push({ rowId: r.id, id: r.client })
+  }
+
+  // Имена одним запросом — как в listFriendships.
+  const ids = [...new Set([...coaches, ...clients, ...invites].map((x) => x.id))]
+  if (ids.length) {
+    const { data: rows } = await supabase
+      .from('app_state')
+      .select('user_id, fname:state->profile->>name, favatar:state->profile->>avatar')
+      .in('user_id', ids)
+    const byId = Object.fromEntries((rows || []).map((r) => [r.user_id, r]))
+    for (const x of [...coaches, ...clients, ...invites]) {
+      x.name = byId[x.id]?.fname
+      x.avatar = byId[x.id]?.favatar
+    }
+  }
+  return { coaches, clients, invites }
+}
+
+export async function acceptCoachLink(rowId) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase.from('coach_links').update({ status: 'accepted' }).eq('id', rowId)
+  return error ? { error: error.message } : { ok: true }
+}
+
+export async function removeCoachLink(rowId) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase.from('coach_links').delete().eq('id', rowId)
+  return error ? { error: error.message } : { ok: true }
+}
+
+// ── Комментарии к дню ────────────────────────────────────────────────────────
+export async function listDayComments(clientId, day) {
+  if (!supabase || !clientId || !day) return []
+  const { data, error } = await supabase
+    .from('day_comments')
+    .select('id, client, author, day, text, created_at')
+    .eq('client', clientId)
+    .eq('day', day)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+export async function addDayComment({ clientId, authorId, day, text }) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const body = String(text || '').trim()
+  if (!body) return { error: 'Пустой комментарий' }
+  const { data, error } = await supabase
+    .from('day_comments')
+    .insert({ client: clientId, author: authorId, day, text: body.slice(0, 2000) })
+    .select('id, client, author, day, text, created_at')
+    .single()
+  return error ? { error: error.message } : { ok: data }
+}
+
+export async function deleteDayComment(id) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase.from('day_comments').delete().eq('id', id)
+  return error ? { error: error.message } : { ok: true }
+}
+
+// Мой действующий бан (или null). Нужен интерфейсу, чтобы честно сказать,
+// почему нельзя писать, вместо молчаливого отказа.
+export async function fetchMyBan() {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('my_ban')
+  if (error) return null
+  const row = Array.isArray(data) ? data[0] : data
+  return row || null
+}
+
+// ── Челленджи ────────────────────────────────────────────────────────────────
+// Прогресс каждый считает у себя из своего дневника (см. lib/challenges.js) и
+// кладёт сюда только итог по дню. Читать чужие дневники ради лидерборда не
+// нужно — и не следует: челлендж не повод раскрывать всю историю питания.
+
+export async function listChallenges(myId) {
+  if (!supabase || !myId) return []
+  const { data: mem, error: e1 } = await supabase
+    .from('challenge_members')
+    .select('challenge')
+    .eq('user_id', myId)
+  if (e1) throw e1
+  const ids = (mem || []).map((m) => m.challenge)
+  if (!ids.length) return []
+
+  const { data, error } = await supabase
+    .from('challenges')
+    .select('id, owner, title, kind, starts_on, ends_on, created_at')
+    .in('id', ids)
+    .order('starts_on', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function createChallenge({ myId, title, kind, starts_on, ends_on }) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { data, error } = await supabase
+    .from('challenges')
+    .insert({ owner: myId, title: title.trim(), kind, starts_on, ends_on })
+    .select('id, owner, title, kind, starts_on, ends_on')
+    .single()
+  if (error) return { error: error.message }
+
+  // Создатель сразу участник: челлендж без автора выглядел бы как чужой.
+  const { error: e2 } = await supabase.from('challenge_members').insert({ challenge: data.id, user_id: myId })
+  if (e2) return { error: e2.message }
+  return { ok: data }
+}
+
+export async function joinChallenge({ challengeId, myId }) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase.from('challenge_members').insert({ challenge: challengeId, user_id: myId })
+  if (error) {
+    if (error.code === '23505') return { error: 'Вы уже участвуете' }
+    if (error.code === '23503') return { error: 'Челлендж не найден' }
+    return { error: error.message }
+  }
+  return { ok: true }
+}
+
+export async function leaveChallenge({ challengeId, myId }) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase
+    .from('challenge_members').delete()
+    .eq('challenge', challengeId).eq('user_id', myId)
+  return error ? { error: error.message } : { ok: true }
+}
+
+export async function deleteChallenge(challengeId) {
+  if (!supabase) return { error: 'Нет подключения' }
+  const { error } = await supabase.from('challenges').delete().eq('id', challengeId)
+  return error ? { error: error.message } : { ok: true }
+}
+
+// Отправить свои зачётные дни. Пишем ВЕСЬ набор прошедших дней разом: так
+// исправление задним числом (человек дописал вчерашний ужин) сразу отражается
+// в лидерборде, а не остаётся навсегда незачтённым.
+export async function pushChallengeDays({ challengeId, myId, elapsedDays, scoredDays }) {
+  if (!supabase || !elapsedDays?.length) return { ok: true }
+  const scored = new Set(scoredDays)
+  const rows = elapsedDays.map((day) => ({
+    challenge: challengeId,
+    user_id: myId,
+    day,
+    scored: scored.has(day),
+  }))
+  const { error } = await supabase
+    .from('challenge_days')
+    .upsert(rows, { onConflict: 'challenge,user_id,day' })
+  return error ? { error: error.message } : { ok: true }
+}
+
+// Лидерборд одним запросом (серверная функция, см. миграцию).
+export async function challengeBoard(challengeId) {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('challenge_board', { p_challenge: challengeId })
+  if (error) return []
+  return data || []
+}

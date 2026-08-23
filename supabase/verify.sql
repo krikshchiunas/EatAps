@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- EatAps — самопроверка после миграции account_sync.
+-- EatAps — самопроверка базы после установки и миграций.
 --
 -- Вставить целиком в Supabase SQL Editor → Run. Ничего не меняет, только читает.
 -- Возвращает таблицу: каждая строка — одна проверка со статусом ✔ или ✖.
@@ -393,6 +393,118 @@ with checks(порядок, проверка, ok, деталь) as (
       from storage.buckets where id = 'post-images'
     ), false),
     'иначе хранилище проекта превращается в бесплатный файлообменник'
+
+  -- 12. Модерация: баны и обращения в поддержку
+  union all
+  select 55, 'таблица bans создана и защищена RLS',
+    coalesce((select relrowsecurity from pg_class where oid = 'public.bans'::regclass), false),
+    'банов в базе: ' || coalesce((select count(*)::text from public.bans), '—')
+
+  union all
+  select 56, 'клиент не может выдать или снять бан сам себе',
+    not exists (
+      select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'bans' and cmd in ('INSERT', 'UPDATE', 'DELETE')
+    ),
+    'политик записи быть не должно вовсе — пишет только service_role'
+
+  union all
+  select 57, 'is_banned доступен authenticated и закрыт для анонима',
+    has_function_privilege('authenticated', 'public.is_banned(uuid)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.is_banned(uuid)', 'EXECUTE'),
+    ''
+
+  union all
+  select 58, 'support_messages: клиент не может писать в обход лимита',
+    coalesce((select relrowsecurity from pg_class where oid = 'public.support_messages'::regclass), false)
+      and not exists (
+        select 1 from pg_policies
+        where schemaname = 'public' and tablename = 'support_messages' and cmd = 'INSERT'
+      ),
+    'вставка только через api/support.js, где проверяется «раз в час»'
+
+  union all
+  select 59, 'индекс под проверку частоты обращений на месте',
+    exists (select 1 from pg_indexes where schemaname='public' and indexname='support_user_time_idx'),
+    'без него лимит превращается в скан всей таблицы'
+
+  -- 13. Роль тренера
+  union all
+  select 60, 'таблицы coaches и coach_links созданы',
+    to_regclass('public.coaches') is not null and to_regclass('public.coach_links') is not null,
+    'тренеров одобрено: ' || coalesce((select count(*)::text from public.coaches), '—')
+
+  union all
+  select 61, 'пригласить тренера может только сам клиент',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='coach_links' and cmd='INSERT'
+        and with_check like '%auth.uid() = client%'
+    ),
+    'иначе чужой человек подписался бы на ваш дневник сам'
+
+  union all
+  select 62, 'приглашать можно только одобренного тренера',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='coach_links' and cmd='INSERT'
+        and with_check like '%coaches%'
+    ),
+    'проверка членства в coaches должна быть в политике, а не в интерфейсе'
+
+  union all
+  select 63, 'политика чтения app_state покрывает себя, друзей и тренера',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='app_state' and cmd='SELECT'
+        and qual like '%friendships%' and qual like '%coach_links%'
+    ),
+    'права друзей не должны потеряться при добавлении тренера'
+
+  union all
+  select 64, 'day_comments: писать может только автор от своего имени',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='day_comments' and cmd='INSERT'
+        and with_check like '%auth.uid() = author%'
+    ),
+    ''
+
+  -- 14. Челленджи
+  union all
+  select 65, 'таблицы челленджей созданы',
+    to_regclass('public.challenges') is not null
+      and to_regclass('public.challenge_members') is not null
+      and to_regclass('public.challenge_days') is not null,
+    'челленджей: ' || coalesce((select count(*)::text from public.challenges), '—')
+
+  union all
+  select 66, 'in_challenge существует — без неё политики зациклятся',
+    exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='in_challenge'
+    ),
+    'политика на challenge_members читала бы саму себя'
+
+  union all
+  select 67, 'отметку о зачёте можно поставить только себе',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='challenge_days' and cmd='INSERT'
+        and with_check like '%auth.uid() = user_id%'
+    ),
+    'иначе очки проставлялись бы за соседа'
+
+  union all
+  select 68, 'триггер не даёт засчитывать дни вне срока челленджа',
+    exists (select 1 from pg_trigger where tgname = 'challenge_day_guard' and not tgisinternal),
+    'без него очки добирались бы задним числом за пределами окна'
+
+  union all
+  select 69, 'challenge_board закрыт для анонима',
+    has_function_privilege('authenticated', 'public.challenge_board(uuid)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.challenge_board(uuid)', 'EXECUTE'),
+    ''
 )
 
 select
