@@ -294,18 +294,6 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   border: 2px solid var(--nav-bg);
   pointer-events: none;
 }
-.bottomnav .fab-slot { flex: 0 0 auto; }
-.fab {
-  width: 58px; height: 58px; border-radius: 20px;
-  background: var(--primary); color: var(--surface);
-  display: grid; place-items: center;
-  box-shadow: var(--shadow-float);
-  transform: translateY(-14px);
-  transition: transform 0.14s ease;
-}
-[data-theme="dark"] .fab { color: #171D19; }
-.fab:active { transform: translateY(-14px) scale(0.94); }
-
 .sheet-backdrop {
   position: fixed; inset: 0; z-index: 40;
   background: rgba(15, 24, 20, 0.42);

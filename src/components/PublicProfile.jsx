@@ -205,8 +205,12 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
               </button>
             )}
 
+            {/* Кнопка отдаёт сразу всё, что нужно ChatView: имя, аватар и rowId
+                дружбы. Иначе вызывающий экран пошёл бы за ними вторым запросом,
+                хотя здесь они уже загружены. */}
             {canMessage(rel) && (
-              <button className="btn soft" style={{ width: 'auto', padding: '0 18px' }} onClick={() => onOpenChat?.(userId)}>
+              <button className="btn soft" style={{ width: 'auto', padding: '0 18px' }}
+                onClick={() => onOpenChat?.({ id: userId, name, avatar: card?.avatar_url, rowId: rel.friendshipId })}>
                 Написать
               </button>
             )}

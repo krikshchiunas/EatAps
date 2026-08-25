@@ -4,7 +4,7 @@ import { keyOf } from './lib/date.js'
 import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief, startPresence, touchLastSeen } from './lib/supabase.js'
 import { unreadNotificationCount, subscribeToNotifications } from './lib/social.js'
 import { startScheduler, notifyIncomingMessage, setNotificationPrefs } from './lib/notifications.js'
-import { autoStandardMealId, labelForMealId, typeOfMealId } from './lib/meals.js'
+import { typeOfMealId } from './lib/meals.js'
 import Onboarding from './components/Onboarding.jsx'
 import BootScreen from './components/BootScreen.jsx'
 import SyncIndicator from './components/SyncIndicator.jsx'
@@ -14,6 +14,7 @@ import HistoryScreen from './components/HistoryScreen.jsx'
 import StatsScreen from './components/StatsScreen.jsx'
 import ProfileScreen from './components/ProfileScreen.jsx'
 import FriendsScreen from './components/FriendsScreen.jsx'
+import FeedTab from './components/FeedTab.jsx'
 import BottomNav from './components/BottomNav.jsx'
 import AddMealSheet from './components/AddMealSheet.jsx'
 import ResetPasswordSheet from './components/ResetPasswordSheet.jsx'
@@ -156,14 +157,11 @@ export default function App() {
     <div className="app">
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={(mealId, mealLabel) => setSheet({ mealId, mealLabel })} onOpenCalendar={() => setCalendarOpen(true)} onOpenStats={() => setStatsOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
       {tab === 'ai' && <AITab />}
+      {tab === 'feed' && <FeedTab onChatClosed={refreshUnread} />}
       {tab === 'friends' && <FriendsScreen unreadCounts={unreadCounts} onChatClosed={refreshUnread} setTab={setTab} />}
       {tab === 'profile' && <ProfileScreen setTab={setTab} />}
 
-      <BottomNav tab={tab} setTab={setTab} onAdd={() => {
-        setTab('day')
-        const mealId = autoStandardMealId(dayOf(date))
-        setSheet({ mealId, mealLabel: labelForMealId(dayOf(date), mealId) })
-      }} totalUnread={totalUnread} />
+      <BottomNav tab={tab} setTab={setTab} totalUnread={totalUnread} />
 
       {calendarOpen && (
         <PushScreen onClose={() => setCalendarOpen(false)}>

@@ -4,19 +4,17 @@ import { listFriendships, listConversations, acceptFriend, removeFriendship } fr
 import { getMutedFriends, toggleFriendMuted, forgetMutedFriend } from '../lib/notifications.js'
 import AddFriendSheet from './AddFriendSheet.jsx'
 import ChatView from './ChatView.jsx'
-import FeedScreen from './FeedScreen.jsx'
 import UserSearch from './UserSearch.jsx'
 import PeopleList from './PeopleList.jsx'
 import PublicProfile from './PublicProfile.jsx'
 import NotificationsScreen from './NotificationsScreen.jsx'
 import { listFollowers, listFollowing, unreadNotificationCount, subscribeToNotifications } from '../lib/social.js'
 
-// Разделы социального хаба. Лента стоит первой намеренно: раньше экран был
-// списком друзей с чатами, и «социальная» часть приложения начиналась и
-// заканчивалась перепиской. Теперь первое, что человек видит, — что происходит
-// у людей, на которых он подписан.
+// Разделы социального хаба. Ленты здесь НЕТ намеренно: она переехала в нижнюю
+// навигацию отдельной вкладкой, на место бывшей зелёной «＋». Держать её ещё и
+// тут значило бы иметь один и тот же экран в двух местах с двумя независимыми
+// состояниями прокрутки и загрузки.
 const VIEWS = [
-  { key: 'feed',    label: 'Лента' },
   { key: 'friends', label: 'Друзья' },
   { key: 'people',  label: 'Люди' },
   { key: 'events',  label: 'События' },
@@ -142,7 +140,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const [openMenu, setOpenMenu] = useState(null) // friend.id with open menu
   const [dropUp, setDropUp] = useState(false)    // раскрывать меню вверх
   const [menuErr, setMenuErr] = useState(null)
-  const [view, setView] = useState('feed')
+  const [view, setView] = useState('friends')
   const [profileUser, setProfileUser] = useState(null)
   const [peopleTab, setPeopleTab] = useState('search') // search | followers | following
   const [myPeople, setMyPeople] = useState(null)
@@ -347,8 +345,6 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
           </button>
         ))}
       </div>
-
-      {view === 'feed' && <FeedScreen onOpenProfile={setProfileUser} />}
 
       {view === 'events' && (
         <NotificationsScreen

@@ -16,6 +16,12 @@ const ICONS = {
       <path d="M3.5 9h17M8 3v3M16 3v3" />
     </svg>
   ),
+  feed: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="navicon">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="3" />
+      <path d="M7.5 9h5M7.5 12.5h9M7.5 16h7" />
+    </svg>
+  ),
   friends: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="navicon">
       <circle cx="9" cy="8.5" r="3" />
@@ -31,7 +37,7 @@ const ICONS = {
   ),
 }
 
-export default function BottomNav({ tab, setTab, onAdd, totalUnread = 0 }) {
+export default function BottomNav({ tab, setTab, totalUnread = 0 }) {
   return (
     <nav className="bottomnav">
       <button className={tab === 'day' ? 'on' : ''} onClick={() => setTab('day')}>
@@ -40,13 +46,9 @@ export default function BottomNav({ tab, setTab, onAdd, totalUnread = 0 }) {
       <button className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>
         {ICONS.ai}<span>AI</span>
       </button>
-      <div className="fab-slot">
-        <button className="fab" onClick={onAdd} aria-label="Добавить приём пищи">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" width="26" height="26">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-      </div>
+      <button className={tab === 'feed' ? 'on' : ''} onClick={() => setTab('feed')}>
+        {ICONS.feed}<span>Лента</span>
+      </button>
       <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')} style={{ position: 'relative' }}>
         {ICONS.friends}
         {totalUnread > 0 && (
