@@ -412,7 +412,14 @@ export function StoreProvider({ children }) {
   const applyPromo = useCallback(async (code) => {
     const res = await redeemPromo(code)
     if (res?.ok && uid) {
-      grantsRef.current = await pullPromoGrants(uid)
+      const pulled = await pullPromoGrants(uid)
+      // pullPromoGrants при сбое сети молча возвращает []. Гашение на сервере
+      // уже прошло — если перечитать не удалось, доступ всё равно должен
+      // появиться сразу, а не после перезагрузки. Подмешиваем то, что сервер
+      // только что подтвердил, если его нет среди прочитанного.
+      const key = String(code).trim().toUpperCase()
+      const known = { code: key, tier: res.tier, granted_until: res.until }
+      grantsRef.current = pulled.some((g) => g.code === key) ? pulled : [...pulled, known]
       pushAccess()
     }
     return res

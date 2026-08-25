@@ -17,7 +17,7 @@ import { lazyWithReload } from '../lib/lazyWithReload.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import {
   Group, Row,
-  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel,
+  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel, PromoPanel,
 } from './SettingsPanels.jsx'
 import AITonePanel from './AITonePanel.jsx'
 import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiPrompt.js'
@@ -28,12 +28,15 @@ const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const CoachScreen = lazyWithReload(() => import('./CoachScreen.jsx'))
 
 export default function SettingsScreen({ onClose, onOpenFriends }) {
-  const { user, supabaseEnabled, theme, prefs } = useStore()
+  const { user, supabaseEnabled, theme, prefs, subscription } = useStore()
   const [panel, setPanel] = useState(null) // 'account' | 'privacy' | ...
   const [authOpen, setAuthOpen] = useState(false)
   const close = () => setPanel(null)
 
   const toneLabel = (TONES[prefs?.[TONE_PREF]] || TONES[DEFAULT_TONE]).label
+  const promoValue = subscription?.via === 'promo'
+    ? (subscription.tier === 'AI_PLUS' ? 'AI+ активен' : 'AI активен')
+    : null
   const themeLabel = theme === 'light' ? 'Светлая' : theme === 'dark' ? 'Тёмная' : 'Как в системе'
   const accountValue = supabaseEnabled
     ? (user ? (user.email || user.phone || 'Вход выполнен') : 'Не выполнен')
@@ -60,6 +63,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
 
       <Group title="AI Assistant">
         <Row label="Тон ассистента" value={toneLabel} onClick={() => setPanel('aiTone')} />
+        <Row label="Промокод" value={promoValue} onClick={() => setPanel('promo')} />
       </Group>
 
       <Group title="Оформление">
@@ -84,6 +88,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       {panel === 'privacy' && <PrivacyPanel onClose={close} onOpenFriends={onOpenFriends} />}
       {panel === 'notifications' && <NotificationsPanel onClose={close} />}
       {panel === 'aiTone' && <AITonePanel onClose={close} />}
+      {panel === 'promo' && <PromoPanel onClose={close} />}
       {panel === 'appearance' && <AppearancePanel onClose={close} />}
       {panel === 'data' && <DataPanel onClose={close} />}
       {panel === 'coach' && (

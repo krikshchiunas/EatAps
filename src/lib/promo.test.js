@@ -90,3 +90,30 @@ test('без выдач подписка возвращается как ест�
   assert.deepEqual(effectiveSubscription(base, []), base)
   assert.deepEqual(effectiveSubscription(base), base)
 })
+
+// ── applyPromo: устойчивость к сбою перечитывания ───────────────────────────
+// Модель того, что делает store.jsx: гашение прошло, но повторное чтение
+// список выдач вернуло не то (или пусто) из-за сетевого сбоя. Доступ обязан
+// открыться немедленно, а не только после перезагрузки.
+function mergeAfterRedeem(pulled, redeemedCode, redeemed) {
+  const key = String(redeemedCode).trim().toUpperCase()
+  const known = { code: key, tier: redeemed.tier, granted_until: redeemed.until }
+  return pulled.some((g) => g.code === key) ? pulled : [...pulled, known]
+}
+
+test('перечитывание вернуло пусто — выданный доступ всё равно на месте', () => {
+  const merged = mergeAfterRedeem([], 'eataps30', { tier: TIER.AI_PLUS, until: inDays(30) })
+  const g = activeGrant(merged)
+  assert.equal(g.tier, TIER.AI_PLUS)
+})
+
+test('перечитывание успело — дублей не появляется', () => {
+  const fresh = [{ code: 'EATAPS30', tier: TIER.AI_PLUS, granted_until: inDays(30) }]
+  const merged = mergeAfterRedeem(fresh, 'eataps30', { tier: TIER.AI_PLUS, until: inDays(29) })
+  assert.equal(merged.length, 1, 'источник правды — то, что реально прочитано с сервера')
+})
+
+test('код нормализуется в верхний регистр так же, как на сервере', () => {
+  const merged = mergeAfterRedeem([], '  eataps30 ', { tier: TIER.AI, until: inDays(10) })
+  assert.equal(merged[0].code, 'EATAPS30')
+})

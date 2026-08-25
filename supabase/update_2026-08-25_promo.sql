@@ -222,11 +222,15 @@ select
          case stripe_tier when 'AI_PLUS' then 2 when 'AI' then 1 else 0 end
     then promo_tier else stripe_tier
   end as tier,
+  -- Значения латиницей намеренно. Кириллица в ДАННЫХ проходит через буфер
+  -- обмена, редактор и SQL-консоль — на любом стыке она может побиться, и
+  -- в таблице появятся кракозябры вместо слов. Комментарии на русском такой
+  -- проблемы не создают: они никуда не отдаются.
   case
     when case promo_tier when 'AI_PLUS' then 2 when 'AI' then 1 else 0 end >
          case stripe_tier when 'AI_PLUS' then 2 when 'AI' then 1 else 0 end
-    then 'промокод' else
-      case when stripe_tier = 'FREE' then '—' else 'stripe' end
+    then 'promo' else
+      case when stripe_tier = 'FREE' then 'none' else 'stripe' end
   end as source,
   -- До какого числа действует то, что человек имеет сейчас.
   case
@@ -257,10 +261,11 @@ select
   c.max_uses,
   c.max_uses - c.used as left_uses,
   c.expires_at,
+  -- Тоже латиницей и по той же причине.
   case
-    when c.expires_at is not null and c.expires_at <= now() then 'просрочен'
-    when c.used >= c.max_uses then 'разобран'
-    else 'действует'
+    when c.expires_at is not null and c.expires_at <= now() then 'expired'
+    when c.used >= c.max_uses then 'used_up'
+    else 'active'
   end as state,
   c.note,
   c.created_at,
