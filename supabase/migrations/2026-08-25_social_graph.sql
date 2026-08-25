@@ -1336,6 +1336,17 @@ grant execute on function public.list_feed(int, timestamptz, uuid) to authentica
 -- ─────────────────────────────────────────────────────────────────────────
 -- 20. Посты одного человека — с учётом новой видимости
 -- ─────────────────────────────────────────────────────────────────────────
+-- list_posts существует с миграции 2026-08-11, и здесь у неё МЕНЯЕТСЯ состав
+-- возвращаемых колонок: добавилась visibility. create or replace на такое не
+-- способен — Postgres отвечает
+--   42P13: cannot change return type of existing function
+-- потому что тип строки задан OUT-параметрами. Поэтому сначала удаляем.
+--
+-- Удаление безопасно: функция вызывается только клиентом через RPC, никакие
+-- вью и политики на неё не опираются. Права выдаются заново сразу после
+-- создания, ниже по файлу.
+drop function if exists public.list_posts(uuid, int, timestamptz);
+
 create or replace function public.list_posts(
   p_user_id uuid,
   p_limit   int default 20,
