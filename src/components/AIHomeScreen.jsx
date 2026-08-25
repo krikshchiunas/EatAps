@@ -194,7 +194,7 @@ export default function AIHomeScreen({ onUpgrade }) {
           <div className="ai-badge ai-badge--plus">AI+ · Sonnet</div>
         ) : (
           <button className="ai-badge ai-badge--action" onClick={onUpgrade} title="Тарифы и промокод">
-            AI · Haiku
+            {tier === 'AI' ? 'AI · Haiku' : 'FREE · Haiku'}
           </button>
         )}
         {budget?.budgetMicro
