@@ -61,7 +61,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
         <Row label="Уведомления" onClick={() => setPanel('notifications')} />
       </Group>
 
-      <Group title="AI Assistant">
+      <Group title="Carrot 🥕">
         <Row label="Тон ассистента" value={toneLabel} onClick={() => setPanel('aiTone')} />
         <Row label="Промокод" value={promoValue} onClick={() => setPanel('promo')} />
       </Group>

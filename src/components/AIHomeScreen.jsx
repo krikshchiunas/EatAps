@@ -26,10 +26,10 @@ import { autoStandardMealId } from '../lib/meals.js'
 const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
 
 const GREETING = {
-  calm: 'Привет. Сфотографируйте тарелку или спросите что угодно про еду и ваши цели.',
-  coach: 'На связи. Кидайте фото еды или спрашивайте — разберём, что сегодня доедаем.',
-  strict: 'Фото тарелки или вопрос. Считаю по вашему дневнику, без скидок.',
-  savage: 'Ну что, показывай, что там сожрал. Или спрашивай, раз ещё не поздно.',
+  calm: 'Привет, я Carrot 🥕. Сфотографируйте тарелку или спросите что угодно про еду и ваши цели.',
+  coach: 'Я Carrot 🥕, на связи. Кидайте фото еды или спрашивайте — разберём, что сегодня доедаем.',
+  strict: 'Carrot на месте. Фото тарелки или вопрос — считаю по вашему дневнику, без скидок.',
+  savage: 'Carrot тут. Ну что, показывай, что там сожрал. Или спрашивай, раз ещё не поздно.',
 }
 
 export default function AIHomeScreen({ onUpgrade }) {
@@ -191,10 +191,10 @@ export default function AIHomeScreen({ onUpgrade }) {
             на тарифы можно было, только исчерпав лимит, то есть промокод было
             некуда ввести. */}
         {plus ? (
-          <div className="ai-badge ai-badge--plus">AI+ · Sonnet</div>
+          <div className="ai-badge ai-badge--plus">AI+ · умнее</div>
         ) : (
           <button className="ai-badge ai-badge--action" onClick={onUpgrade} title="Тарифы и промокод">
-            {tier === 'AI' ? 'AI · Haiku' : 'FREE · Haiku'}
+            {tier === 'AI' ? 'AI' : 'FREE'}
           </button>
         )}
         {budget?.budgetMicro
