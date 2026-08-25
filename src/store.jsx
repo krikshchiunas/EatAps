@@ -3,8 +3,9 @@ import { StoreCtx, useStore } from './lib/storeContext.js'
 import {
   supabase, supabaseEnabled, pullState, saveAppState, subscribeToAppState,
   pullSubscription, subscribeToSubscription, removeAllRealtimeChannels,
+  pullPromoGrants, redeemPromo,
 } from './lib/supabase.js'
-import { defaultSubscription, checkout as subCheckout, openBillingPortal as subPortal, subFromRow } from './lib/subscription.js'
+import { defaultSubscription, checkout as subCheckout, openBillingPortal as subPortal, subFromRow, effectiveSubscription } from './lib/subscription.js'
 import { upsertSection, removeSection, swapCustomOrder, effectiveMealId } from './lib/meals.js'
 import { createClock } from './lib/hlc.js'
 import { getDeviceId } from './lib/deviceId.js'
@@ -369,24 +370,60 @@ export function StoreProvider({ children }) {
     setUpdateSafetyCheck(() => !engineRef.current?.hasPendingChanges)
   }, [syncStatus])
 
-  // ── 8. Подписка Stripe (серверный источник истины, вне app_state) ─────────
+  // ── 8. Доступ к платным функциям (серверный источник истины, вне app_state)
+  //
+  // Источников два: подписка Stripe и промокод. Держим их порознь — вебхук
+  // Stripe перезаписывает свою строку целиком и стёр бы выданный кодом
+  // доступ, — а наружу отдаём лучший из двух (effectiveSubscription).
+  // Оба источника держим в ref, а не в state: пересчёт нужен при изменении
+  // любого из них, и промежуточный рендер с половиной данных тут не нужен.
+  const stripeRowRef = useRef(null)
+  const grantsRef = useRef([])
+
+  const pushAccess = useCallback(() => {
+    setState((s) => ({
+      ...s,
+      subscription: effectiveSubscription(subFromRow(stripeRowRef.current), grantsRef.current),
+    }))
+  }, [])
+
   useEffect(() => {
     if (!supabaseEnabled || !uid || recovering) return
     let alive = true
+
     ;(async () => {
-      const row = await pullSubscription(uid)
+      const [row, grants] = await Promise.all([pullSubscription(uid), pullPromoGrants(uid)])
       if (!alive) return
-      setState((s) => ({ ...s, subscription: subFromRow(row) }))
+      stripeRowRef.current = row
+      grantsRef.current = grants
+      pushAccess()
     })()
+
     const unsub = subscribeToSubscription(uid, (row) => {
-      if (alive) setState((s) => ({ ...s, subscription: subFromRow(row) }))
+      if (!alive) return
+      stripeRowRef.current = row
+      pushAccess()
     })
     return () => { alive = false; unsub() }
-  }, [uid, recovering])
+  }, [uid, recovering, pushAccess])
+
+  // Гашение промокода. Возвращает результат как есть — экран сам решает, что
+  // показать: причина отказа («уже использован») это нормальный ответ, а не сбой.
+  const applyPromo = useCallback(async (code) => {
+    const res = await redeemPromo(code)
+    if (res?.ok && uid) {
+      grantsRef.current = await pullPromoGrants(uid)
+      pushAccess()
+    }
+    return res
+  }, [uid, pushAccess])
 
   // Разлогин → возвращаем FREE (иначе UI останется с чужим тиром до перезагрузки).
+  // Чистим и промокоды: они принадлежат вышедшему аккаунту.
   useEffect(() => {
     if (uid) return
+    stripeRowRef.current = null
+    grantsRef.current = []
     setState((s) => (s.subscription?.tier === 'FREE' ? s : { ...s, subscription: defaultSubscription() }))
   }, [uid])
 
@@ -859,6 +896,7 @@ export function StoreProvider({ children }) {
     purchaseSubscription,
     openSubscriptionPortal,
     refreshSubscription,
+    applyPromo,
     resetAll,
     // auth / sync
     supabaseEnabled,
@@ -889,7 +927,7 @@ export function StoreProvider({ children }) {
     setProfile, setTheme, addFood, addFoods, repeatDay, repeatMeal, removeFood, editFood, upsertMealSection, deleteMealSection,
     moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient,
     setDayWeight, setDayActivity, setWeightGoal, setDayStatsExcluded, confirmDayStats,
-    setPref, purchaseSubscription, openSubscriptionPortal, refreshSubscription,
+    setPref, purchaseSubscription, openSubscriptionPortal, refreshSubscription, applyPromo,
     resetAll, signOut, stopSync, beginSignIn, endSignIn, completeRecovery, cancelRecovery,
     retryData, retrySync, dismissAuthError,
   ])

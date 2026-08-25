@@ -150,6 +150,46 @@ export async function pullSubscription(userId) {
   return data || null
 }
 
+// Промокоды: действующие выдачи и гашение кода.
+//
+// Таблица самих кодов закрыта политикой целиком — читать её клиенту нельзя,
+// иначе список действующих кодов выгружался бы одним запросом. Проверка и
+// гашение идут через RPC redeem_promo, который работает от имени сервера.
+export async function pullPromoGrants(userId) {
+  if (!supabase || !userId) return []
+  const { data, error } = await supabase
+    .from('promo_grants')
+    .select('code, tier, granted_until')
+    .eq('user_id', userId)
+    .gt('granted_until', new Date().toISOString())
+  if (error) return []
+  return data || []
+}
+
+// Возвращает { ok, tier, until } или { ok: false, error }.
+// Причина отказа — часть нормального сценария, поэтому приходит значением.
+export async function redeemPromo(code) {
+  if (!supabase) return { ok: false, error: 'offline' }
+  const { data, error } = await supabase.rpc('redeem_promo', { p_code: String(code || '') })
+  if (error) return { ok: false, error: 'failed' }
+  return data || { ok: false, error: 'failed' }
+}
+
+// Расход токенов AI за текущий период. Читается при открытии вкладки AI —
+// иначе остаток появлялся бы только после первого сообщения, и человек с
+// исчерпанным лимитом узнавал бы об этом, уже написав вопрос.
+export async function pullAiUsage(userId, period) {
+  if (!supabase || !userId) return 0
+  const { data, error } = await supabase
+    .from('ai_usage')
+    .select('spent_micro')
+    .eq('user_id', userId)
+    .eq('period', period)
+    .maybeSingle()
+  if (error) return 0
+  return Number(data?.spent_micro || 0)
+}
+
 // Realtime-подписка на изменения нашей строки — фронт мгновенно узнаёт, когда
 // вебхук записал новый статус после оплаты/отмены.
 export function subscribeToSubscription(userId, onChange) {

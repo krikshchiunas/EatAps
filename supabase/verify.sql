@@ -505,6 +505,141 @@ with checks(порядок, проверка, ok, деталь) as (
     has_function_privilege('authenticated', 'public.challenge_board(uuid)', 'EXECUTE')
       and not has_function_privilege('anon', 'public.challenge_board(uuid)', 'EXECUTE'),
     ''
+
+  -- 12. Расход токенов AI
+  union all
+  select 70, 'таблица ai_usage существует',
+    exists (select 1 from information_schema.tables
+      where table_schema='public' and table_name='ai_usage'),
+    'без неё ассистент не запустится: лимит некуда писать'
+
+  union all
+  select 71, 'на ai_usage включён RLS',
+    coalesce((select relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='public' and c.relname='ai_usage'), false),
+    ''
+
+  union all
+  select 72, 'клиент может читать только свою строку расхода',
+    exists (select 1 from pg_policies
+      where schemaname='public' and tablename='ai_usage' and cmd='SELECT'
+        and qual like '%auth.uid() = user_id%'),
+    ''
+
+  union all
+  select 73, 'клиенту нельзя писать в ai_usage',
+    not exists (select 1 from pg_policies
+      where schemaname='public' and tablename='ai_usage' and cmd in ('INSERT','UPDATE','ALL')),
+    'иначе месячный лимит обнулялся бы одним запросом из консоли браузера'
+
+  union all
+  select 74, 'RPC ai_usage_add создан',
+    exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='public' and p.proname='ai_usage_add'),
+    'атомарный инкремент: без него параллельные запросы затирают расход'
+
+  union all
+  -- Права спрашиваем через oid из pg_proc, а не по строке сигнатуры:
+  -- has_function_privilege('...текст...') БРОСАЕТ ошибку, если функции нет, и
+  -- тогда вся самопроверка падает вместо того, чтобы показать ✖ в одной строке.
+  select 75, 'ai_usage_add закрыт для клиента — вызывает только сервер',
+    coalesce((
+      select not has_function_privilege('anon', p.oid, 'EXECUTE')
+         and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'ai_usage_add'
+      limit 1
+    ), false),
+    ''
+
+  union all
+  -- Ловушка обновления: create or replace НЕ заменяет функцию с другим числом
+  -- аргументов, а создаёт вторую перегрузку рядом. Тогда вызов с тремя
+  -- параметрами становится неоднозначным, и учёт расхода падает целиком.
+  select 76, 'ai_usage_add существует ровно в одном экземпляре',
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'ai_usage_add') = 1,
+    'найдено версий: ' || (select count(*)::text from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'ai_usage_add')
+
+  -- 13. Промокоды
+  union all
+  select 77, 'таблицы promo_codes и promo_grants существуют',
+    (select count(*) from information_schema.tables
+      where table_schema = 'public' and table_name in ('promo_codes','promo_grants')) = 2,
+    ''
+
+  union all
+  select 78, 'на обеих таблицах промокодов включён RLS',
+    (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relname in ('promo_codes','promo_grants')
+        and c.relrowsecurity) = 2,
+    ''
+
+  union all
+  select 79, 'список кодов закрыт от клиента наглухо',
+    not exists (select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'promo_codes'),
+    'при любой политике SELECT все действующие коды выгружались бы одним запросом'
+
+  union all
+  select 80, 'свои выдачи человек видит, чужие — нет',
+    exists (select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'promo_grants' and cmd = 'SELECT'
+        and qual like '%auth.uid() = user_id%')
+    and not exists (select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'promo_grants'
+        and cmd in ('INSERT','UPDATE','ALL')),
+    'выдачу создаёт только redeem_promo'
+
+  union all
+  select 81, 'число гашений не может превысить лимит кода',
+    exists (select 1 from pg_constraint
+      where conname = 'promo_codes_uses_within_limit'),
+    'ограничение БД страхует на случай ошибки в функции гашения'
+
+  union all
+  select 82, 'redeem_promo доступен вошедшему и закрыт для анонима',
+    coalesce((
+      select has_function_privilege('authenticated', p.oid, 'EXECUTE')
+         and not has_function_privilege('anon', p.oid, 'EXECUTE')
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'redeem_promo'
+      limit 1
+    ), false),
+    ''
+
+  -- 14. Панель управления доступом
+  union all
+  select 83, 'представления admin_subscriptions и admin_promo_codes созданы',
+    (select count(*) from information_schema.views
+      where table_schema = 'public'
+        and table_name in ('admin_subscriptions','admin_promo_codes')) = 2,
+    ''
+
+  union all
+  -- Самая опасная строка во всей самопроверке: представление читает auth.users,
+  -- и одна лишняя выдача прав превращает его в выгрузку почт всех пользователей.
+  select 84, 'панель закрыта от клиента — почты пользователей не утекают',
+    not exists (
+      select 1 from information_schema.role_table_grants
+      where table_schema = 'public'
+        and table_name in ('admin_subscriptions','admin_promo_codes')
+        and grantee in ('anon','authenticated')
+    ),
+    'иначе любой вошедший выгрузит список всех пользователей с почтами'
+
+  union all
+  select 85, 'issue_promo закрыт для клиента — коды выпускает только владелец',
+    coalesce((
+      select not has_function_privilege('anon', p.oid, 'EXECUTE')
+         and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'issue_promo'
+      limit 1
+    ), false),
+    'иначе пользователь выпишет себе AI+ на десять лет'
 )
 
 select

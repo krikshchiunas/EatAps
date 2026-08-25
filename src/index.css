@@ -1650,3 +1650,216 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   color: #fff;
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
+
+/* ── AI-чат ─────────────────────────────────────────────────────────────────
+   Лента занимает всю доступную высоту, композер прижат к низу и не уезжает
+   под клавиатуру (safe-area + dvh). Пузыри намеренно не как в мессенджере
+   друзей: ассистент — инструмент, а не собеседник, поэтому его реплики шире,
+   спокойнее и без хвостиков. */
+.ai-chat {
+  display: flex;
+  flex-direction: column;
+  /* Высота прибита к вьюпорту минус нижняя навигация. height: 100% здесь не
+     работает: .app задан min-height, и экран послушно растягивается под
+     содержимое — композер уезжает под навигацию, как только в ленте
+     накапливается несколько сообщений. Прокручиваться должна ЛЕНТА, а не
+     экран целиком, поэтому высота фиксированная.
+     dvh — ради мобильных браузеров, где адресная строка съезжает; vh следом
+     как запасной вариант для старых движков. */
+  /* .screen задан flex: 1 — в колоночном .app это делает высоту главной осью
+     флекса, и любой height проигрывает grow. Поэтому сначала отключаем рост,
+     и только тогда высота ниже начинает действовать. */
+  flex: 0 0 auto;
+  height: calc(100vh - 66px - env(safe-area-inset-bottom));
+  height: calc(100dvh - 66px - env(safe-area-inset-bottom));
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.ai-chat__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  flex: 0 0 auto;
+}
+
+.ai-chat__unlimited { font-size: 12px; color: var(--ink-3); }
+
+.ai-budget { display: flex; align-items: center; gap: 8px; min-width: 96px; }
+.ai-budget__track {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ai-budget__fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
+.ai-budget__label { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.ai-chat__feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 12px;
+}
+
+.ai-bubble {
+  max-width: 88%;
+  padding: 10px 13px;
+  border-radius: 16px;
+  font-size: 15px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.ai-bubble--me {
+  align-self: flex-end;
+  background: var(--primary);
+  color: #fff;
+  border-bottom-right-radius: 6px;
+}
+.ai-bubble--ai {
+  align-self: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 6px;
+}
+.ai-bubble__text { margin: 0; white-space: pre-wrap; }
+.ai-bubble__photo {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+
+/* «Печатает»: три точки. prefers-reduced-motion уважаем — анимация гаснет,
+   но индикатор остаётся видимым, иначе непонятно, что ответ вообще идёт. */
+.ai-typing { display: flex; gap: 5px; align-items: center; padding: 14px 15px; }
+.ai-typing span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-3);
+  animation: ai-blink 1.2s infinite ease-in-out;
+}
+.ai-typing span:nth-child(2) { animation-delay: .18s; }
+.ai-typing span:nth-child(3) { animation-delay: .36s; }
+@keyframes ai-blink { 0%, 60%, 100% { opacity: .28 } 30% { opacity: 1 } }
+@media (prefers-reduced-motion: reduce) {
+  .ai-typing span { animation: none; opacity: .6; }
+}
+
+/* Карточка еды. Кнопка на всю ширину — её жмут большим пальцем на телефоне. */
+.ai-card {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.ai-card__head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+}
+.ai-card__name { font-weight: 600; font-size: 15px; }
+.ai-card__grams { font-size: 13px; color: var(--ink-2); flex: 0 0 auto; }
+.ai-card__macros { font-size: 13px; color: var(--ink-2); margin-top: 3px; }
+.ai-card__conf { color: var(--ink-3); }
+.ai-card__add { width: 100%; margin-top: 10px; }
+
+.ai-chat__composer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.ai-chat__camera { flex: 0 0 auto; }
+.ai-chat__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  max-height: 120px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 16px; /* меньше 16px — iOS зумит страницу при фокусе */
+  line-height: 1.35;
+}
+.ai-chat__input:focus { outline: none; border-color: var(--primary); }
+.ai-chat__send {
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 19px; line-height: 1;
+}
+
+.ai-budget--action {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--primary-strong);
+  font: inherit;
+}
+.ai-budget--action .ai-budget__label { color: var(--primary-strong); font-weight: 600; }
+
+.ai-notice {
+  align-self: stretch;
+  padding: 10px 13px;
+  border-radius: 12px;
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+/* ── Промокод на экране тарифов ─────────────────────────────────────────────
+   Намеренно скромный блок под карточками: это запасной путь для тех, кому код
+   выдали, а не второй способ оплаты. Крупная форма сверху сбивала бы с
+   основного действия. */
+.promo { margin: 18px 0 6px; }
+.promo__label {
+  display: block;
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+}
+.promo__row { display: flex; gap: 8px; align-items: stretch; }
+.promo__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 14px;
+  height: 46px;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px; /* меньше 16px — iOS зумит страницу при фокусе */
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.promo__input::placeholder { letter-spacing: normal; text-transform: none; }
+.promo__input:focus { outline: none; border-color: var(--primary); }
+.promo__btn { width: auto; flex: 0 0 auto; height: 46px; padding: 0 18px; }
+.promo__msg { margin: 10px 0 0; font-size: 13.5px; line-height: 1.4; }
+.promo__msg--ok { color: var(--primary-strong); }
+.promo__msg--err { color: var(--danger); }
+
+/* Значок тарифа в роли кнопки: выглядит так же, отличается только откликом. */
+.ai-badge--action {
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.2s ease;
+}
+.ai-badge--action:active { transform: scale(0.97); }

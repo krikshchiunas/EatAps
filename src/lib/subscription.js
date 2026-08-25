@@ -38,6 +38,54 @@ export const PLANS = [
   },
 ]
 
+// ── Промокоды ────────────────────────────────────────────────────────────────
+// Источников доступа два и они независимы: Stripe (таблица subscriptions) и
+// промокод (promo_grants). Складывать их в одну строку нельзя — вебхук Stripe
+// перезаписывает свою строку целиком и стёр бы выданный доступ. Поэтому
+// действующий тариф считается здесь, в одном месте на весь проект.
+export const TIER_RANK = Object.freeze({ [TIER.FREE]: 0, [TIER.AI]: 1, [TIER.AI_PLUS]: 2 })
+
+export function bestTier(a, b) {
+  return (TIER_RANK[b] ?? 0) > (TIER_RANK[a] ?? 0) ? b : (a || TIER.FREE)
+}
+
+// Действующая выдача по промокоду: лучший тариф среди непросроченных.
+// Если у человека два кода, побеждает старший тариф, а срок берётся его.
+export function activeGrant(grants = [], now = Date.now()) {
+  let best = null
+  for (const g of grants) {
+    if (!g?.tier || !g?.granted_until) continue
+    if (new Date(g.granted_until).getTime() <= now) continue
+    if (!best || TIER_RANK[g.tier] > TIER_RANK[best.tier]) best = g
+    else if (TIER_RANK[g.tier] === TIER_RANK[best.tier]
+             && new Date(g.granted_until) > new Date(best.granted_until)) best = g
+  }
+  return best
+}
+
+// Итоговая подписка для UI и лимитов: Stripe плюс промокод, побеждает лучшее.
+// Тир, выданный кодом, помечаем via: 'promo' — чтобы экран не предлагал
+// «управление подпиской» там, где никакой подписки в Stripe нет.
+export function effectiveSubscription(stripeSub, grants = [], now = Date.now()) {
+  const base = stripeSub || defaultSubscription()
+  const grant = activeGrant(grants, now)
+  if (!grant) return base
+
+  const stripeTier = isActive(base) ? base.tier : TIER.FREE
+  if (TIER_RANK[grant.tier] <= TIER_RANK[stripeTier]) return base
+
+  return {
+    ...base,
+    tier: grant.tier,
+    status: STATUS.ACTIVE,
+    via: 'promo',
+    promoCode: grant.code,
+    promoUntil: grant.granted_until,
+    // Оплаченный период Stripe тут ни при чём — показываем срок промокода.
+    currentPeriodEnd: grant.granted_until,
+  }
+}
+
 export function planByTier(tier) {
   return PLANS.find((p) => p.tier === tier) || null
 }

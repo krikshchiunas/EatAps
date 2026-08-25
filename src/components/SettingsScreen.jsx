@@ -19,6 +19,8 @@ import {
   Group, Row,
   AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel,
 } from './SettingsPanels.jsx'
+import AITonePanel from './AITonePanel.jsx'
+import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiPrompt.js'
 
 // AuthSheet тянет тяжёлый Web3-стек — грузим только когда его открывают.
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
@@ -26,11 +28,12 @@ const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const CoachScreen = lazyWithReload(() => import('./CoachScreen.jsx'))
 
 export default function SettingsScreen({ onClose, onOpenFriends }) {
-  const { user, supabaseEnabled, theme } = useStore()
+  const { user, supabaseEnabled, theme, prefs } = useStore()
   const [panel, setPanel] = useState(null) // 'account' | 'privacy' | ...
   const [authOpen, setAuthOpen] = useState(false)
   const close = () => setPanel(null)
 
+  const toneLabel = (TONES[prefs?.[TONE_PREF]] || TONES[DEFAULT_TONE]).label
   const themeLabel = theme === 'light' ? 'Светлая' : theme === 'dark' ? 'Тёмная' : 'Как в системе'
   const accountValue = supabaseEnabled
     ? (user ? (user.email || user.phone || 'Вход выполнен') : 'Не выполнен')
@@ -55,6 +58,10 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
         <Row label="Уведомления" onClick={() => setPanel('notifications')} />
       </Group>
 
+      <Group title="AI Assistant">
+        <Row label="Тон ассистента" value={toneLabel} onClick={() => setPanel('aiTone')} />
+      </Group>
+
       <Group title="Оформление">
         <Row label="Тема" value={themeLabel} onClick={() => setPanel('appearance')} />
       </Group>
@@ -76,6 +83,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       {panel === 'account' && <AccountPanel onClose={close} onOpenAuth={() => setAuthOpen(true)} />}
       {panel === 'privacy' && <PrivacyPanel onClose={close} onOpenFriends={onOpenFriends} />}
       {panel === 'notifications' && <NotificationsPanel onClose={close} />}
+      {panel === 'aiTone' && <AITonePanel onClose={close} />}
       {panel === 'appearance' && <AppearancePanel onClose={close} />}
       {panel === 'data' && <DataPanel onClose={close} />}
       {panel === 'coach' && (

@@ -2,30 +2,63 @@ import { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { PLANS, TIER } from '../lib/subscription.js'
 
-// Заглушки-описания. Владелец приложения заменит текст в PLAN_COPY.
+// Описания тарифов. Обещаем ровно то, что делает код: объём в 3,5 раза
+// больше бесплатного на AI и снятый потолок плюс более умная модель на AI+.
+// Никаких «приоритетной скорости» — её в реализации нет.
 const PLAN_COPY = {
   [TIER.AI]: {
-    tagline: 'Персональный AI-ассистент по питанию.',
+    tagline: 'В 3,5 раза больше запросов к ассистенту.',
     bullets: [
-      'Распознаёт блюда и считает БЖУ',
-      'Отвечает на вопросы о рационе',
-      'Подсказывает, что съесть под ваши цели',
+      'Фото еды, разбор дневника, ответы на вопросы',
+      'История за неделю — ассистент видит ваши паттерны',
+      'Разбор дневника за период',
     ],
   },
   [TIER.AI_PLUS]: {
-    tagline: 'Всё, что в AI, и глубокая аналитика.',
+    tagline: 'Без месячного лимита и на более умной модели.',
     bullets: [
-      'Разбор недели и рекомендации',
-      'Приоритетная скорость ответа',
-      'Расширенные форматы и инсайты',
+      'Claude Sonnet 4.6 — точнее распознаёт блюда по фото',
+      'История за 30 дней и долгая память о ваших привычках',
+      'Сколько угодно запросов',
     ],
   },
 }
 
-export default function AIPlansScreen() {
-  const { purchaseSubscription, user } = useStore()
+const PROMO_ERRORS = {
+  not_found: 'Такого кода нет. Проверьте написание.',
+  expired: 'Срок действия кода истёк.',
+  exhausted: 'Код уже разобрали — все использования закончились.',
+  already_used: 'Вы уже активировали этот код.',
+  unauthorized: 'Войдите в аккаунт, чтобы активировать код.',
+  offline: 'Нет связи. Проверьте интернет.',
+  failed: 'Не получилось активировать код. Попробуйте ещё раз.',
+}
+
+export default function AIPlansScreen({ onClose }) {
+  const { purchaseSubscription, user, applyPromo } = useStore()
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
+  const [promo, setPromo] = useState('')
+  const [promoBusy, setPromoBusy] = useState(false)
+  const [promoResult, setPromoResult] = useState(null)
+
+  const submitPromo = async (e) => {
+    e.preventDefault()
+    const code = promo.trim()
+    if (!code || promoBusy) return
+    setPromoResult(null)
+    setPromoBusy(true)
+    const res = await applyPromo(code)
+    setPromoBusy(false)
+    if (res?.ok) {
+      const until = new Date(res.until).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+      const name = res.tier === 'AI_PLUS' ? 'AI+' : 'AI'
+      setPromoResult({ ok: true, text: `Готово: ${name} до ${until}.` })
+      setPromo('')
+    } else {
+      setPromoResult({ ok: false, text: PROMO_ERRORS[res?.error] || PROMO_ERRORS.failed })
+    }
+  }
 
   const handleBuy = async (tier) => {
     setError(null)
@@ -47,6 +80,9 @@ export default function AIPlansScreen() {
 
   return (
     <div className="screen ai-plans">
+      {onClose && (
+        <button className="iconbtn" onClick={onClose} aria-label="Назад" style={{ fontSize: 22, marginBottom: 8 }}>‹</button>
+      )}
       <div className="eyebrow ai-plans__eyebrow">AI-ассистент</div>
 
       <div className="ai-hero">
@@ -77,6 +113,31 @@ export default function AIPlansScreen() {
       {error && (
         <div className="ai-error" role="alert">{error}</div>
       )}
+
+      <form className="promo" onSubmit={submitPromo}>
+        <label className="promo__label" htmlFor="promo-code">Есть промокод?</label>
+        <div className="promo__row">
+          <input
+            id="promo-code"
+            className="promo__input"
+            value={promo}
+            onChange={(e) => setPromo(e.target.value)}
+            placeholder="Код"
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            disabled={promoBusy}
+          />
+          <button className="btn ghost promo__btn" type="submit" disabled={promoBusy || !promo.trim()}>
+            {promoBusy ? '…' : 'Активировать'}
+          </button>
+        </div>
+        {promoResult && (
+          <p className={`promo__msg ${promoResult.ok ? 'promo__msg--ok' : 'promo__msg--err'}`} role="status">
+            {promoResult.text}
+          </p>
+        )}
+      </form>
 
       <p className="ai-plans__foot">Оплата раз в месяц. Отмена в любой момент.</p>
     </div>
