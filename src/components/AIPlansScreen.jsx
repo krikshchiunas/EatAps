@@ -18,7 +18,7 @@ const PLAN_COPY = {
   [TIER.AI_PLUS]: {
     tagline: 'Без месячного лимита и на более умной модели.',
     bullets: [
-      'Claude Sonnet 4.6 — точнее распознаёт блюда по фото',
+      'Более умная модель — точнее распознаёт блюда по фото',
       'История за 30 дней и долгая память о ваших привычках',
       'Сколько угодно запросов',
     ],
@@ -53,7 +53,7 @@ export default function AIPlansScreen({ onClose }) {
       {onClose && (
         <button className="iconbtn" onClick={onClose} aria-label="Назад" style={{ fontSize: 22, marginBottom: 8 }}>‹</button>
       )}
-      <div className="eyebrow ai-plans__eyebrow">AI-ассистент</div>
+      <div className="eyebrow ai-plans__eyebrow">🥕 Carrot</div>
 
       <div className="ai-hero">
         <div className="ai-hero__orb" aria-hidden>
