@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
 import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief, startPresence, touchLastSeen } from './lib/supabase.js'
+import { unreadNotificationCount, subscribeToNotifications } from './lib/social.js'
 import { startScheduler, notifyIncomingMessage, setNotificationPrefs } from './lib/notifications.js'
 import { autoStandardMealId, labelForMealId, typeOfMealId } from './lib/meals.js'
 import Onboarding from './components/Onboarding.jsx'
@@ -30,6 +31,7 @@ export default function App() {
   const [statsOpen, setStatsOpen] = useState(false)
   const [clipboard, setClipboard] = useState(null)
   const [unreadCounts, setUnreadCounts] = useState({})
+  const [unreadEvents, setUnreadEvents] = useState(0)
 
   // Актуальный стор для планировщика (не пересоздаём таймер при каждом изменении).
   const stateRef = useRef({ profile, days })
@@ -104,7 +106,19 @@ export default function App() {
     })
   }, [user?.id, refreshUnread])
 
-  const totalUnread = Object.values(unreadCounts).reduce((s, n) => s + n, 0)
+  // Непрочитанные события — с сервера, как и сообщения. Складываем в один
+  // бейдж: для человека это одно «на меня что-то пришло», а не две разные
+  // цифры на одной вкладке.
+  useEffect(() => {
+    if (!user?.id) { setUnreadEvents(0); return }
+    const refresh = async () => {
+      try { setUnreadEvents(await unreadNotificationCount()) } catch { /* раздел недоступен */ }
+    }
+    refresh()
+    return subscribeToNotifications(user.id, refresh)
+  }, [user?.id])
+
+  const totalUnread = Object.values(unreadCounts).reduce((s, n) => s + n, 0) + unreadEvents
 
   // Затянувшаяся загрузка — меняем текст, чтобы человек понимал, что происходит,
   // а не смотрел в бесконечный спиннер без объяснений.

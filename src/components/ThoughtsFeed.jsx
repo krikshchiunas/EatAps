@@ -20,10 +20,12 @@ import {
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { Avatar } from './FriendsScreen.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import { visibilityLabel, VISIBILITY, DEFAULT_VISIBILITY } from '../lib/relationship.js'
+import { setPostVisibility } from '../lib/social.js'
 
 const MAX_TEXT = 2000
 
-function timeAgo(iso) {
+export function timeAgo(iso) {
   const t = Date.parse(iso)
   if (!Number.isFinite(t)) return ''
   const mins = Math.floor((Date.now() - t) / 60000)
@@ -37,9 +39,10 @@ function timeAgo(iso) {
 }
 
 // ── Создание и правка мысли ───────────────────────────────────────────────────
-function ComposerSheet({ post, userId, onClose, onSaved }) {
+export function ComposerSheet({ post, userId, onClose, onSaved }) {
   const [text, setText] = useState(post?.text || '')
   const [imageUrl, setImageUrl] = useState(post?.image_url || null)
+  const [visibility, setVisibility] = useState(post?.visibility || DEFAULT_VISIBILITY)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const fileRef = useRef(null)
@@ -65,10 +68,17 @@ function ComposerSheet({ post, userId, onClose, onSaved }) {
     setErr(null)
     const res = post
       ? await updatePost(post.id, { text, imageUrl })
-      : await createPost({ userId, text, imageUrl })
+      : await createPost({ userId, text, imageUrl, visibility })
     setBusy(false)
     if (res.error) { setErr(res.error); return }
-    onSaved(res.ok, Boolean(post))
+    // Видимость у существующего поста меняется отдельным запросом: updatePost
+    // намеренно правит только текст и фото, а guard-триггер в базе следит,
+    // чтобы через него нельзя было переписать ничего другого.
+    if (post && visibility !== post.visibility) {
+      const v = await setPostVisibility(post.id, visibility)
+      if (v.error) { setErr(v.error); return }
+    }
+    onSaved({ ...res.ok, visibility }, Boolean(post))
     onClose()
   }
 
@@ -104,6 +114,23 @@ function ComposerSheet({ post, userId, onClose, onSaved }) {
           </div>
         )}
 
+        <div style={{ marginBottom: 12 }}>
+          <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>Кто увидит</div>
+          <div className="row gap8" style={{ flexWrap: 'wrap' }}>
+            {VISIBILITY.map((v) => (
+              <button
+                key={v.value}
+                className={`pill${visibility === v.value ? ' on' : ''}`}
+                onClick={() => setVisibility(v.value)}
+                title={v.hint}
+                type="button"
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {err && <p style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 10 }}>{err}</p>}
 
         <div className="row gap8">
@@ -121,7 +148,7 @@ function ComposerSheet({ post, userId, onClose, onSaved }) {
 }
 
 // ── Ответы ────────────────────────────────────────────────────────────────────
-function Comments({ post, myId, isPostOwner, onCountChange }) {
+export function Comments({ post, myId, isPostOwner, onCountChange }) {
   // Своё имя и фото берём из своего профиля: сервер вернёт их при следующей
   // загрузке ветки, а до тех пор только что отправленный ответ не должен
   // выглядеть как чужой безымянный.
@@ -208,7 +235,10 @@ function Comments({ post, myId, isPostOwner, onCountChange }) {
 }
 
 // ── Одна мысль ────────────────────────────────────────────────────────────────
-function PostCard({ post, myId, isOwnProfile, authorName, authorAvatar, onChange, onEdit, onDelete }) {
+export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdit, onDelete, onOpenProfile }) {
+  // Владелец определяется по самому посту, а не по тому, чей экран открыт:
+  // в ленте на одном экране соседствуют свои и чужие мысли.
+  const isMine = post.user_id === myId
   const [open, setOpen] = useState(false)
   const [menu, setMenu] = useState(false)
   const [err, setErr] = useState(null)
@@ -248,15 +278,29 @@ function PostCard({ post, myId, isOwnProfile, authorName, authorAvatar, onChange
     <div className="card" style={{ marginBottom: 12 }}>
       <div className="row between" style={{ alignItems: 'flex-start', marginBottom: 10 }}>
         <div className="row gap10" style={{ alignItems: 'center', minWidth: 0 }}>
-          <Avatar src={authorAvatar} name={authorName} size={34} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authorName}</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>
-              {timeAgo(post.created_at)}{post.edited_at ? ' · изменено' : ''}
+          <button
+            onClick={onOpenProfile ? () => onOpenProfile(post.user_id) : undefined}
+            disabled={!onOpenProfile}
+            className="row gap10"
+            style={{
+              alignItems: 'center', minWidth: 0, background: 'none', border: 0,
+              padding: 0, textAlign: 'left', color: 'inherit',
+              cursor: onOpenProfile ? 'pointer' : 'default',
+            }}
+          >
+            <Avatar src={authorAvatar} name={authorName} size={34} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authorName}</div>
+              <div className="muted" style={{ fontSize: 11.5 }}>
+                {timeAgo(post.created_at)}{post.edited_at ? ' · изменено' : ''}
+                {isMine && post.visibility && post.visibility !== 'followers'
+                  ? ' · ' + visibilityLabel(post.visibility)
+                  : ''}
+              </div>
             </div>
-          </div>
+          </button>
         </div>
-        {isOwnProfile && (
+        {isMine && (
           <div style={{ position: 'relative', flex: '0 0 auto' }}>
             <button className="iconbtn" style={{ width: 32, height: 32 }} onClick={() => setMenu((m) => !m)} aria-label="Действия с мыслью">⋯</button>
             {menu && (
@@ -387,7 +431,6 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
             key={p.id}
             post={p}
             myId={myId}
-            isOwnProfile={isOwnProfile}
             authorName={authorName}
             authorAvatar={authorAvatar}
             onChange={replace}

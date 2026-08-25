@@ -1,9 +1,27 @@
-import { useState, useEffect, useRef, useMemo, Suspense } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { listFriendships, listConversations, acceptFriend, removeFriendship } from '../lib/supabase.js'
 import { getMutedFriends, toggleFriendMuted, forgetMutedFriend } from '../lib/notifications.js'
 import AddFriendSheet from './AddFriendSheet.jsx'
 import ChatView from './ChatView.jsx'
+import FeedScreen from './FeedScreen.jsx'
+import UserSearch from './UserSearch.jsx'
+import PeopleList from './PeopleList.jsx'
+import PublicProfile from './PublicProfile.jsx'
+import NotificationsScreen from './NotificationsScreen.jsx'
+import { listFollowers, listFollowing, unreadNotificationCount, subscribeToNotifications } from '../lib/social.js'
+
+// Разделы социального хаба. Лента стоит первой намеренно: раньше экран был
+// списком друзей с чатами, и «социальная» часть приложения начиналась и
+// заканчивалась перепиской. Теперь первое, что человек видит, — что происходит
+// у людей, на которых он подписан.
+const VIEWS = [
+  { key: 'feed',    label: 'Лента' },
+  { key: 'friends', label: 'Друзья' },
+  { key: 'people',  label: 'Люди' },
+  { key: 'events',  label: 'События' },
+]
+
 import LazyBoundary from './LazyBoundary.jsx'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 
@@ -124,6 +142,11 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const [openMenu, setOpenMenu] = useState(null) // friend.id with open menu
   const [dropUp, setDropUp] = useState(false)    // раскрывать меню вверх
   const [menuErr, setMenuErr] = useState(null)
+  const [view, setView] = useState('feed')
+  const [profileUser, setProfileUser] = useState(null)
+  const [peopleTab, setPeopleTab] = useState('search') // search | followers | following
+  const [myPeople, setMyPeople] = useState(null)
+  const [unreadEvents, setUnreadEvents] = useState(0)
   const [pinned, setPinned] = useState(getPinned)
   const [muted, setMuted] = useState(getMutedFriends)
   const screenRef = useRef(null)
@@ -217,6 +240,31 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
 
   useEffect(() => { if (myId) reload(); else setLoading(false) }, [myId])
 
+  // Счётчик непрочитанных событий — с сервера, а не из localStorage: он должен
+  // совпадать на всех устройствах и переживать перезаход.
+  const refreshEvents = useCallback(async () => {
+    if (!myId) return
+    try { setUnreadEvents(await unreadNotificationCount()) } catch { /* раздел недоступен */ }
+  }, [myId])
+
+  useEffect(() => {
+    if (!myId) return
+    refreshEvents()
+    return subscribeToNotifications(myId, refreshEvents)
+  }, [myId, refreshEvents])
+
+  useEffect(() => {
+    if (view !== 'people' || peopleTab === 'search') return
+    let alive = true
+    ;(async () => {
+      try {
+        const list = peopleTab === 'followers' ? await listFollowers(myId) : await listFollowing(myId)
+        if (alive) setMyPeople(list)
+      } catch { if (alive) setMyPeople([]) }
+    })()
+    return () => { alive = false }
+  }, [view, peopleTab, myId])
+
   const act = async (fn) => { setBusy(true); await fn(); setBusy(false); reload() }
 
   const lastById = useMemo(() => new Map(convs.map(c => [c.id, c.last])), [convs])
@@ -268,16 +316,78 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
 
   return (
     <div className="screen" ref={screenRef} style={swipeStyle} onClick={() => openMenu && setOpenMenu(null)}>
-      <div className="row between" style={{ alignItems: 'center', margin: '0 0 16px' }}>
-        <h1 className="h1" style={{ margin: '4px 0 0' }}>Друзья</h1>
+      <div className="row between" style={{ alignItems: 'center', margin: '0 0 14px' }}>
+        <h1 className="h1" style={{ margin: '4px 0 0' }}>Общение</h1>
         <div className="row gap8">
           <button className="iconbtn" onClick={() => setChallengesOpen(true)} aria-label="Челленджи" title="Челленджи">🏁</button>
           <button className="btn" style={{ width: 'auto', height: 40, padding: '0 16px', fontSize: 14 }} onClick={() => setAddOpen(true)}>
-            ＋ Добавить
+            ＋ По ID
           </button>
         </div>
       </div>
 
+      <div className="seg" style={{ marginBottom: 16, overflowX: 'auto' }}>
+        {VIEWS.map((v) => (
+          <button
+            key={v.key}
+            className={view === v.key ? 'on' : ''}
+            onClick={() => setView(v.key)}
+            style={{ position: 'relative', whiteSpace: 'nowrap' }}
+          >
+            {v.label}
+            {v.key === 'events' && unreadEvents > 0 && (
+              <span style={{
+                marginLeft: 6, minWidth: 18, height: 18, borderRadius: 999,
+                background: 'var(--danger)', color: '#fff', fontSize: 11, fontWeight: 700,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
+              }}>
+                {unreadEvents > 99 ? '99+' : unreadEvents}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {view === 'feed' && <FeedScreen onOpenProfile={setProfileUser} />}
+
+      {view === 'events' && (
+        <NotificationsScreen
+          onChanged={refreshEvents}
+          onNavigate={(t) => {
+            if (t.screen === 'profile') setProfileUser(t.userId)
+            else if (t.screen === 'requests') setView('friends')
+            // Реакции и ответы приходят только на СВОИ мысли, поэтому пост
+            // всегда лежит в собственном профиле — туда и открываем, а не в
+            // ленту, где его пришлось бы искать прокруткой.
+            else if (t.screen === 'post') setProfileUser(myId)
+            else if (t.screen === 'chat') {
+              const f = lists.friends.find((x) => x.id === t.userId)
+              if (f) setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId })
+              else setProfileUser(t.userId)
+            }
+          }}
+        />
+      )}
+
+      {view === 'people' && (
+        <div>
+          <div className="seg" style={{ marginBottom: 14 }}>
+            <button className={peopleTab === 'search' ? 'on' : ''} onClick={() => setPeopleTab('search')}>Поиск</button>
+            <button className={peopleTab === 'followers' ? 'on' : ''} onClick={() => setPeopleTab('followers')}>Подписчики</button>
+            <button className={peopleTab === 'following' ? 'on' : ''} onClick={() => setPeopleTab('following')}>Подписки</button>
+          </div>
+          {peopleTab === 'search'
+            ? <UserSearch onOpenProfile={setProfileUser} />
+            : <PeopleList
+                people={myPeople || []}
+                myId={myId}
+                onOpen={setProfileUser}
+                empty={peopleTab === 'followers' ? 'На вас пока никто не подписан' : 'Вы пока ни на кого не подписаны'}
+              />}
+        </div>
+      )}
+
+      {view === 'friends' && (<>
       {/* Поиск */}
       <div className="field" style={{ marginBottom: 14 }}>
         <input
@@ -403,22 +513,29 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
         )
       })}
 
+      </>)}
+
       {challengesOpen && (
-
         <LazyBoundary onClose={() => setChallengesOpen(false)}>
-
           <Suspense fallback={null}>
-
             <ChallengesScreen onClose={() => setChallengesOpen(false)} />
-
           </Suspense>
-
         </LazyBoundary>
-
       )}
 
-
       {addOpen && <AddFriendSheet onClose={() => setAddOpen(false)} onSent={reload} />}
+
+      {profileUser && (
+        <PublicProfile
+          userId={profileUser}
+          onClose={() => { setProfileUser(null); reload() }}
+          onOpenProfile={setProfileUser}
+          onOpenChat={(uid) => {
+            const f = lists.friends.find((x) => x.id === uid)
+            if (f) { setProfileUser(null); setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId }) }
+          }}
+        />
+      )}
 
       {chatFriend && (
         <ChatView

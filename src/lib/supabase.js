@@ -6,6 +6,7 @@ import { isMissingColumn } from './pgErrors.js'
 import { log } from './log.js'
 import { newId } from './uuid.js'
 import { normalizePublicId } from './publicId.js'
+import { DEFAULT_VISIBILITY } from './relationship.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -399,15 +400,23 @@ export async function listPosts(userId, { limit = 20, before = null } = {}) {
   return { posts: data || [] }
 }
 
-export async function createPost({ userId, text, imageUrl }) {
+export async function createPost({ userId, text, imageUrl, visibility = DEFAULT_VISIBILITY }) {
   if (!supabase) return { error: 'Нет подключения' }
   const payload = {
     user_id: userId,
     text: text?.trim() ? text.trim() : null,
     image_url: imageUrl || null,
+    visibility,
   }
   if (!payload.text && !payload.image_url) return { error: 'Пустая мысль' }
-  const { data, error } = await supabase.from('posts').insert(payload).select('*').single()
+  let { data, error } = await supabase.from('posts').insert(payload).select('*').single()
+  // Фронтенд задеплоен раньше миграции социального графа: колонки visibility
+  // ещё нет. Публикация не должна из-за этого падать — повторяем без неё, и
+  // пост уходит с прежней видимостью «только друзьям».
+  if (error && isMissingColumn(error)) {
+    delete payload.visibility
+    ;({ data, error } = await supabase.from('posts').insert(payload).select('*').single())
+  }
   if (error) return { error: normalizeError(error).message }
   return { ok: { ...data, carrots: 0, broccoli: 0, my_reaction: null, comments_count: 0 } }
 }
