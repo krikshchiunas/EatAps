@@ -1,12 +1,16 @@
-import { useStore } from '../store.jsx'
-import { isActive } from '../lib/subscription.js'
+import { useState } from 'react'
 import AIPlansScreen from './AIPlansScreen.jsx'
 import AIHomeScreen from './AIHomeScreen.jsx'
 
-// Роутер вкладки AI: подписка активна → домашний экран, иначе — экран покупки.
-// Тир и статус тянутся из store, куда их кладёт вебхук через Supabase Realtime,
-// так что переход FREE → AI/AI+ происходит без ручного обновления страницы.
+// Роутер вкладки AI.
+//
+// Ассистент доступен ВСЕМ, включая бесплатный тариф: у FREE свой месячный
+// бюджет токенов (см. aiBudget.js). Раньше здесь стоял платный шлагбаум, и
+// человек покупал подписку вслепую — теперь он сначала пробует, а экран
+// тарифов открывается по кнопке и когда бесплатный объём кончился.
 export default function AITab() {
-  const { subscription } = useStore()
-  return isActive(subscription) ? <AIHomeScreen /> : <AIPlansScreen />
+  const [plans, setPlans] = useState(false)
+  return plans
+    ? <AIPlansScreen onClose={() => setPlans(false)} />
+    : <AIHomeScreen onUpgrade={() => setPlans(true)} />
 }

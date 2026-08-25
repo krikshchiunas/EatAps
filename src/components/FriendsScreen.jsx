@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import { listFriendships, listConversations, acceptFriend, removeFriendship } from '../lib/supabase.js'
 import { getMutedFriends, toggleFriendMuted, forgetMutedFriend } from '../lib/notifications.js'
@@ -21,6 +21,12 @@ const VIEWS = [
   { key: 'people',  label: 'Люди' },
   { key: 'events',  label: 'События' },
 ]
+
+import LazyBoundary from './LazyBoundary.jsx'
+import { lazyWithReload } from '../lib/lazyWithReload.js'
+
+// Челленджи открывает меньшинство — не тянем экран в стартовый бандл.
+const ChallengesScreen = lazyWithReload(() => import('./ChallengesScreen.jsx'))
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 // Список заглушённых живёт в notifications.js: его читает не этот экран, а
@@ -130,6 +136,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [challengesOpen, setChallengesOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [chatFriend, setChatFriend] = useState(null)
   const [openMenu, setOpenMenu] = useState(null) // friend.id with open menu
@@ -311,9 +318,12 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
     <div className="screen" ref={screenRef} style={swipeStyle} onClick={() => openMenu && setOpenMenu(null)}>
       <div className="row between" style={{ alignItems: 'center', margin: '0 0 14px' }}>
         <h1 className="h1" style={{ margin: '4px 0 0' }}>Общение</h1>
-        <button className="btn" style={{ width: 'auto', height: 40, padding: '0 16px', fontSize: 14 }} onClick={() => setAddOpen(true)}>
-          ＋ По ID
-        </button>
+        <div className="row gap8">
+          <button className="iconbtn" onClick={() => setChallengesOpen(true)} aria-label="Челленджи" title="Челленджи">🏁</button>
+          <button className="btn" style={{ width: 'auto', height: 40, padding: '0 16px', fontSize: 14 }} onClick={() => setAddOpen(true)}>
+            ＋ По ID
+          </button>
+        </div>
       </div>
 
       <div className="seg" style={{ marginBottom: 16, overflowX: 'auto' }}>
@@ -504,6 +514,14 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
       })}
 
       </>)}
+
+      {challengesOpen && (
+        <LazyBoundary onClose={() => setChallengesOpen(false)}>
+          <Suspense fallback={null}>
+            <ChallengesScreen onClose={() => setChallengesOpen(false)} />
+          </Suspense>
+        </LazyBoundary>
+      )}
 
       {addOpen && <AddFriendSheet onClose={() => setAddOpen(false)} onSent={reload} />}
 

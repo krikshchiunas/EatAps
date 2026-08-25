@@ -10,6 +10,9 @@
 // сахаров; строгого сравнения с лимитом ВОЗ у сахара нет.
 // ─────────────────────────────────────────────────────────────────────────────
 import { sumDay, freeSugarShare, sumAdvanced, satFatLimit } from './nutrition.js'
+import { createTargetResolver, weightSummary, activitySummary } from './body.js'
+import { buildInsights } from './insights.js'
+import { normalizeName } from './text.js'
 import { keyOf, fromKey, addDays } from './date.js'
 
 export const PERIODS = [
@@ -55,9 +58,8 @@ const round1 = (n) => Math.round(n * 10) / 10
 
 // Нормализация имени для аналитики: регистр, ё→е, лишние пробелы.
 // В интерфейсе показываем человекочитаемое имя (самое частое написание).
-export function normalizeName(s) {
-  return (s || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim()
-}
+// Реализация — в text.js: её же используют корреляции и библиотека избранного.
+export { normalizeName }
 
 const hasMeals = (day) => Boolean(day && Array.isArray(day.meals) && day.meals.length > 0)
 
@@ -92,13 +94,60 @@ export function dayNutrients(meals = []) {
   }
 }
 
-// Цель по нутриенту из профиля. Приводим к конечному числу > 0, иначе null
-// (аналитика покажет только факт). У сахара/сложных углеводов/качества белка
-// пользовательской цели нет вовсе — не сравниваем оценку с нормой как с
-// достоверными данными. У насыщенных жиров цель считается отдельно от общей
-// нормы жиров (см. satFatLimit).
-function targetFor(key, profile) {
-  const t = profile?.targets
+// ── Учёт дня в статистике ────────────────────────────────────────────────────
+// Самая частая причина вранья в статистике — не ошибка расчёта, а лень: человек
+// записал завтрак и бросил. Такой день тянет средние вниз и превращает
+// аналитику в фикцию. Поэтому:
+//   • day.statsExcluded — человек сам сказал «этот день не считать»;
+//   • день с записями, но с калориями сильно ниже цели, по умолчанию НЕ идёт в
+//     статистику, пока человек не подтвердит (day.statsConfirmed).
+// Продукты дня при этом не трогаются: на самом дне они остаются видны.
+const LOW_LOG_RATIO = 0.4
+
+// calTarget — цель ИМЕННО ЭТОГО дня (вес и активность дня, см. lib/body.js).
+// Без цели по калориям судить не о чем — не флагуем.
+export function isLowLogged(day, profile, calTarget) {
+  if (!hasMeals(day)) return false
+  const explicit = Number(calTarget)
+  const cal = Number.isFinite(explicit) && explicit > 0 ? explicit : Number(profile?.targets?.calories)
+  if (!Number.isFinite(cal) || cal <= 0) return false
+  return dayNutrients(day.meals).kcal < cal * LOW_LOG_RATIO
+}
+
+export function countsInStats(day, profile, calTarget) {
+  if (!hasMeals(day)) return false
+  if (day.statsExcluded) return false
+  if (isLowLogged(day, profile, calTarget) && !day.statsConfirmed) return false
+  return true
+}
+
+// Контекст расчёта: профиль + цели, пересчитанные на каждый день из веса и
+// активности этого дня. Создаётся один раз на computeStats — внутри кэш, так
+// что 365 дней не превращаются в 365 полных пересчётов Mifflin-St Jeor.
+function makeCtx(days, profile) {
+  const resolve = createTargetResolver(days, profile)
+  return {
+    profile,
+    targetsOf: (key, day) => resolve(key, day),
+    calTargetOf: (key, day) => {
+      const n = Number(resolve(key, day)?.calories)
+      return Number.isFinite(n) && n > 0 ? n : null
+    },
+  }
+}
+
+// Учитывается ли день — с целью, посчитанной на этот день.
+function counts(day, key, ctx) {
+  return countsInStats(day, ctx.profile, ctx.calTargetOf(key, day))
+}
+
+// Цель по нутриенту из НАБОРА ЦЕЛЕЙ (targets), посчитанного на конкретный день.
+// Приводим к конечному числу > 0, иначе null (аналитика покажет только факт).
+// У сахара/сложных углеводов/качества белка пользовательской цели нет вовсе —
+// не сравниваем оценку с нормой как с достоверными данными. У насыщенных жиров
+// цель считается отдельно от общей нормы жиров (см. satFatLimit).
+function targetFor(key, targets) {
+  const t = targets
   if (!t || key === 'sugar' || key === 'complexCarb' || key === 'qualityProtein') return null
   if (key === 'satFat') {
     const cal = Number(t.calories)
@@ -146,13 +195,14 @@ function weekStartKey(key) {
   return keyOf(d)
 }
 
-// Средний дневной нутриент по набору дат (только дни с записями). Нет данных → null.
-function avgOver(days, keys, nutKey) {
+// Средний дневной нутриент по набору дат (только дни, учитываемые в статистике).
+// Нет данных → null.
+function avgOver(days, keys, nutKey, ctx) {
   let sum = 0
   let n = 0
   for (const k of keys) {
     const day = days[k]
-    if (!hasMeals(day)) continue
+    if (!counts(day, k, ctx)) continue
     sum += dayNutrients(day.meals)[nutKey]
     n += 1
   }
@@ -160,9 +210,9 @@ function avgOver(days, keys, nutKey) {
 }
 
 // Тренд относительно предыдущего равного периода.
-function trendOf(days, keys, prevKeys, nutKey) {
-  const cur = avgOver(days, keys, nutKey)
-  const prev = avgOver(days, prevKeys, nutKey)
+function trendOf(days, keys, prevKeys, nutKey, ctx) {
+  const cur = avgOver(days, keys, nutKey, ctx)
+  const prev = avgOver(days, prevKeys, nutKey, ctx)
   if (cur == null || prev == null) return { delta: null, pct: null, dir: 'flat', prev }
   const delta = cur - prev
   const pct = prev !== 0 ? (delta / prev) * 100 : null
@@ -171,19 +221,22 @@ function trendOf(days, keys, prevKeys, nutKey) {
 }
 
 // Разбиение периода на бакеты для графика (день / неделя / месяц).
-// value бакета — средний дневной нутриент внутри бакета (по дням с записями),
+// value бакета — средний дневной нутриент внутри бакета (по учтённым дням),
 // чтобы линия цели (дневная) оставалась сопоставимой на всех периодах.
-function buildBuckets(days, keys, gran, nutKey) {
+// target бакета — средняя цель тех же дней: цель больше не константа, она
+// зависит от веса и активности каждого дня (см. lib/body.js).
+function buildBuckets(days, keys, gran, nutKey, ctx) {
   if (gran === 'day') {
     return keys.map((k) => {
       const day = days[k]
-      const logged = hasMeals(day)
+      const logged = counts(day, k, ctx)
       const d = fromKey(k)
       return {
         id: k,
         label: keys.length <= 7 ? DOW_SHORT[d.getDay()] : String(d.getDate()),
         full: `${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`,
         value: logged ? dayNutrients(day.meals)[nutKey] : null,
+        target: logged ? targetFor(nutKey, ctx.targetsOf(k, day)) : null,
         loggedDays: logged ? 1 : 0,
       }
     })
@@ -201,11 +254,18 @@ function buildBuckets(days, keys, gran, nutKey) {
     .map(([gid, memberKeys]) => {
       let sum = 0
       let logged = 0
+      let tSum = 0
+      let tN = 0
       for (const k of memberKeys) {
         const day = days[k]
-        if (!hasMeals(day)) continue
+        if (!counts(day, k, ctx)) continue
         sum += dayNutrients(day.meals)[nutKey]
         logged += 1
+        const t = targetFor(nutKey, ctx.targetsOf(k, day))
+        if (t != null) {
+          tSum += t
+          tN += 1
+        }
       }
       let label
       let full
@@ -218,19 +278,32 @@ function buildBuckets(days, keys, gran, nutKey) {
         label = MONTH_SHORT[m - 1]
         full = `${MONTH_SHORT[m - 1]} ${y}`
       }
-      return { id: gid, label, full, value: logged ? sum / logged : null, loggedDays: logged }
+      return {
+        id: gid,
+        label,
+        full,
+        value: logged ? sum / logged : null,
+        target: tN ? tSum / tN : null,
+        loggedDays: logged,
+      }
     })
 }
 
 // Полная статистика по одному нутриенту за период.
-function nutrientStats(nutDef, days, keys, prevKeys, gran, profile) {
+// Каждый день сравнивается со СВОЕЙ целью (вес и активность этого дня).
+// Для подписи «Цель» и пунктирной линии берём среднюю цель по учтённым дням —
+// одно число на график; если цели за период менялись, помечаем targetVaried,
+// чтобы UI не выдавал среднее за жёсткую константу.
+function nutrientStats(nutDef, days, keys, prevKeys, gran, ctx, today) {
   const { key } = nutDef
-  const target = targetFor(key, profile)
-  const daily = [] // значения по дням с записями
+  const daily = [] // значения по дням, учитываемым в статистике
+  const dayTargets = [] // цель того же дня (может быть null)
+
   for (const k of keys) {
     const day = days[k]
-    if (!hasMeals(day)) continue
+    if (!counts(day, k, ctx)) continue
     daily.push(dayNutrients(day.meals)[key])
+    dayTargets.push(targetFor(key, ctx.targetsOf(k, day)))
   }
 
   const loggedDays = daily.length
@@ -243,24 +316,41 @@ function nutrientStats(nutDef, days, keys, prevKeys, gran, profile) {
   let daysUnder = 0
   let daysOver = 0
   let devSum = 0
-  if (target != null) {
-    for (const v of daily) {
-      const st = statusOf(v, target, key)
-      if (st === 'in') daysIn += 1
-      else if (st === 'under') daysUnder += 1
-      else if (st === 'over') daysOver += 1
-      devSum += v - target
-    }
+  let devN = 0
+  for (let i = 0; i < daily.length; i++) {
+    const t = dayTargets[i]
+    if (t == null) continue
+    const st = statusOf(daily[i], t, key)
+    if (st === 'in') daysIn += 1
+    else if (st === 'under') daysUnder += 1
+    else if (st === 'over') daysOver += 1
+    devSum += daily[i] - t
+    devN += 1
   }
 
-  const series = buildBuckets(days, keys, gran, key).map((b) => ({
+  // Представительная цель периода. Нет учтённых дней → берём цель на сегодня,
+  // чтобы пустой график всё равно показал ориентир.
+  const valid = dayTargets.filter((t) => t != null)
+  const target = valid.length
+    ? valid.reduce((a, v) => a + v, 0) / valid.length
+    : targetFor(key, ctx.targetsOf(today, days[today]))
+  const tMin = valid.length ? Math.min(...valid) : null
+  const tMax = valid.length ? Math.max(...valid) : null
+  // «Цель менялась» — если разброс больше 1% от среднего (округления не в счёт).
+  const targetVaried = valid.length > 1 && target > 0 && (tMax - tMin) / target > 0.01
+
+  const series = buildBuckets(days, keys, gran, key, ctx).map((b) => ({
     ...b,
-    status: b.value == null ? 'none' : statusOf(b.value, target, key),
+    // Статус точки — относительно цели её собственных дней, а не средней.
+    status: b.value == null ? 'none' : statusOf(b.value, b.target ?? target, key),
   }))
 
   return {
     ...nutDef,
     target,
+    targetVaried,
+    targetMin: tMin,
+    targetMax: tMax,
     loggedDays,
     total,
     avg,
@@ -269,15 +359,15 @@ function nutrientStats(nutDef, days, keys, prevKeys, gran, profile) {
     daysIn,
     daysUnder,
     daysOver,
-    avgDeviation: target != null && loggedDays ? devSum / loggedDays : null,
-    trend: trendOf(days, keys, prevKeys, key),
+    avgDeviation: devN ? devSum / devN : null,
+    trend: trendOf(days, keys, prevKeys, key, ctx),
     series,
     gran,
   }
 }
 
 // Рейтинг продуктов и источники нутриентов за период.
-function productStats(days, keys) {
+function productStats(days, keys, ctx) {
   const groups = new Map()
   let totalMeals = 0
   let sugarEstimated = false // хоть один приём без реального поля sugar
@@ -285,7 +375,7 @@ function productStats(days, keys) {
 
   for (const k of keys) {
     const day = days[k]
-    if (!hasMeals(day)) continue
+    if (!counts(day, k, ctx)) continue
     for (const m of day.meals) {
       const norm = normalizeName(m.name)
       if (!norm) continue
@@ -453,7 +543,11 @@ const habitOf = (p) => (p ? { name: p.name, emoji: p.emoji, count: p.count, last
 export function foodHabits(days) {
   const D = days && typeof days === 'object' ? days : {}
   const keys = Object.keys(D).sort()
-  const { frequent, totalMeals } = productStats(D, keys)
+  // Профиля здесь нет — привычки считаются по всей истории, без целей. Значит,
+  // эвристика «день внесён не полностью» не работает (ей нужна цель), а вот
+  // явное «не учитывать этот день» уважается: человек сказал не считать день —
+  // он не должен влиять и на «чаще всего ем».
+  const { frequent, totalMeals } = productStats(D, keys, makeCtx(D, null))
 
   let most = null
   for (const p of frequent) {
@@ -476,6 +570,64 @@ export function foodHabits(days) {
   return { most: habitOf(most), rare: habitOf(rare), products: frequent.length, totalMeals }
 }
 
+// ── Недельные цели ────────────────────────────────────────────────────────────
+// Дневная цель — жёсткая рамка: перебрал на дне рождения, и день «провален»,
+// даже если вся неделя ровная. Организм считает иначе — по балансу за неделю.
+// Поэтому здесь мы смотрим на неделю целиком: средний день недели против
+// средней цели тех же дней и накопленный за неделю перебор/недобор.
+//
+// Неполные недели (в начале периода или текущая) помечаются partial — сравнивать
+// их итог с полной неделей нельзя, и UI обязан это показывать.
+function weeklyStats(days, keys, ctx, today) {
+  const groups = new Map()
+  for (const k of keys) {
+    const gid = weekStartKey(k)
+    if (!groups.has(gid)) groups.set(gid, [])
+    groups.get(gid).push(k)
+  }
+
+  return [...groups.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([gid, memberKeys]) => {
+      let kcal = 0
+      let tSum = 0
+      let tN = 0
+      let logged = 0
+      let balance = 0 // сумма (факт − цель) по учтённым дням
+      for (const k of memberKeys) {
+        const day = days[k]
+        if (!counts(day, k, ctx)) continue
+        const v = dayNutrients(day.meals).kcal
+        kcal += v
+        logged += 1
+        const t = ctx.calTargetOf(k, day)
+        if (t != null) {
+          tSum += t
+          tN += 1
+          balance += v - t
+        }
+      }
+      const avg = logged ? kcal / logged : null
+      const avgTarget = tN ? tSum / tN : null
+      const d = fromKey(gid)
+      const endKey = addDays(gid, 6)
+      return {
+        id: gid,
+        start: gid,
+        end: endKey,
+        label: `${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`,
+        daysInPeriod: memberKeys.length,
+        loggedDays: logged,
+        // Неделя неполная: обрезана границей периода или ещё идёт.
+        partial: memberKeys.length < 7 || endKey > today,
+        avgKcal: avg,
+        avgTarget,
+        balance: tN ? balance : null,
+        status: avg != null && avgTarget != null ? statusOf(avg, avgTarget, 'kcal') : 'none',
+      }
+    })
+}
+
 // ── Главная точка входа: собрать всю статистику за период ─────────────────────
 export function computeStats(days, profile, periodKey, today = keyOf()) {
   const D = days && typeof days === 'object' ? days : {} // не падаем на null/undefined
@@ -483,19 +635,33 @@ export function computeStats(days, profile, periodKey, today = keyOf()) {
   const keys = periodKeys(period.days, today)
   const prevKeys = periodKeys(period.days, addDays(keys[0], -1))
 
-  const loggedKeys = keys.filter((k) => hasMeals(D[k]))
+  const ctx = makeCtx(D, profile)
+
+  const loggedKeys = keys.filter((k) => counts(D[k], k, ctx))
   const loggedDays = loggedKeys.length
+
+  // Дни с записями, которые НЕ вошли в статистику — чтобы UI мог явно
+  // объяснить расхождение, а не молча занизить «заполнено дней».
+  let excludedDays = 0
+  let pendingLowDays = 0
+  for (const k of keys) {
+    const d = D[k]
+    if (!hasMeals(d)) continue
+    if (d.statsExcluded) excludedDays += 1
+    else if (isLowLogged(d, profile, ctx.calTargetOf(k, d)) && !d.statsConfirmed) pendingLowDays += 1
+  }
 
   const nutrients = {}
   for (const def of NUTRIENTS) {
-    nutrients[def.key] = nutrientStats(def, D, keys, prevKeys, period.gran, profile)
+    nutrients[def.key] = nutrientStats(def, D, keys, prevKeys, period.gran, ctx, today)
   }
 
-  const products = productStats(D, keys)
+  const products = productStats(D, keys, ctx)
   nutrients.sugar.estimated = products.sugarEstimated
 
-  // Сводка «Общая динамика».
-  const calTarget = targetFor('kcal', profile)
+  // Сводка «Общая динамика». Отклонение лучшего/худшего дня считаем от цели
+  // ТОГО дня — иначе активный день с большей целью выглядел бы «перебором».
+  const calTarget = nutrients.kcal.target
   let goalHitPct = null
   let daysInTarget = null
   let bestDay = null
@@ -506,9 +672,11 @@ export function computeStats(days, profile, periodKey, today = keyOf()) {
     goalHitPct = Math.round((kc.daysIn / loggedDays) * 100)
     for (const k of loggedKeys) {
       const kcal = dayNutrients(D[k].meals).kcal
-      const dev = kcal - calTarget
-      if (!bestDay || Math.abs(dev) < Math.abs(bestDay.dev)) bestDay = { key: k, kcal, dev }
-      if (!worstDay || Math.abs(dev) > Math.abs(worstDay.dev)) worstDay = { key: k, kcal, dev }
+      const t = ctx.calTargetOf(k, D[k])
+      if (t == null) continue
+      const dev = kcal - t
+      if (!bestDay || Math.abs(dev) < Math.abs(bestDay.dev)) bestDay = { key: k, kcal, dev, target: t }
+      if (!worstDay || Math.abs(dev) > Math.abs(worstDay.dev)) worstDay = { key: k, kcal, dev, target: t }
     }
   }
 
@@ -525,6 +693,8 @@ export function computeStats(days, profile, periodKey, today = keyOf()) {
     bestDay,
     worstDay,
     calTarget,
+    // Цель по калориям менялась внутри периода (менялся вес или активность дней).
+    calTargetVaried: nutrients.kcal.targetVaried,
   }
 
   return {
@@ -534,10 +704,24 @@ export function computeStats(days, profile, periodKey, today = keyOf()) {
     totalDays: keys.length,
     totalMeals: products.totalMeals,
     sugarEstimated: products.sugarEstimated,
+    excludedDays,
+    pendingLowDays,
     hasData: loggedDays > 0,
     single: loggedDays === 1, // особый случай: одного дня мало для трендов
     nutrients,
     products,
     summary,
+    // Тело и режим: вес и активность живут по дням, поэтому их своды считаются
+    // по ВСЕМ дням периода, а не только по тем, где заполнена еда — взвесился
+    // человек и не поел — вес всё равно факт.
+    body: {
+      weight: weightSummary(D, keys, profile),
+      activity: activitySummary(D, keys, profile),
+    },
+    // Недельный срез: средний день недели против средней цели той же недели.
+    weekly: weeklyStats(D, keys, ctx, today),
+    // Корреляции «еда ↔ самочувствие». Передаём готовые суммы, чтобы insights.js
+    // не зависел от stats.js (иначе вышла бы циклическая зависимость модулей).
+    insights: buildInsights(loggedKeys.map((k) => ({ key: k, day: D[k], nut: dayNutrients(D[k].meals) }))),
   }
 }

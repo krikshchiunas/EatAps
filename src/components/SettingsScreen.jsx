@@ -17,18 +17,26 @@ import { lazyWithReload } from '../lib/lazyWithReload.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import {
   Group, Row,
-  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel,
+  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel, PromoPanel,
 } from './SettingsPanels.jsx'
+import AITonePanel from './AITonePanel.jsx'
+import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiPrompt.js'
 
 // AuthSheet тянет тяжёлый Web3-стек — грузим только когда его открывают.
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
+// Экран тренера нужен меньшинству — не тянем его в стартовый бандл.
+const CoachScreen = lazyWithReload(() => import('./CoachScreen.jsx'))
 
 export default function SettingsScreen({ onClose, onOpenFriends }) {
-  const { user, supabaseEnabled, theme } = useStore()
+  const { user, supabaseEnabled, theme, prefs, subscription } = useStore()
   const [panel, setPanel] = useState(null) // 'account' | 'privacy' | ...
   const [authOpen, setAuthOpen] = useState(false)
   const close = () => setPanel(null)
 
+  const toneLabel = (TONES[prefs?.[TONE_PREF]] || TONES[DEFAULT_TONE]).label
+  const promoValue = subscription?.via === 'promo'
+    ? (subscription.tier === 'AI_PLUS' ? 'AI+ активен' : 'AI активен')
+    : null
   const themeLabel = theme === 'light' ? 'Светлая' : theme === 'dark' ? 'Тёмная' : 'Как в системе'
   const accountValue = supabaseEnabled
     ? (user ? (user.email || user.phone || 'Вход выполнен') : 'Не выполнен')
@@ -53,6 +61,11 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
         <Row label="Уведомления" onClick={() => setPanel('notifications')} />
       </Group>
 
+      <Group title="AI Assistant">
+        <Row label="Тон ассистента" value={toneLabel} onClick={() => setPanel('aiTone')} />
+        <Row label="Промокод" value={promoValue} onClick={() => setPanel('promo')} />
+      </Group>
+
       <Group title="Оформление">
         <Row label="Тема" value={themeLabel} onClick={() => setPanel('appearance')} />
       </Group>
@@ -62,6 +75,8 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       </Group>
 
       <Group title="О приложении">
+        <Row label="Тренер и клиенты" onClick={() => setPanel('coach')} />
+        <Row label="Поддержка" onClick={() => setPanel('support')} />
         <Row label="Помощь и правовая информация" onClick={() => setPanel('about')} />
       </Group>
 
@@ -72,8 +87,18 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       {panel === 'account' && <AccountPanel onClose={close} onOpenAuth={() => setAuthOpen(true)} />}
       {panel === 'privacy' && <PrivacyPanel onClose={close} onOpenFriends={onOpenFriends} />}
       {panel === 'notifications' && <NotificationsPanel onClose={close} />}
+      {panel === 'aiTone' && <AITonePanel onClose={close} />}
+      {panel === 'promo' && <PromoPanel onClose={close} />}
       {panel === 'appearance' && <AppearancePanel onClose={close} />}
       {panel === 'data' && <DataPanel onClose={close} />}
+      {panel === 'coach' && (
+        <LazyBoundary onClose={close}>
+          <Suspense fallback={null}>
+            <CoachScreen onClose={close} />
+          </Suspense>
+        </LazyBoundary>
+      )}
+      {panel === 'support' && <SupportPanel onClose={close} />}
       {panel === 'about' && <AboutPanel onClose={close} />}
 
       {authOpen && (

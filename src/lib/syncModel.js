@@ -42,7 +42,15 @@ export function blankDay() {
   return { meals: [], mealSections: [], mood: null, wellbeing: [], note: '' }
 }
 
-export const DAY_SCALARS = ['mood', 'wellbeing', 'note']
+// Скаляры дня — поля, которые версионируются каждое своим временем в
+// meta.dayFieldTs. Правка веса на телефоне не должна конфликтовать с отметкой
+// самочувствия на компьютере, поэтому у каждого поля метка отдельная.
+//
+// weight / activity — вес и режим ЭТОГО дня: цели по калориям пересчитываются
+// на каждый день из них (см. lib/body.js).
+// statsExcluded / statsConfirmed — решение человека, учитывать ли день в
+// статистике (см. lib/stats.js).
+export const DAY_SCALARS = ['mood', 'wellbeing', 'note', 'weight', 'activity', 'statsExcluded', 'statsConfirmed']
 
 // ── Ключи тумбстоунов ────────────────────────────────────────────────────────
 export const tombMeal = (date, id) => `d:${date}:m:${id}`
@@ -84,6 +92,22 @@ function normalizeEntities(list) {
   return out
 }
 
+// Вес дня: только осмысленное число. Мусор и опечатки («7 кг», «750») привели бы
+// к бессмысленной цели по калориям, поэтому не сохраняем их вовсе.
+const WEIGHT_MIN = 20
+const WEIGHT_MAX = 400
+const ACTIVITY_KEYS = ['sedentary', 'light', 'moderate', 'high']
+
+function normWeight(v) {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= WEIGHT_MIN && n <= WEIGHT_MAX ? Math.round(n * 10) / 10 : null
+}
+
+function normActivity(v) {
+  return ACTIVITY_KEYS.includes(v) ? v : null
+}
+
 function normalizeDay(raw) {
   const d = isObj(raw) ? raw : {}
   return {
@@ -93,6 +117,11 @@ function normalizeDay(raw) {
     mood: d.mood ?? null,
     wellbeing: arr(d.wellbeing).filter((t) => typeof t === 'string'),
     note: str(d.note),
+    weight: normWeight(d.weight),
+    activity: normActivity(d.activity),
+    // Флаги учёта в статистике: строго булевы, чтобы не было «то ли есть, то ли нет».
+    statsExcluded: d.statsExcluded === true,
+    statsConfirmed: d.statsConfirmed === true,
   }
 }
 
@@ -229,6 +258,10 @@ function mergeDay(base, inc, date, baseFieldTs, incFieldTs, tombstones) {
   day.wellbeing = arr(day.wellbeing)
   day.note = str(day.note)
   day.mood = day.mood ?? null
+  day.weight = normWeight(day.weight)
+  day.activity = normActivity(day.activity)
+  day.statsExcluded = day.statsExcluded === true
+  day.statsConfirmed = day.statsConfirmed === true
 
   return { day, fieldTs }
 }
@@ -307,6 +340,11 @@ export function mergeState(baseRaw, incomingRaw) {
   }
 }
 
+// День считается пустым, только если в нём нет НИЧЕГО из того, что человек мог
+// внести. Вес и активность здесь обязательны: взвесился, но не поел — это
+// заполненный день, и выбросить его значило бы потерять точку графика веса.
+// Пометка «не учитывать в статистике» тоже удерживает день: она осмысленна
+// ровно для дня, где еда есть, но само решение стирать нельзя.
 export function isDayEmpty(day) {
   const d = day || {}
   return (
@@ -314,7 +352,10 @@ export function isDayEmpty(day) {
     !(d.mealSections || []).length &&
     d.mood == null &&
     !(d.wellbeing || []).length &&
-    !str(d.note).trim()
+    !str(d.note).trim() &&
+    d.weight == null &&
+    d.activity == null &&
+    d.statsExcluded !== true
   )
 }
 

@@ -196,7 +196,13 @@ with checks(порядок, проверка, ok, деталь) as (
     ),
     'триггер apply_block снимает дружбу'
 
-  union all select 30, 'сообщения по-прежнему только между друзьями',
+  union all select 30, 'user_brief не раздаёт public_id посторонним',
+    (select pg_get_functiondef(p.oid) like '%coach_links%'
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='user_brief'),
+    'код добавления в друзья виден только владельцу и связанному тренеру'
+
+  union all select 31, 'сообщения по-прежнему только между друзьями',
     exists (select 1 from pg_policies
       where schemaname='public' and tablename='messages' and cmd='INSERT'
         and with_check like '%is_friend_with%'),

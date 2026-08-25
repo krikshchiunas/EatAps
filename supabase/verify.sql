@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- EatAps — самопроверка после миграции account_sync.
+-- EatAps — самопроверка базы после установки и миграций.
 --
 -- Вставить целиком в Supabase SQL Editor → Run. Ничего не меняет, только читает.
 -- Возвращает таблицу: каждая строка — одна проверка со статусом ✔ или ✖.
@@ -393,6 +393,253 @@ with checks(порядок, проверка, ok, деталь) as (
       from storage.buckets where id = 'post-images'
     ), false),
     'иначе хранилище проекта превращается в бесплатный файлообменник'
+
+  -- 12. Модерация: баны и обращения в поддержку
+  union all
+  select 55, 'таблица bans создана и защищена RLS',
+    coalesce((select relrowsecurity from pg_class where oid = 'public.bans'::regclass), false),
+    'банов в базе: ' || coalesce((select count(*)::text from public.bans), '—')
+
+  union all
+  select 56, 'клиент не может выдать или снять бан сам себе',
+    not exists (
+      select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'bans' and cmd in ('INSERT', 'UPDATE', 'DELETE')
+    ),
+    'политик записи быть не должно вовсе — пишет только service_role'
+
+  union all
+  select 57, 'is_banned доступен authenticated и закрыт для анонима',
+    has_function_privilege('authenticated', 'public.is_banned(uuid)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.is_banned(uuid)', 'EXECUTE'),
+    ''
+
+  union all
+  select 58, 'support_messages: клиент не может писать в обход лимита',
+    coalesce((select relrowsecurity from pg_class where oid = 'public.support_messages'::regclass), false)
+      and not exists (
+        select 1 from pg_policies
+        where schemaname = 'public' and tablename = 'support_messages' and cmd = 'INSERT'
+      ),
+    'вставка только через api/support.js, где проверяется «раз в час»'
+
+  union all
+  select 59, 'индекс под проверку частоты обращений на месте',
+    exists (select 1 from pg_indexes where schemaname='public' and indexname='support_user_time_idx'),
+    'без него лимит превращается в скан всей таблицы'
+
+  -- 13. Роль тренера
+  union all
+  select 60, 'таблицы coaches и coach_links созданы',
+    to_regclass('public.coaches') is not null and to_regclass('public.coach_links') is not null,
+    'тренеров одобрено: ' || coalesce((select count(*)::text from public.coaches), '—')
+
+  union all
+  select 61, 'пригласить тренера может только сам клиент',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='coach_links' and cmd='INSERT'
+        and with_check like '%auth.uid() = client%'
+    ),
+    'иначе чужой человек подписался бы на ваш дневник сам'
+
+  union all
+  select 62, 'приглашать можно только одобренного тренера',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='coach_links' and cmd='INSERT'
+        and with_check like '%coaches%'
+    ),
+    'проверка членства в coaches должна быть в политике, а не в интерфейсе'
+
+  union all
+  select 63, 'политика чтения app_state покрывает себя, друзей и тренера',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='app_state' and cmd='SELECT'
+        and qual like '%friendships%' and qual like '%coach_links%'
+    ),
+    'права друзей не должны потеряться при добавлении тренера'
+
+  union all
+  select 64, 'day_comments: писать может только автор от своего имени',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='day_comments' and cmd='INSERT'
+        and with_check like '%auth.uid() = author%'
+    ),
+    ''
+
+  -- 14. Челленджи
+  union all
+  select 65, 'таблицы челленджей созданы',
+    to_regclass('public.challenges') is not null
+      and to_regclass('public.challenge_members') is not null
+      and to_regclass('public.challenge_days') is not null,
+    'челленджей: ' || coalesce((select count(*)::text from public.challenges), '—')
+
+  union all
+  select 66, 'in_challenge существует — без неё политики зациклятся',
+    exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='in_challenge'
+    ),
+    'политика на challenge_members читала бы саму себя'
+
+  union all
+  select 67, 'отметку о зачёте можно поставить только себе',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='challenge_days' and cmd='INSERT'
+        and with_check like '%auth.uid() = user_id%'
+    ),
+    'иначе очки проставлялись бы за соседа'
+
+  union all
+  select 68, 'триггер не даёт засчитывать дни вне срока челленджа',
+    exists (select 1 from pg_trigger where tgname = 'challenge_day_guard' and not tgisinternal),
+    'без него очки добирались бы задним числом за пределами окна'
+
+  union all
+  select 69, 'challenge_board закрыт для анонима',
+    has_function_privilege('authenticated', 'public.challenge_board(uuid)', 'EXECUTE')
+      and not has_function_privilege('anon', 'public.challenge_board(uuid)', 'EXECUTE'),
+    ''
+
+  -- 12. Расход токенов AI
+  union all
+  select 70, 'таблица ai_usage существует',
+    exists (select 1 from information_schema.tables
+      where table_schema='public' and table_name='ai_usage'),
+    'без неё ассистент не запустится: лимит некуда писать'
+
+  union all
+  select 71, 'на ai_usage включён RLS',
+    coalesce((select relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='public' and c.relname='ai_usage'), false),
+    ''
+
+  union all
+  select 72, 'клиент может читать только свою строку расхода',
+    exists (select 1 from pg_policies
+      where schemaname='public' and tablename='ai_usage' and cmd='SELECT'
+        and qual like '%auth.uid() = user_id%'),
+    ''
+
+  union all
+  select 73, 'клиенту нельзя писать в ai_usage',
+    not exists (select 1 from pg_policies
+      where schemaname='public' and tablename='ai_usage' and cmd in ('INSERT','UPDATE','ALL')),
+    'иначе месячный лимит обнулялся бы одним запросом из консоли браузера'
+
+  union all
+  select 74, 'RPC ai_usage_add создан',
+    exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='public' and p.proname='ai_usage_add'),
+    'атомарный инкремент: без него параллельные запросы затирают расход'
+
+  union all
+  -- Права спрашиваем через oid из pg_proc, а не по строке сигнатуры:
+  -- has_function_privilege('...текст...') БРОСАЕТ ошибку, если функции нет, и
+  -- тогда вся самопроверка падает вместо того, чтобы показать ✖ в одной строке.
+  select 75, 'ai_usage_add закрыт для клиента — вызывает только сервер',
+    coalesce((
+      select not has_function_privilege('anon', p.oid, 'EXECUTE')
+         and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'ai_usage_add'
+      limit 1
+    ), false),
+    ''
+
+  union all
+  -- Ловушка обновления: create or replace НЕ заменяет функцию с другим числом
+  -- аргументов, а создаёт вторую перегрузку рядом. Тогда вызов с тремя
+  -- параметрами становится неоднозначным, и учёт расхода падает целиком.
+  select 76, 'ai_usage_add существует ровно в одном экземпляре',
+    (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'ai_usage_add') = 1,
+    'найдено версий: ' || (select count(*)::text from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'ai_usage_add')
+
+  -- 13. Промокоды
+  union all
+  select 77, 'таблицы promo_codes и promo_grants существуют',
+    (select count(*) from information_schema.tables
+      where table_schema = 'public' and table_name in ('promo_codes','promo_grants')) = 2,
+    ''
+
+  union all
+  select 78, 'на обеих таблицах промокодов включён RLS',
+    (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relname in ('promo_codes','promo_grants')
+        and c.relrowsecurity) = 2,
+    ''
+
+  union all
+  select 79, 'список кодов закрыт от клиента наглухо',
+    not exists (select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'promo_codes'),
+    'при любой политике SELECT все действующие коды выгружались бы одним запросом'
+
+  union all
+  select 80, 'свои выдачи человек видит, чужие — нет',
+    exists (select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'promo_grants' and cmd = 'SELECT'
+        and qual like '%auth.uid() = user_id%')
+    and not exists (select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'promo_grants'
+        and cmd in ('INSERT','UPDATE','ALL')),
+    'выдачу создаёт только redeem_promo'
+
+  union all
+  select 81, 'число гашений не может превысить лимит кода',
+    exists (select 1 from pg_constraint
+      where conname = 'promo_codes_uses_within_limit'),
+    'ограничение БД страхует на случай ошибки в функции гашения'
+
+  union all
+  select 82, 'redeem_promo доступен вошедшему и закрыт для анонима',
+    coalesce((
+      select has_function_privilege('authenticated', p.oid, 'EXECUTE')
+         and not has_function_privilege('anon', p.oid, 'EXECUTE')
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'redeem_promo'
+      limit 1
+    ), false),
+    ''
+
+  -- 14. Панель управления доступом
+  union all
+  select 83, 'представления admin_subscriptions и admin_promo_codes созданы',
+    (select count(*) from information_schema.views
+      where table_schema = 'public'
+        and table_name in ('admin_subscriptions','admin_promo_codes')) = 2,
+    ''
+
+  union all
+  -- Самая опасная строка во всей самопроверке: представление читает auth.users,
+  -- и одна лишняя выдача прав превращает его в выгрузку почт всех пользователей.
+  select 84, 'панель закрыта от клиента — почты пользователей не утекают',
+    not exists (
+      select 1 from information_schema.role_table_grants
+      where table_schema = 'public'
+        and table_name in ('admin_subscriptions','admin_promo_codes')
+        and grantee in ('anon','authenticated')
+    ),
+    'иначе любой вошедший выгрузит список всех пользователей с почтами'
+
+  union all
+  select 85, 'issue_promo закрыт для клиента — коды выпускает только владелец',
+    coalesce((
+      select not has_function_privilege('anon', p.oid, 'EXECUTE')
+         and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'issue_promo'
+      limit 1
+    ), false),
+    'иначе пользователь выпишет себе AI+ на десять лет'
 )
 
 select

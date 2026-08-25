@@ -55,8 +55,13 @@ export default function StatsScreen({ onClose }) {
             <SourcesCard key={def.key} def={def} rows={stats.products.sources[def.key]} />
           ))}
           <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', margin: '4px 4px 0', lineHeight: 1.5 }}>
-            Средние и проценты считаются по дням с записями ({stats.loggedDays} из {stats.totalDays}).
+            Средние и проценты считаются по дням, учитываемым в статистике ({stats.loggedDays} из {stats.totalDays}).
             {stats.sugarEstimated && ' «Оценка сахара» рассчитана приблизительно из углеводов там, где сахар не указан отдельно, — это ориентир, а не точное количество.'}
+            {/* Числа обязаны сходиться: если день с едой не попал в средние,
+                человек должен видеть почему, а не гадать над расхождением. */}
+            {stats.pendingLowDays > 0 && ` Ещё ${stats.pendingLowDays} ${plural(stats.pendingLowDays, 'день ждёт', 'дня ждут', 'дней ждут')} вашего решения — калорий заметно меньше цели. Откройте такой день и подтвердите или пропустите его.`}
+            {stats.excludedDays > 0 && ` ${stats.excludedDays} ${plural(stats.excludedDays, 'день пропущен', 'дня пропущено', 'дней пропущено')} вручную.`}
+            {stats.summary.calTargetVaried && ' Цель по калориям за период менялась вместе с вашим весом и активностью дней — в подписях показано среднее значение цели.'}
           </p>
         </>
       )}

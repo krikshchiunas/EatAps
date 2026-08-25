@@ -1483,3 +1483,50 @@ begin
 end $$;
 
 alter table public.notifications replica identity full;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 24. Заделка стыка с миграцией тренеров (2026-08-23_moderation_and_coach)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Та миграция завела user_brief(uuid) → (public_id, name) и выдала EXECUTE
+-- всем authenticated. Сама по себе функция была почти безопасна: чтобы её
+-- позвать, нужен UUID собеседника, а взять его посторонний человек практически
+-- не мог.
+--
+-- Поиск людей из этого файла ломает ровно эту предпосылку: search_users отдаёт
+-- user_id любого пользователя по трём буквам имени. В паре с user_brief это
+-- превращается в выгрузку public_id всей базы, а public_id — код добавления в
+-- друзья. Именно его миграция 2026-08-09 делала неугадываемым, и обнулять ту
+-- работу побочным эффектом ленты нельзя.
+--
+-- Поэтому public_id здесь снова закрывается: его получают только тот, кому он
+-- принадлежит, и тренер с принятой связью — то есть те, для кого функция и
+-- писалась («для интерфейса тренера»). Имя остаётся доступным всем: оно и так
+-- публично после этой миграции.
+--
+-- Сигнатура и набор колонок не меняются, поэтому вызывающий код (на момент
+-- написания — отсутствующий) не ломается.
+create or replace function public.user_brief(p_user uuid)
+returns table (public_id text, name text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    case
+      when p_user = auth.uid() then p.public_id
+      when exists (
+        select 1 from public.coach_links cl
+        where cl.status = 'accepted' and cl.coach = auth.uid() and cl.client = p_user
+      ) then p.public_id
+      else null
+    end,
+    p.display_name
+  from public.profiles p
+  where p.user_id = p_user
+    and not public.is_blocked_between(p.user_id, auth.uid());
+$$;
+
+revoke all on function public.user_brief(uuid) from public, anon;
+grant execute on function public.user_brief(uuid) to authenticated;
