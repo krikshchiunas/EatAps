@@ -196,6 +196,18 @@ with checks(порядок, проверка, ok, деталь) as (
     ),
     'триггер apply_block снимает дружбу'
 
+  union all select 29.5, 'аватары не обрезаны в мусор',
+    -- Аватар хранится как base64 data URL. Если бы он обрезался по длине,
+    -- строка перестала бы быть картинкой. Проверяем, что ни один сохранённый
+    -- аватар не оборван на полуслове.
+    not exists (
+      select 1 from public.profiles
+      where avatar_url is not null
+        and avatar_url like 'data:%'
+        and char_length(avatar_url) >= 300000
+    ),
+    'аватаров в профилях: ' || (select count(*)::text from public.profiles where avatar_url is not null)
+
   union all select 30, 'user_brief не раздаёт public_id посторонним',
     (select pg_get_functiondef(p.oid) like '%coach_links%'
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace

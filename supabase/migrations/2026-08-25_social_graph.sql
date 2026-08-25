@@ -82,9 +82,16 @@ alter table public.profiles drop constraint if exists profiles_display_name_len;
 alter table public.profiles add constraint profiles_display_name_len
   check (display_name is null or char_length(display_name) <= 60);
 
+-- Аватар в EatAps — НЕ ссылка, а data URL: src/lib/avatar.js кадрирует фото в
+-- квадрат 256×256 и кладёт в JSON профиля как base64 JPEG (см. комментарий
+-- «чтобы аватар помещался в синхронизируемый JSON-профиль»). Это десятки
+-- килобайт строки, а не 500 символов.
+--
+-- Лимит здесь не ради экономии места, а как потолок: он ловит попытку записать
+-- в публичную таблицу мегабайтную картинку, но не мешает штатному аватару.
 alter table public.profiles drop constraint if exists profiles_avatar_len;
 alter table public.profiles add constraint profiles_avatar_len
-  check (avatar_url is null or char_length(avatar_url) <= 500);
+  check (avatar_url is null or char_length(avatar_url) <= 300000);
 
 create unique index if not exists profiles_username_key on public.profiles (username);
 
@@ -173,8 +180,13 @@ begin
   loop
     update public.profiles
        set username     = public.claim_username(r.user_id, r.nm),
-           display_name = coalesce(display_name, r.nm),
-           avatar_url   = coalesce(avatar_url, r.av)
+           display_name = coalesce(display_name, left(r.nm, 60)),
+           -- Аватар сверх потолка НЕ обрезаем, а пропускаем: обрезанный base64
+           -- — это не «картинка поменьше», а битая строка, которую браузер не
+           -- покажет. Пусто честнее: Avatar в интерфейсе нарисует инициал.
+           avatar_url   = coalesce(avatar_url,
+                            case when char_length(coalesce(r.av, '')) between 1 and 300000
+                                 then r.av end)
      where user_id = r.user_id;
   end loop;
 end $$;
@@ -198,15 +210,19 @@ security definer
 set search_path = public
 as $$
 declare
-  v_name text := new.state->'profile'->>'name';
-  v_av   text := new.state->'profile'->>'avatar';
+  v_name text := nullif(left(coalesce(new.state->'profile'->>'name', ''), 60), '');
+  v_raw  text := new.state->'profile'->>'avatar';
+  -- Имя обрезать можно: слишком длинное имя остаётся именем. Аватар — нельзя:
+  -- это base64-строка, и обрезанная она не картинка, а мусор. Поэтому сверх
+  -- потолка пишем NULL, и интерфейс рисует инициал.
+  v_av   text := case when char_length(coalesce(v_raw, '')) between 1 and 300000
+                      then v_raw end;
 begin
   update public.profiles
-     set display_name = nullif(left(coalesce(v_name, ''), 60), ''),
-         avatar_url   = nullif(left(coalesce(v_av, ''), 500), '')
+     set display_name = v_name,
+         avatar_url   = v_av
    where user_id = new.user_id
-     and (display_name is distinct from nullif(left(coalesce(v_name, ''), 60), '')
-       or avatar_url   is distinct from nullif(left(coalesce(v_av, ''), 500), ''));
+     and (display_name is distinct from v_name or avatar_url is distinct from v_av);
   return null;
 end;
 $$;
@@ -993,6 +1009,11 @@ grant execute on function public.set_username(text) to authenticated;
 -- ─────────────────────────────────────────────────────────────────────────
 -- Единственный способ узнать имя и аватар чужого человека. Отдаёт ровно четыре
 -- поля и никогда — public_id.
+--
+-- Потолок в 200 идентификаторов — не про нагрузку на базу, а про размер
+-- ответа: avatar_url здесь это base64-картинка на десятки килобайт, и запрос
+-- на 500 человек весил бы больше десяти мегабайт. По той же причине у
+-- list_followers/list_following лимит 50, а не 100.
 
 create or replace function public.user_cards(p_user_ids uuid[])
 returns table (user_id uuid, username text, display_name text, avatar_url text)
@@ -1003,7 +1024,7 @@ set search_path = public
 as $$
   select p.user_id, p.username, p.display_name, p.avatar_url
   from public.profiles p
-  where p.user_id = any(p_user_ids[1:500])
+  where p.user_id = any(p_user_ids[1:200])
     and not public.is_blocked_between(p.user_id, auth.uid());
 $$;
 
@@ -1185,7 +1206,7 @@ as $$
   where f.following_id = p_user_id
     and not public.is_blocked_between(p.user_id, auth.uid())
   order by f.created_at desc
-  limit least(greatest(coalesce(p_limit, 50), 1), 100)
+  limit least(greatest(coalesce(p_limit, 50), 1), 50)
   offset greatest(coalesce(p_offset, 0), 0);
 $$;
 
@@ -1204,7 +1225,7 @@ as $$
   where f.follower_id = p_user_id
     and not public.is_blocked_between(p.user_id, auth.uid())
   order by f.created_at desc
-  limit least(greatest(coalesce(p_limit, 50), 1), 100)
+  limit least(greatest(coalesce(p_limit, 50), 1), 50)
   offset greatest(coalesce(p_offset, 0), 0);
 $$;
 
