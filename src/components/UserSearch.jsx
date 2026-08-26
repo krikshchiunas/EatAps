@@ -1,13 +1,14 @@
-// Поиск людей.
+// Поиск людей — по нику и только по нику.
 //
-// Заменяет прежний единственный способ найти человека — ручной ввод
-// 12-символьного публичного ID. Ввод по ID продолжает работать (AddFriendSheet),
-// и это по-прежнему единственный способ найти того, кто не хочет находиться по
-// имени.
+// Заменил собой два прежних способа: ручной ввод 12-символьного публичного
+// кода (кодов больше нет) и поиск по отображаемому имени. Имя выпало из
+// условия намеренно: оно неуникально, и по запросу «Денис» выбирать было бы
+// не из чего. Обоснование целиком — в search_users, миграция
+// 2026-08-26_nickname_identity.
 //
 // Debounce обязателен: без него каждая буква — отдельный запрос к базе.
 // Меньше трёх символов сервер не обслуживает, и такой запрос не отправляется
-// вовсе — see search_users в миграции.
+// вовсе.
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store.jsx'
 import { searchUsers } from '../lib/social.js'
@@ -56,10 +57,10 @@ export default function UserSearch({ onOpenProfile }) {
         className="input"
         type="search"
         inputMode="search"
-        placeholder="Имя или @адрес"
+        placeholder="Ник, например denis"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        aria-label="Поиск людей"
+        aria-label="Поиск людей по нику"
         style={{ marginBottom: 12 }}
       />
 
@@ -80,7 +81,7 @@ export default function UserSearch({ onOpenProfile }) {
           people={results}
           myId={myId}
           onOpen={onOpenProfile}
-          empty="Никого не нашли"
+          empty="Никого не нашли. Ник нужно ввести целиком или с начала — по имени поиск не ищет."
         />
       )}
     </div>

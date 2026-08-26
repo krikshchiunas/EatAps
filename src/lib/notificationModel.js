@@ -1,8 +1,9 @@
 // Уведомления — ЧИСТАЯ часть: во что превращается строка из list_notifications.
 // Без зависимостей, чтобы проверяться под голым `node --test`.
 
+// Группы «Заявки» больше нет: заявок в друзья не существует — дружба
+// возникает из взаимной подписки, и оба события уже лежат в «Людях».
 export const NOTIFICATION_GROUPS = [
-  { key: 'requests', label: 'Заявки',   types: ['FRIEND_REQUEST'] },
   { key: 'social',   label: 'Люди',     types: ['FOLLOW', 'FRIEND_ACCEPTED'] },
   { key: 'posts',    label: 'Мысли',    types: ['POST_REACTION', 'POST_COMMENT'] },
   { key: 'messages', label: 'Сообщения', types: ['MESSAGE'] },
@@ -13,8 +14,9 @@ export const NOTIFICATION_GROUPS = [
 export function notificationText(n) {
   switch (n.type) {
     case 'FOLLOW':          return 'подписался на вас'
-    case 'FRIEND_REQUEST':  return 'хочет добавить вас в друзья'
-    case 'FRIEND_ACCEPTED': return 'теперь ваш друг'
+    // Приходит тому, кто подписался первым: второй подписался в ответ, и
+    // подписка стала дружбой.
+    case 'FRIEND_ACCEPTED': return 'подписался в ответ — теперь вы друзья'
     case 'POST_REACTION':   return `отреагировал${n.metadata?.reaction ? ' ' + n.metadata.reaction : ''} на вашу мысль`
     case 'POST_COMMENT':    return 'ответил на вашу мысль'
     case 'MESSAGE':         return 'написал вам'
@@ -29,8 +31,6 @@ export function notificationTarget(n) {
     case 'FOLLOW':
     case 'FRIEND_ACCEPTED':
       return { screen: 'profile', userId: n.actor_id }
-    case 'FRIEND_REQUEST':
-      return { screen: 'requests' }
     case 'POST_REACTION':
       return { screen: 'post', postId: n.entity_id }
     case 'POST_COMMENT':

@@ -88,9 +88,10 @@ export const banButtonKeyboard = (userId) => ({
   inline_keyboard: [[{ text: '🚫 Бан', callback_data: `m:${userId}` }]],
 })
 
-// Заголовок обращения. ID и ник — обязательные поля: по ним владелец бота
-// понимает, кого банить, не переспрашивая.
-export function formatReport({ kind, publicId, name, userId, text }) {
+// Заголовок обращения. Ник и UUID — обязательные поля: по ним владелец бота
+// понимает, кого банить, не переспрашивая. Публичного кода больше нет — его
+// место занял ник, по которому человека находят и в самом приложении.
+export function formatReport({ kind, username, name, userId, text }) {
   const title = kind === 'coach_application'
     ? '🎓 Заявка на роль тренера'
     : '🆘 Обращение в поддержку'
@@ -98,8 +99,8 @@ export function formatReport({ kind, publicId, name, userId, text }) {
   return [
     title,
     '',
-    `Ник: ${who}`,
-    `ID: ${publicId || '—'}`,
+    `Ник: ${username || '—'}`,
+    `Имя: ${who}`,
     `UUID: ${userId}`,
     '',
     text,

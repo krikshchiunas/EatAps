@@ -150,15 +150,16 @@ with checks(порядок, проверка, ok, деталь) as (
 
   -- 8. Ничего не потеряно
   union all
-  select 24, 'у всех пользователей есть public_id',
+  select 24, 'у всех пользователей есть профиль с ником',
     not exists (
       select 1 from auth.users u
       left join public.profiles p on p.user_id = u.id
-      where p.user_id is null
+      where p.user_id is null or p.username is null
     ),
-    'без public_id человека нельзя добавить в друзья; пользователей без него: '
+    'без ника человека нельзя ни найти, ни показать; пользователей без него: '
       || (select count(*)::text from auth.users u
-          left join public.profiles p on p.user_id = u.id where p.user_id is null)
+          left join public.profiles p on p.user_id = u.id
+          where p.user_id is null or p.username is null)
 
   union all
   select 25, 'состояния пользователей на месте',
@@ -199,10 +200,12 @@ with checks(порядок, проверка, ok, деталь) as (
       where schemaname='public' and tablename='app_state' and cmd='SELECT'), 'политик SELECT нет')
 
   union all
-  select 30, 'RPC ensure_public_id создан',
-    exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname='public' and p.proname='ensure_public_id'),
-    'чинит отсутствующий public_id при первом обращении'
+  select 30, 'колонка public_id удалена вместе со всей идеей кодов',
+    not exists (
+      select 1 from information_schema.columns
+      where table_schema='public' and table_name='profiles' and column_name='public_id'
+    ),
+    'единственный адрес человека — ник'
 
   -- 10. Устранение слабостей аудита (миграция hardening)
   union all
@@ -254,14 +257,13 @@ with checks(порядок, проверка, ok, деталь) as (
 
   -- 12. Непредсказуемые публичные ID
   union all
-  select 39, 'public_id выдаётся случайно, а не по счётчику',
+  select 39, 'ник выдаётся при регистрации, а не после первого входа',
     coalesce((
-      select pg_get_functiondef(p.oid) not like '%nextval%'
-         and pg_get_functiondef(p.oid) like '%gen_random_uuid%'
+      select pg_get_functiondef(p.oid) like '%claim_username%'
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname='public' and p.proname='generate_public_id' limit 1
+      where n.nspname='public' and p.proname='handle_new_user' limit 1
     ), false),
-    'последовательные ID позволяли перебором получить список всех пользователей'
+    'иначе новый профиль был бы невидим в поиске до первой правки'
 
   union all
   select 40, 'последовательность public_id_seq удалена',
@@ -269,30 +271,26 @@ with checks(порядок, проверка, ok, деталь) as (
     'оставленная последовательность — готовый механизм выдачи предсказуемых ID'
 
   union all
-  select 41, 'формат public_id закреплён ограничением',
+  select 41, 'формат ника закреплён ограничением',
     exists (select 1 from pg_constraint
-      where conname = 'profiles_public_id_format'
+      where conname = 'profiles_username_format'
         and conrelid = 'public.profiles'::regclass),
-    'без него любой путь записи мог бы вернуть короткий предсказуемый код'
+    'без него в базу попал бы ник в верхнем регистре, и «Denis» с «denis» стали бы разными'
 
   union all
-  select 42, 'у всех пользователей ID нового формата',
-    not exists (
-      select 1 from public.profiles
-      where public_id !~ '^[0-9A-HJKMNP-TV-Z]{12}$'
-    ),
-    'старых кодов осталось: '
-      || (select count(*)::text from public.profiles
-          where public_id !~ '^[0-9A-HJKMNP-TV-Z]{12}$')
+  select 42, 'ники уникальны',
+    exists (select 1 from pg_indexes
+      where schemaname='public' and tablename='profiles' and indexname='profiles_username_key'),
+    'всего ников: ' || (select count(distinct username)::text from public.profiles)
 
   union all
-  select 43, 'find_user_by_public_id нормализует ввод на сервере',
+  select 43, 'find_user_by_username нормализует ввод на сервере',
     coalesce((
-      select pg_get_functiondef(p.oid) like '%normalize_public_id%'
+      select pg_get_functiondef(p.oid) like '%lower(%'
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname='public' and p.proname='find_user_by_public_id' limit 1
+      where n.nspname='public' and p.proname='find_user_by_username' limit 1
     ), false),
-    'дефисы, регистр и рукописные O/I/L разбирает база, а не клиент'
+    'регистр и ведущую «@» снимает база, а не клиент'
 
   -- 13. Публичный профиль и «Мои мысли»
   union all

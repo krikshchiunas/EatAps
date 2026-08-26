@@ -85,15 +85,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Не удалось отправить' })
   }
 
-  // 4. Кто написал — ник и публичный ID для владельца бота.
+  // 4. Кто написал — ник и имя для владельца бота.
   const [{ data: profile }, { data: stateRow }] = await Promise.all([
-    supabase.from('profiles').select('public_id').eq('user_id', user.id).maybeSingle(),
+    supabase.from('profiles').select('username').eq('user_id', user.id).maybeSingle(),
     supabase.from('app_state').select('name:state->profile->>name').eq('user_id', user.id).maybeSingle(),
   ])
 
   const report = formatReport({
     kind,
-    publicId: profile?.public_id,
+    username: profile?.username,
     name: stateRow?.name,
     userId: user.id,
     text,

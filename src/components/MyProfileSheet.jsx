@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
-import { getMyPublicId } from '../lib/supabase.js'
-import { formatPublicId } from '../lib/publicId.js'
+import { userProfile, setUsername } from '../lib/social.js'
 import { addProfileListItem, removeProfileListItem, normalizeProfileList, MAX_LEN } from '../lib/profileLists.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 
@@ -74,12 +73,26 @@ function ListEditor({ label, hint, placeholder, items, onChange, tone }) {
 
 export default function MyProfileSheet({ onClose }) {
   const { user, profile, setProfile } = useStore()
-  const [publicId, setPublicId] = useState(null)
-  const [copied, setCopied] = useState(false)
+  // Ник живёт не в синхронизируемом блобе, а в profiles на сервере: он должен
+  // быть уникальным на всю базу, а блоб об остальных ничего не знает. Поэтому
+  // грузится и сохраняется он отдельно от всего остального в этой форме.
+  const [nick, setNick] = useState('')
+  const [savedNick, setSavedNick] = useState(null)
+  const [nickErr, setNickErr] = useState(null)
+  const [busy, setBusy] = useState(false)
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
   useEffect(() => {
-    if (user?.id) getMyPublicId(user.id).then((id) => setPublicId(id))
+    if (!user?.id) return
+    let alive = true
+    userProfile(user.id)
+      .then((card) => {
+        if (!alive || !card?.username) return
+        setSavedNick(card.username)
+        setNick(card.username)
+      })
+      .catch(() => {})
+    return () => { alive = false }
   }, [user?.id])
 
   const [draft, setDraft] = useState({
@@ -94,7 +107,20 @@ export default function MyProfileSheet({ onClose }) {
 
   const set = (p) => setDraft((d) => ({ ...d, ...p }))
 
-  const save = () => {
+  const save = async () => {
+    // Ник сохраняем ПЕРВЫМ и только при изменении: он единственный может быть
+    // отвергнут сервером (занят, короткий), и в этом случае лист закрывать
+    // нельзя — иначе человек решит, что ник сменился, а он нет.
+    const wanted = nick.trim().toLowerCase().replace(/^@+/, '')
+    if (savedNick !== null && wanted !== savedNick) {
+      setBusy(true)
+      const res = await setUsername(wanted)
+      setBusy(false)
+      if (res.error) { setNickErr(res.error); return }
+      setSavedNick(res.ok)
+      setNick(res.ok)
+    }
+
     // Пустой список пишем как undefined, а не []: профиль — обычный объект в
     // синхронизируемом состоянии, и пустые ключи там ни к чему.
     const noGos = normalizeProfileList(draft.noGos)
@@ -112,22 +138,6 @@ export default function MyProfileSheet({ onClose }) {
     onClose()
   }
 
-  // В базе код лежит без разделителей, человеку показываем и копируем
-  // сгруппированный вид — его проще перенабрать и продиктовать. Обратно
-  // normalizePublicId снимает дефисы, поэтому вставить можно любой из двух.
-  const shownId = publicId ? formatPublicId(publicId) : null
-
-  const copy = async () => {
-    if (!shownId) return
-    try {
-      await navigator.clipboard.writeText(shownId)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* ignore */
-    }
-  }
-
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close}>
       <div className="sheet sheet-tall" {...sheetProps} onClick={(e) => e.stopPropagation()}>
@@ -142,9 +152,38 @@ export default function MyProfileSheet({ onClose }) {
         </div>
 
         <div className="field">
-          <label>Имя / никнейм</label>
+          <label>Имя</label>
           <input className="input" placeholder="Напр. Денис" value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
         </div>
+
+        {/* Ник — единственный способ найти человека в поиске, поэтому он не
+            спрятан в настройках, а стоит сразу под именем. Приставки «@» нет
+            нигде: ни здесь, ни в профиле, ни в поиске. */}
+        {savedNick !== null && (
+          <div className="field">
+            <label>Ник — по нему вас находят в поиске</label>
+            <input
+              className="input"
+              value={nick}
+              onChange={(e) => {
+                // Приводим к тому, что примет сервер, прямо во время ввода:
+                // отказ после нажатия «Сохранить» из-за заглавной буквы был бы
+                // придиркой, а не защитой.
+                setNick(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))
+                setNickErr(null)
+              }}
+              placeholder="denis"
+              maxLength={20}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              От 3 до 20 символов: латиница, цифры и «_». У каждого свой — двух одинаковых не бывает.
+            </p>
+            {nickErr && <p style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 6 }}>{nickErr}</p>}
+          </div>
+        )}
 
         {/* Порядок полей — тот же, что в профиле: человек правит их сверху вниз
             ровно в том виде, в каком они потом стоят на витрине. */}
@@ -189,28 +228,9 @@ export default function MyProfileSheet({ onClose }) {
           tone="no"
         />
 
-        <div className="field">
-          <label>Ваш ID — отправьте другу, чтобы он вас добавил</label>
-          <div className="row gap8" style={{ alignItems: 'center' }}>
-            <input
-              className="input"
-              readOnly
-              value={shownId ?? '…'}
-              style={{ flex: 1, fontSize: 17, fontWeight: 650, letterSpacing: '0.04em', textAlign: 'center' }}
-              onFocus={(e) => e.target.select()}
-            />
-            <button className="iconbtn" onClick={copy} title="Копировать ID" aria-label="Копировать ID" disabled={!shownId} style={{ flex: '0 0 auto' }}>
-              {copied ? '✓' : (
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="9" width="11" height="11" rx="2" />
-                  <path d="M5 15V5a2 2 0 0 1 2-2h10" />
-                </svg>
-              )}
-            </button>
-          </div>
-        </div>
-
-        <button className="btn" style={{ marginTop: 10 }} onClick={save}>Сохранить</button>
+        <button className="btn" style={{ marginTop: 10 }} onClick={save} disabled={busy}>
+          {busy ? 'Сохраняем…' : 'Сохранить'}
+        </button>
       </div>
     </div>
   )

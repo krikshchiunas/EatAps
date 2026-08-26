@@ -13,7 +13,7 @@ import { targetsForDay } from '../lib/body.js'
 // ─────────────────────────────────────────────────────────────────────────────
 // Тренер и клиент.
 //
-// Доступ к дневнику отдаёт ТОЛЬКО клиент: он приглашает тренера по ID, тренер
+// Доступ к дневнику отдаёт ТОЛЬКО клиент: он приглашает тренера по нику, тренер
 // принимает. Обратный порядок (тренер подписывается сам) означал бы, что чужой
 // человек читает ваш дневник, пока вы не заметили.
 //
@@ -85,7 +85,7 @@ export default function CoachScreen({ onClose }) {
       {!isCoach && (
         <p className="set-note" style={{ marginTop: 22 }}>
           Вы тренер или нутрициолог? Подайте заявку в разделе «Поддержка» → «Стать тренером».
-          После одобрения клиенты смогут приглашать вас по вашему ID.
+          После одобрения клиенты смогут приглашать вас по вашему нику.
         </p>
       )}
     </div>
@@ -130,7 +130,7 @@ function ClientList({ clients, onOpen, onDone }) {
     <div className="card" style={{ marginBottom: 14 }}>
       <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Мои клиенты</div>
       {clients.length === 0 ? (
-        <p className="muted" style={{ fontSize: 14 }}>Пока никого. Клиент приглашает вас сам — по вашему ID.</p>
+        <p className="muted" style={{ fontSize: 14 }}>Пока никого. Клиент приглашает вас сам — по вашему нику.</p>
       ) : clients.map((c) => (
         <div key={c.rowId} className="row gap12" style={{ alignItems: 'center', marginBottom: 12 }}>
           <Avatar src={c.avatar} name={c.name} />
@@ -192,13 +192,15 @@ function MyCoaches({ coaches, myId, onDone }) {
       ))}
 
       <div className="field" style={{ marginTop: coaches.length ? 8 : 0 }}>
-        <label className="label">ID тренера</label>
+        <label className="label">Ник тренера</label>
         <input
           className="input"
           value={id}
           onChange={(e) => setId(e.target.value)}
-          placeholder="7K4M-9XPQ-2RTV"
-          autoCapitalize="characters"
+          placeholder="denis"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           style={{ marginTop: 6 }}
         />
       </div>

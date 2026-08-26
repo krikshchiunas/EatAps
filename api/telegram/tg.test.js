@@ -51,9 +51,9 @@ test('меню бана содержит все сроки и отмену', () 
   assert.ok(kb[1][0].callback_data.startsWith('x:'), 'вторым рядом — отмена')
 })
 
-test('в отчёте всегда есть ник и ID автора', () => {
-  const r = formatReport({ kind: 'support', publicId: 'AA000042', name: 'Денис', userId: UUID, text: 'не работает вход' })
-  assert.ok(r.includes('AA000042'))
+test('в отчёте всегда есть ник, имя и UUID автора', () => {
+  const r = formatReport({ kind: 'support', username: 'denis_k', name: 'Денис', userId: UUID, text: 'не работает вход' })
+  assert.ok(r.includes('denis_k'))
   assert.ok(r.includes('Денис'))
   assert.ok(r.includes(UUID))
   assert.ok(r.includes('не работает вход'))
@@ -61,15 +61,15 @@ test('в отчёте всегда есть ник и ID автора', () => {
 })
 
 test('отчёт без имени не ломается и помечает пропуск', () => {
-  const r = formatReport({ kind: 'coach_application', publicId: null, name: null, userId: UUID, text: 'хочу быть тренером' })
+  const r = formatReport({ kind: 'coach_application', username: null, name: null, userId: UUID, text: 'хочу быть тренером' })
   assert.ok(r.includes('без имени'))
-  assert.ok(r.includes('—'), 'отсутствующий публичный ID показывается прочерком')
+  assert.ok(r.includes('—'), 'отсутствующий ник показывается прочерком')
   assert.ok(r.includes('Заявка на роль тренера'))
 })
 
 test('разметка из текста пользователя не превращается в оформление', () => {
   // parse_mode не задаётся нигде, поэтому такой текст должен уехать как есть.
   const evil = '*жирный* _курсив_ [ссылка](http://зло) `код`'
-  const r = formatReport({ kind: 'support', publicId: 'AA1', name: 'X', userId: UUID, text: evil })
+  const r = formatReport({ kind: 'support', username: 'x_user', name: 'X', userId: UUID, text: evil })
   assert.ok(r.includes(evil), 'текст не должен экранироваться или обрезаться')
 })

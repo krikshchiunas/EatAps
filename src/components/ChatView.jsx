@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo } from 
 import { useStore } from '../store.jsx'
 import {
   listMessagesWith, sendChatMessage, subscribeToChat, uploadChatImage,
-  markChatRead, listFriendships,
+  markChatRead, listFriends,
   markMessagesRead, subscribeToSentUpdates, hideMessageLocally, hideMessagesLocally,
   createTypingChannel, watchPresence, fetchLastSeen,
   toggleMessageReaction,
@@ -1322,7 +1322,7 @@ function ForwardSheet({ m, myId, fromName, onClose, onDone }) {
 
   useEffect(() => {
     let cancelled = false
-    listFriendships(myId).then((r) => { if (!cancelled) { setFriends(r.friends || []); setLoading(false) } })
+    listFriends(myId).then((r) => { if (!cancelled) { setFriends(r); setLoading(false) } })
       .catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [myId])

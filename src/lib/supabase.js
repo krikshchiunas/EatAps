@@ -5,7 +5,6 @@ import { normalizeError } from './authErrors.js'
 import { isMissingColumn } from './pgErrors.js'
 import { log } from './log.js'
 import { newId } from './uuid.js'
-import { normalizePublicId } from './publicId.js'
 import { DEFAULT_VISIBILITY } from './relationship.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
@@ -210,108 +209,36 @@ export function subscribeToSubscription(userId, onChange) {
   }
 }
 
-// ---------------- Публичные ID ----------------
-// Формат и нормализация — в lib/publicId.js, там же объяснение, почему ID
-// случайный, а не последовательный.
-
-// Получить читаемый публичный ID текущего пользователя.
-//
-// Через RPC, а не прямым select: ensure_public_id заодно чинит пропуск. Раньше
-// сбой триггера при регистрации означал, что человека навсегда нельзя добавить
-// в друзья, и заметить это было нечем — ID просто не показывался.
-// Фолбэк на прямое чтение — для проектов, где миграция ещё не прогнана.
-export async function getMyPublicId(userId) {
-  if (!supabase || !userId) return null
-  const { data, error } = await supabase.rpc('ensure_public_id')
-  if (!error) return data || null
-  const legacy = await supabase.from('profiles').select('public_id').eq('user_id', userId).maybeSingle()
-  return legacy.data?.public_id || null
-}
-
-// Найти UUID по публичному ID через RPC (обходит RLS).
-// На вход — уже канонический код из normalizePublicId; серверная функция всё
-// равно нормализует ввод сама, клиенту тут доверия нет.
-async function resolvePublicId(publicId) {
-  const { data } = await supabase.rpc('find_user_by_public_id', { p_public_id: publicId })
-  return data || null
-}
-
 // ---------------- Друзья ----------------
+// Друг — это взаимная подписка, и ничего больше. Заявок, подтверждений и
+// «публичного ID для добавления» больше нет: чтобы подружиться, оба человека
+// нажимают «Подписаться» на профиле друг друга (см. миграцию
+// 2026-08-26_nickname_identity). Поэтому здесь остались только чтение списка и
+// поиск карточки — сама связь создаётся через follow/unfollow в social.js.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// Отправить запрос в друзья по ID. Принимает как публичный ID (7K4M-9XPQ-2RTV),
-// так и UUID.
-// Если встречный запрос уже есть — принимает его.
-// Возвращает { ok } или { error } (сообщение по-русски).
-export async function sendFriendRequest({ myId, myName, targetId }) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
-  const raw = (targetId || '').trim()
-
-  let t
-  const publicId = normalizePublicId(raw)
-  if (publicId) {
-    t = await resolvePublicId(publicId)
-    if (!t) return { error: 'Пользователь с таким ID не найден' }
-  } else if (UUID_RE.test(raw)) {
-    t = raw.toLowerCase()
-  } else {
-    return { error: 'Неверный формат ID (12 символов, например 7K4M-9XPQ-2RTV)' }
-  }
-
-  if (t === myId) return { error: 'Это ваш собственный ID' }
-
-  const { data: existing, error: e1 } = await supabase
-    .from('friendships')
-    .select('id, requester, addressee, status')
-    .or(`and(requester.eq.${myId},addressee.eq.${t}),and(requester.eq.${t},addressee.eq.${myId})`)
-  if (e1) return { error: normalizeError(e1).message }
-
-  const row = existing?.[0]
-  if (row) {
-    if (row.status === 'accepted') return { error: 'Вы уже друзья' }
-    if (row.requester === myId) return { error: 'Запрос уже отправлен' }
-    const { error } = await supabase.from('friendships').update({ status: 'accepted' }).eq('id', row.id)
-    if (error) return { error: normalizeError(error).message }
-    return { ok: 'Теперь вы друзья' }
-  }
-
-  const { error } = await supabase
-    .from('friendships')
-    .insert({ requester: myId, addressee: t, requester_name: myName || null })
+// Список друзей одним запросом: RPC отдаёт сразу карточку человека, поэтому
+// второго обращения за именами больше не нужно.
+//
+// Форма строки — { id, name, avatar, username } — совпадает с той, что ждут
+// экраны друзей и чат.
+export async function listFriends(myId) {
+  if (!supabase || !myId) return []
+  const { data, error } = await supabase.rpc('list_friends', {
+    p_user_id: myId, p_limit: 100, p_offset: 0,
+  })
   if (error) {
-    if (error.code === '23503') return { error: 'Пользователь с таким ID не найден' }
-    return { error: normalizeError(error).message }
+    // Миграция ещё не прогнана — раздел просто пуст, а не сломан.
+    if (isMissingRelation(error)) return []
+    throw error
   }
-  return { ok: 'Запрос отправлен' }
-}
-
-// Списки: friends (принятые), incoming (входящие), outgoing (исходящие).
-export async function listFriendships(myId) {
-  if (!supabase) return { friends: [], incoming: [], outgoing: [] }
-  const { data, error } = await supabase
-    .from('friendships')
-    .select('id, requester, addressee, status, requester_name, created_at')
-    .or(`requester.eq.${myId},addressee.eq.${myId}`)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-
-  const friends = [], incoming = [], outgoing = []
-  for (const r of data || []) {
-    const other = r.requester === myId ? r.addressee : r.requester
-    if (r.status === 'accepted') friends.push({ rowId: r.id, id: other })
-    else if (r.addressee === myId) incoming.push({ rowId: r.id, id: r.requester, name: r.requester_name })
-    else outgoing.push({ rowId: r.id, id: other })
-  }
-
-  // Имя и фото принятых друзей — одним запросом.
-  if (friends.length) {
-    const briefs = await fetchFriendBriefs(friends.map((f) => f.id))
-    for (const f of friends) {
-      f.name = briefs[f.id]?.name
-      f.avatar = briefs[f.id]?.avatar
-    }
-  }
-  return { friends, incoming, outgoing }
+  return (data || []).map((r) => ({
+    id: r.user_id,
+    username: r.username,
+    name: r.display_name || r.username,
+    avatar: r.avatar_url,
+    since: r.created_at,
+  }))
 }
 
 // Имя и фото по списку ID. RPC friend_briefs отдаёт только эти два поля и
@@ -335,17 +262,9 @@ async function fetchFriendBriefs(ids) {
   return out
 }
 
-export async function acceptFriend(rowId) {
-  if (!supabase) return { error: 'Нет подключения' }
-  const { error } = await supabase.from('friendships').update({ status: 'accepted' }).eq('id', rowId)
-  return error ? { error: normalizeError(error).message } : { ok: true }
-}
-
-export async function removeFriendship(rowId) {
-  if (!supabase) return { error: 'Нет подключения' }
-  const { error } = await supabase.from('friendships').delete().eq('id', rowId)
-  return error ? { error: normalizeError(error).message } : { ok: true }
-}
+// acceptFriend и removeFriendship удалены вместе с заявками: строку в
+// friendships теперь создаёт и удаляет только сервер, по подпискам. «Удалить
+// из друзей» — это unfollow из social.js.
 
 // Прочитать состояние друга — только видимую часть (профиль без телесных
 // показателей, дни, составные блюда). Отдаёт RPC friend_state, авторизация —
@@ -848,7 +767,11 @@ export async function deleteAccount(userId) {
     uid = data?.session?.user?.id
   }
   if (uid) {
-    await supabase.from('friendships').delete().or(`requester.eq.${uid},addressee.eq.${uid}`)
+    // Рвём подписки в обе стороны. Дружбу отдельно удалять не нужно и уже
+    // нельзя: строку friendships пишет сервер по подпискам, и она уйдёт
+    // триггером вместе с ними.
+    await supabase.from('follows').delete().eq('follower_id', uid)
+    await supabase.from('follows').delete().eq('following_id', uid)
     // Мысли, ответы и реакции стираем явно, хотя они и уходят каскадом вместе
     // с auth.users: если удаление самого аккаунта не пройдёт (partial), данные
     // человека всё равно не должны остаться видимыми его друзьям.
@@ -887,24 +810,31 @@ export async function amICoach(userId) {
   return Boolean(data)
 }
 
-// Пригласить тренера по его публичному ID (AA000001) или UUID.
+// Пригласить тренера по его нику.
+//
+// Через поиск это сделать нельзя: тренер — не обязательно тот, на кого вы
+// подписаны, и приглашение отдаёт доступ к дневнику, поэтому имя тренера
+// человек вводит осознанно и целиком. UUID принимаем по-прежнему — им
+// пользуется поддержка, когда разбирает обращение.
 export async function inviteCoach({ myId, targetId }) {
   if (!supabase) return { error: 'Нет подключения к серверу' }
-  const raw = (targetId || '').trim()
+  const raw = (targetId || '').trim().replace(/^@+/, '')
 
-  // Тот же разбор ID, что и у заявки в друзья: публичный код или UUID.
   let coach
-  const publicId = normalizePublicId(raw)
-  if (publicId) {
-    coach = await resolvePublicId(publicId)
-    if (!coach) return { error: 'Пользователь с таким ID не найден' }
-  } else if (UUID_RE.test(raw)) {
+  if (UUID_RE.test(raw)) {
     coach = raw.toLowerCase()
+  } else if (/^[A-Za-z0-9_]{3,20}$/.test(raw)) {
+    const { data, error } = await supabase.rpc('find_user_by_username', {
+      p_username: raw.toLowerCase(),
+    })
+    if (error) return { error: normalizeError(error).message }
+    if (!data) return { error: 'Пользователь с таким ником не найден' }
+    coach = data
   } else {
-    return { error: 'Неверный формат ID (12 символов, например 7K4M-9XPQ-2RTV)' }
+    return { error: 'Ник — от 3 до 20 символов: латиница, цифры, _' }
   }
 
-  if (coach === myId) return { error: 'Это ваш собственный ID' }
+  if (coach === myId) return { error: 'Это ваш собственный ник' }
 
   const { error } = await supabase.from('coach_links').insert({ coach, client: myId })
   if (error) {

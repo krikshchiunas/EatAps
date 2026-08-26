@@ -5,7 +5,7 @@ import {
 } from './notificationModel.js'
 
 test('у каждого типа есть текст', () => {
-  for (const t of ['FOLLOW','FRIEND_REQUEST','FRIEND_ACCEPTED','POST_REACTION','POST_COMMENT','MESSAGE']) {
+  for (const t of ['FOLLOW','FRIEND_ACCEPTED','POST_REACTION','POST_COMMENT','MESSAGE']) {
     const s = notificationText({ type: t, metadata: {} })
     assert.ok(s && s.length > 0, `нет текста для ${t}`)
   }
@@ -25,7 +25,8 @@ test('неизвестный тип не роняет рендер', () => {
 test('каждое событие ведёт к своему объекту', () => {
   assert.deepEqual(notificationTarget({ type: 'FOLLOW', actor_id: 'u1' }),
     { screen: 'profile', userId: 'u1' })
-  assert.deepEqual(notificationTarget({ type: 'FRIEND_REQUEST' }), { screen: 'requests' })
+  assert.deepEqual(notificationTarget({ type: 'FRIEND_ACCEPTED', actor_id: 'u3' }),
+    { screen: 'profile', userId: 'u3' })
   assert.deepEqual(notificationTarget({ type: 'POST_REACTION', entity_id: 'p1' }),
     { screen: 'post', postId: 'p1' })
 })
@@ -44,11 +45,10 @@ test('сообщение ведёт в диалог, а не к отдельно
 
 test('группировка раскладывает по разделам и не теряет строк', () => {
   const list = [
-    { type: 'FOLLOW' }, { type: 'FRIEND_REQUEST' }, { type: 'POST_COMMENT' },
+    { type: 'FOLLOW' }, { type: 'POST_COMMENT' },
     { type: 'MESSAGE' }, { type: 'FRIEND_ACCEPTED' }, { type: 'POST_REACTION' },
   ]
   const g = groupNotifications(list)
-  assert.equal(g.requests.length, 1)
   assert.equal(g.social.length, 2)
   assert.equal(g.posts.length, 2)
   assert.equal(g.messages.length, 1)

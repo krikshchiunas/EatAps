@@ -10,6 +10,12 @@ import { keyOf, addDays, fromKey } from '../lib/date.js'
 // ─────────────────────────────────────────────────────────────────────────────
 // Челленджи с друзьями.
 //
+// Живут внутри вкладки «События» социального хаба, а не отдельным экраном за
+// иконкой в шапке: соревнование — это событие, и искать его человек идёт туда
+// же, куда за остальными событиями. Поэтому onClose необязателен: без него
+// компонент рисуется как часть чужого экрана, без собственной обёртки и без
+// кнопки «закрыть».
+//
 // Прогресс каждый участник считает у себя из своего дневника и отправляет
 // только итог по дню (см. lib/challenges.js). Поэтому лидерборд не требует
 // доступа к чужой еде: участие в соревновании — не повод раскрывать всю
@@ -23,10 +29,15 @@ const fmtDate = (key) => {
 
 const STATUS_LABEL = { upcoming: 'скоро', active: 'идёт', finished: 'завершён' }
 
-export default function ChallengesScreen({ onClose }) {
+export default function ChallengesScreen({ onClose = null }) {
   const { user, days, profile } = useStore()
   const myId = user?.id
   const today = keyOf()
+  // Встроенный режим: своей обёртки-экрана нет, её даёт вкладка. Именно
+  // className, а не компонент-обёртка: компонент, объявленный внутри рендера,
+  // на каждом обновлении получал бы новую идентичность, и React размонтировал
+  // бы всё поддерево — форма создания теряла бы введённый текст.
+  const shell = onClose ? 'screen' : ''
 
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
@@ -45,7 +56,7 @@ export default function ChallengesScreen({ onClose }) {
 
   if (!myId) {
     return (
-      <div className="screen">
+      <div className={shell}>
         <Header onClose={onClose} />
         <p className="set-note">Челленджи работают только с аккаунтом: соревноваться не с кем, пока данные лежат на одном устройстве.</p>
       </div>
@@ -61,7 +72,7 @@ export default function ChallengesScreen({ onClose }) {
   }
 
   return (
-    <div className="screen">
+    <div className={shell}>
       <Header onClose={onClose} />
 
       {loading && <p className="muted" style={{ fontSize: 14 }}>Загружаем…</p>}
@@ -116,6 +127,10 @@ export default function ChallengesScreen({ onClose }) {
 }
 
 function Header({ onClose }) {
+  // Во встроенном режиме заголовок экрана не нужен: над ним уже стоит
+  // «Общение» и полоска вкладок, и второй крупный заголовок только съедал бы
+  // первый экран прокрутки.
+  if (!onClose) return null
   return (
     <div className="row between" style={{ alignItems: 'flex-start', marginBottom: 18 }}>
       <div>

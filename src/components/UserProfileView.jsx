@@ -196,12 +196,11 @@ export default function UserProfileView({
   isOwnProfile = false,
   userId,
   profile,
-  publicId,
+  username,
   dayOf,
   days,
   customFoods,
-  friendsCount = null,
-  onOpenFriends,
+  counts = null,
   onEditProfile,
   onReactToMeal,
   signInPrompt = null,
@@ -239,21 +238,20 @@ export default function UserProfileView({
           <Avatar src={p.avatar} name={name} size={112} />
         </div>
         <div style={{ fontSize: 22, fontWeight: 680, letterSpacing: '-0.3px', marginTop: 12 }}>{name}</div>
-        {isOwnProfile && publicId && (
-          <div className="tabular" style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 3, letterSpacing: '0.04em' }}>
-            {publicId}
+        {/* Ник показываем и в своём профиле, и в чужом: это адрес человека,
+            по которому его находят, а не служебный код. Без приставки «@» —
+            так же, как он записан в базе и как его вводят в поиске. */}
+        {username && (
+          <div style={{ fontSize: 13.5, color: 'var(--ink-3)', marginTop: 3 }}>
+            {username}
           </div>
         )}
-        {friendsCount != null && (
-          <button
-            onClick={onOpenFriends}
-            style={{ marginTop: 12, fontSize: 14, color: 'var(--ink-2)' }}
-            disabled={!onOpenFriends}
-          >
-            Друзья · <span className="tabular" style={{ fontWeight: 680, color: 'var(--ink)' }}>{friendsCount}</span>
-          </button>
-        )}
       </div>
+
+      {/* Счётчики (подписчики / подписки / друзья) приходят сверху отдельным
+          узлом: их источник — сервер, а этот компонент работает и без сети,
+          на локальном профиле. Раньше здесь стояла одна кнопка «Друзья · N». */}
+      {counts}
 
       {/* ── Три части профиля ─────────────────────────────────────────────── */}
       <div className="seg" style={{ marginBottom: 16 }}>

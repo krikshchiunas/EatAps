@@ -7,7 +7,8 @@
 // friend_state, меню «заглушить / удалить из друзей» и реакция на конкретную
 // еду, которая уходит ЛИЧНЫМ сообщением в чат (MealReactSheet).
 import { useState, useEffect, useRef } from 'react'
-import { pullFriendState, removeFriendship, sendChatMessage } from '../lib/supabase.js'
+import { pullFriendState, sendChatMessage } from '../lib/supabase.js'
+import { unfollow } from '../lib/social.js'
 import { normalizeError } from '../lib/authErrors.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
 import { useScrollLock } from '../lib/useScrollLock.js'
@@ -182,7 +183,9 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
   }, [menuOpen])
 
   const handleRemove = async () => {
-    await removeFriendship(friend.rowId)
+    // Дружба — это взаимная подписка, поэтому «удалить из друзей» и есть
+    // отписка: она снимает и связь, и доступ к дневнику.
+    await unfollow(myId, friend.id)
     onRemoved()
   }
 
@@ -241,6 +244,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
           <UserProfileView
             isOwnProfile={false}
             userId={friend.id}
+            username={friend.username || null}
             profile={{ ...p, name, avatar }}
             // Друг присылает дни без своих приёмов пищи — groupDayByMeal об
             // этом знает и ничего не теряет.

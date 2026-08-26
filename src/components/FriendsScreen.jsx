@@ -1,23 +1,34 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react'
 import { useStore } from '../store.jsx'
-import { listFriendships, listConversations, acceptFriend, removeFriendship } from '../lib/supabase.js'
+import { listFriends, listConversations } from '../lib/supabase.js'
 import { getMutedFriends, toggleFriendMuted, forgetMutedFriend } from '../lib/notifications.js'
-import AddFriendSheet from './AddFriendSheet.jsx'
 import ChatView from './ChatView.jsx'
 import UserSearch from './UserSearch.jsx'
-import PeopleList from './PeopleList.jsx'
 import PublicProfile from './PublicProfile.jsx'
 import NotificationsScreen from './NotificationsScreen.jsx'
-import { listFollowers, listFollowing, unreadNotificationCount, subscribeToNotifications } from '../lib/social.js'
+import { unfollow, unreadNotificationCount, subscribeToNotifications } from '../lib/social.js'
 
-// Разделы социального хаба. Ленты здесь НЕТ намеренно: она переехала в нижнюю
-// навигацию отдельной вкладкой, на место бывшей зелёной «＋». Держать её ещё и
-// тут значило бы иметь один и тот же экран в двух местах с двумя независимыми
-// состояниями прокрутки и загрузки.
+// Разделы социального хаба.
+//
+// Ленты здесь НЕТ намеренно: она переехала в нижнюю навигацию отдельной
+// вкладкой. Держать её ещё и тут значило бы иметь один и тот же экран в двух
+// местах с двумя независимыми состояниями прокрутки и загрузки.
+//
+// Подписчиков и подписок здесь тоже больше нет: списки про МЕНЯ переехали в
+// мой профиль, к остальному про меня. Осталось ровно три вопроса: с кем я уже
+// общаюсь, кого я ищу, что произошло.
 const VIEWS = [
   { key: 'friends', label: 'Друзья' },
-  { key: 'people',  label: 'Люди' },
+  { key: 'search',  label: 'Поиск' },
   { key: 'events',  label: 'События' },
+]
+
+// «События» — это и уведомления, и челленджи. Челленджи жили за иконкой 🏁 в
+// шапке: соревнование с друзьями — событие, а не постоянный раздел, и находить
+// его человек шёл в единственное место, где о событиях вообще идёт речь.
+const EVENT_TABS = [
+  { key: 'feed',       label: 'Уведомления' },
+  { key: 'challenges', label: 'Челленджи' },
 ]
 
 import LazyBoundary from './LazyBoundary.jsx'
@@ -129,21 +140,17 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const { user, supabaseEnabled } = useStore()
   const myId = user?.id || ''
 
-  const [lists, setLists] = useState({ friends: [], incoming: [], outgoing: [] })
+  const [friends, setFriends] = useState([])
   const [convs, setConvs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [addOpen, setAddOpen] = useState(false)
-  const [challengesOpen, setChallengesOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [chatFriend, setChatFriend] = useState(null)
   const [openMenu, setOpenMenu] = useState(null) // friend.id with open menu
   const [dropUp, setDropUp] = useState(false)    // раскрывать меню вверх
   const [menuErr, setMenuErr] = useState(null)
   const [view, setView] = useState('friends')
+  const [eventTab, setEventTab] = useState('feed')
   const [profileUser, setProfileUser] = useState(null)
-  const [peopleTab, setPeopleTab] = useState('search') // search | followers | following
-  const [myPeople, setMyPeople] = useState(null)
   const [unreadEvents, setUnreadEvents] = useState(0)
   const [pinned, setPinned] = useState(getPinned)
   const [muted, setMuted] = useState(getMutedFriends)
@@ -230,8 +237,8 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const reload = async () => {
     try {
       setLoading(true)
-      const [l, c] = await Promise.all([listFriendships(myId), listConversations(myId)])
-      setLists(l)
+      const [f, c] = await Promise.all([listFriends(myId), listConversations(myId)])
+      setFriends(f)
       setConvs(c)
     } catch { /* ignore */ } finally { setLoading(false) }
   }
@@ -251,25 +258,16 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
     return subscribeToNotifications(myId, refreshEvents)
   }, [myId, refreshEvents])
 
-  useEffect(() => {
-    if (view !== 'people' || peopleTab === 'search') return
-    let alive = true
-    ;(async () => {
-      try {
-        const list = peopleTab === 'followers' ? await listFollowers(myId) : await listFollowing(myId)
-        if (alive) setMyPeople(list)
-      } catch { if (alive) setMyPeople([]) }
-    })()
-    return () => { alive = false }
-  }, [view, peopleTab, myId])
-
-  const act = async (fn) => { setBusy(true); await fn(); setBusy(false); reload() }
-
   const lastById = useMemo(() => new Map(convs.map(c => [c.id, c.last])), [convs])
 
   const sorted = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    let arr = q ? lists.friends.filter(f => (f.name || '').toLowerCase().includes(q)) : lists.friends
+    const q = query.trim().toLowerCase().replace(/^@+/, '')
+    // Ищем и по имени, и по нику: в списке видно имя, но помнят люди обычно
+    // ник — по нему же человека находили в поиске.
+    let arr = q
+      ? friends.filter((f) =>
+          (f.name || '').toLowerCase().includes(q) || (f.username || '').includes(q))
+      : friends
     return [...arr].sort((a, b) => {
       const aPin = pinned.indexOf(a.id), bPin = pinned.indexOf(b.id)
       if (aPin !== -1 && bPin !== -1) return aPin - bPin
@@ -279,7 +277,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
       const tb = lastById.has(b.id) ? Date.parse(lastById.get(b.id).created_at) : 0
       return tb - ta
     })
-  }, [lists.friends, query, pinned, lastById])
+  }, [friends, query, pinned, lastById])
 
   const handlePin = (id) => {
     const res = togglePin(id)
@@ -291,12 +289,14 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
     setMuted(toggleFriendMuted(id)); setOpenMenu(null)
   }
 
-  const handleRemove = async (rowId, friendId) => {
-    setOpenMenu(null); setBusy(true)
-    await removeFriendship(rowId)
+  // «Удалить из друзей» = отписаться. Дружба — производная от взаимной
+  // подписки, отдельной строки, которую можно было бы удалить, у клиента нет.
+  const handleRemove = async (friendId) => {
+    setOpenMenu(null)
+    await unfollow(myId, friendId)
     setPinned(forgetPinned(friendId))
     setMuted(forgetMutedFriend(friendId))
-    setBusy(false); reload()
+    reload()
   }
 
   const swipeStyle = { willChange: 'transform', touchAction: 'pan-y' }
@@ -306,7 +306,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
       <div className="screen" ref={screenRef} style={swipeStyle}>
         <h1 className="h1" style={{ margin: '4px 0 20px' }}>Друзья</h1>
         <div className="card">
-          <p className="muted" style={{ fontSize: 15 }}>Войдите в аккаунт (вкладка «Профиль»), чтобы добавлять друзей.</p>
+          <p className="muted" style={{ fontSize: 15 }}>Войдите в аккаунт (вкладка «Профиль»), чтобы находить людей и общаться.</p>
         </div>
       </div>
     )
@@ -314,15 +314,10 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
 
   return (
     <div className="screen" ref={screenRef} style={swipeStyle} onClick={() => openMenu && setOpenMenu(null)}>
-      <div className="row between" style={{ alignItems: 'center', margin: '0 0 14px' }}>
-        <h1 className="h1" style={{ margin: '4px 0 0' }}>Общение</h1>
-        <div className="row gap8">
-          <button className="iconbtn" onClick={() => setChallengesOpen(true)} aria-label="Челленджи" title="Челленджи">🏁</button>
-          <button className="btn" style={{ width: 'auto', height: 40, padding: '0 16px', fontSize: 14 }} onClick={() => setAddOpen(true)}>
-            ＋ По ID
-          </button>
-        </div>
-      </div>
+      {/* В шапке больше нет кнопок. «＋ По ID» ушла вместе с публичными
+          кодами — людей теперь находят по нику во вкладке «Поиск», а 🏁
+          переехала в «События». */}
+      <h1 className="h1" style={{ margin: '4px 0 14px' }}>Общение</h1>
 
       <div className="seg" style={{ marginBottom: 16, overflowX: 'auto' }}>
         {VIEWS.map((v) => (
@@ -347,41 +342,44 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
       </div>
 
       {view === 'events' && (
-        <NotificationsScreen
-          onChanged={refreshEvents}
-          onNavigate={(t) => {
-            if (t.screen === 'profile') setProfileUser(t.userId)
-            else if (t.screen === 'requests') setView('friends')
-            // Реакции и ответы приходят только на СВОИ мысли, поэтому пост
-            // всегда лежит в собственном профиле — туда и открываем, а не в
-            // ленту, где его пришлось бы искать прокруткой.
-            else if (t.screen === 'post') setProfileUser(myId)
-            else if (t.screen === 'chat') {
-              const f = lists.friends.find((x) => x.id === t.userId)
-              if (f) setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId })
-              else setProfileUser(t.userId)
-            }
-          }}
-        />
-      )}
-
-      {view === 'people' && (
         <div>
           <div className="seg" style={{ marginBottom: 14 }}>
-            <button className={peopleTab === 'search' ? 'on' : ''} onClick={() => setPeopleTab('search')}>Поиск</button>
-            <button className={peopleTab === 'followers' ? 'on' : ''} onClick={() => setPeopleTab('followers')}>Подписчики</button>
-            <button className={peopleTab === 'following' ? 'on' : ''} onClick={() => setPeopleTab('following')}>Подписки</button>
+            {EVENT_TABS.map((t) => (
+              <button key={t.key} className={eventTab === t.key ? 'on' : ''} onClick={() => setEventTab(t.key)}>
+                {t.label}
+              </button>
+            ))}
           </div>
-          {peopleTab === 'search'
-            ? <UserSearch onOpenProfile={setProfileUser} />
-            : <PeopleList
-                people={myPeople || []}
-                myId={myId}
-                onOpen={setProfileUser}
-                empty={peopleTab === 'followers' ? 'На вас пока никто не подписан' : 'Вы пока ни на кого не подписаны'}
-              />}
+
+          {eventTab === 'feed' && (
+            <NotificationsScreen
+              onChanged={refreshEvents}
+              onNavigate={(t) => {
+                if (t.screen === 'profile') setProfileUser(t.userId)
+                // Реакции и ответы приходят только на СВОИ мысли, поэтому пост
+                // всегда лежит в собственном профиле — туда и открываем, а не в
+                // ленту, где его пришлось бы искать прокруткой.
+                else if (t.screen === 'post') setProfileUser(myId)
+                else if (t.screen === 'chat') {
+                  const f = friends.find((x) => x.id === t.userId)
+                  if (f) setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, username: f.username })
+                  else setProfileUser(t.userId)
+                }
+              }}
+            />
+          )}
+
+          {eventTab === 'challenges' && (
+            <LazyBoundary onClose={() => setEventTab('feed')}>
+              <Suspense fallback={<p className="muted" style={{ fontSize: 14 }}>Загружаем…</p>}>
+                <ChallengesScreen />
+              </Suspense>
+            </LazyBoundary>
+          )}
         </div>
       )}
+
+      {view === 'search' && <UserSearch onOpenProfile={setProfileUser} />}
 
       {view === 'friends' && (<>
       {/* Поиск */}
@@ -395,36 +393,15 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
         />
       </div>
 
-      {/* Входящие заявки */}
-      {lists.incoming.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 13, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
-            Заявки · {lists.incoming.length}
-          </div>
-          {lists.incoming.map((r) => (
-            <div key={r.rowId} className="card" style={{ marginBottom: 8, padding: '10px 14px' }}>
-              <div className="row between" style={{ alignItems: 'center' }}>
-                <div className="row gap12" style={{ alignItems: 'center', minWidth: 0 }}>
-                  <Avatar name={r.name} />
-                  <div style={{ fontWeight: 600 }}>{r.name || 'Пользователь'}</div>
-                </div>
-                <div className="row gap8" style={{ flex: '0 0 auto' }}>
-                  <button className="btn" style={{ width: 'auto', height: 36, padding: '0 14px', fontSize: 13 }} disabled={busy} onClick={() => act(() => acceptFriend(r.rowId))}>Принять</button>
-                  <button className="btn ghost" style={{ width: 'auto', height: 36, padding: '0 14px', fontSize: 13 }} disabled={busy} onClick={() => act(() => removeFriendship(r.rowId))}>✕</button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Список друзей */}
       {loading ? (
         <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
       ) : sorted.length === 0 ? (
         <div className="card">
-          <p className="muted" style={{ fontSize: 15 }}>
-            {query ? 'Никого не нашли.' : 'Пока никого нет. Нажмите «＋ Добавить» и вставьте ID друга.'}
+          <p className="muted" style={{ fontSize: 15, lineHeight: 1.5 }}>
+            {query
+              ? 'Никого не нашли.'
+              : 'Пока никого нет. Найдите человека по нику во вкладке «Поиск» и подпишитесь — как только он подпишется в ответ, вы станете друзьями.'}
           </p>
         </div>
       ) : sorted.map((f) => {
@@ -434,11 +411,11 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
         const isMenuOpen = openMenu === f.id
 
         return (
-          <div key={f.rowId} style={{ position: 'relative', marginBottom: 8 }}>
+          <div key={f.id} style={{ position: 'relative', marginBottom: 8 }}>
             <button
               className="card"
               style={{ padding: '12px 48px 12px 14px', width: '100%', textAlign: 'left' }}
-              onClick={() => setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId })}
+              onClick={() => setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, username: f.username })}
             >
               <div className="row gap12" style={{ alignItems: 'center' }}>
                 <Avatar src={f.avatar} name={f.name} />
@@ -501,7 +478,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
                 dropUp={dropUp}
                 onPin={() => handlePin(f.id)}
                 onMute={() => handleMute(f.id)}
-                onRemove={() => handleRemove(f.rowId, f.id)}
+                onRemove={() => handleRemove(f.id)}
                 onClose={() => setOpenMenu(null)}
               />
             )}
@@ -511,24 +488,17 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
 
       </>)}
 
-      {challengesOpen && (
-        <LazyBoundary onClose={() => setChallengesOpen(false)}>
-          <Suspense fallback={null}>
-            <ChallengesScreen onClose={() => setChallengesOpen(false)} />
-          </Suspense>
-        </LazyBoundary>
-      )}
-
-      {addOpen && <AddFriendSheet onClose={() => setAddOpen(false)} onSent={reload} />}
-
       {profileUser && (
         <PublicProfile
           userId={profileUser}
           onClose={() => { setProfileUser(null); reload() }}
           onOpenProfile={setProfileUser}
-          onOpenChat={(uid) => {
-            const f = lists.friends.find((x) => x.id === uid)
-            if (f) { setProfileUser(null); setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, rowId: f.rowId }) }
+          onOpenChat={(peer) => {
+            // Профиль отдаёт уже загруженные имя и аватар — второй запрос за
+            // ними не нужен, и чат открывается даже для друга, которого нет в
+            // текущем списке (он мог появиться только что).
+            setProfileUser(null)
+            setChatFriend(peer)
           }}
         />
       )}

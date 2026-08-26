@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom'
 import { useStore } from '../store.jsx'
 import { SYNC } from '../lib/syncEngine.js'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
-import { deleteAccount, listFriendships } from '../lib/supabase.js'
+import { deleteAccount, listFriends } from '../lib/supabase.js'
 import {
   notificationsSupported, notificationPermission, requestNotificationPermission,
   getMutedFriends, toggleFriendMuted,
@@ -331,8 +331,8 @@ export function PrivacyPanel({ onClose, onOpenFriends }) {
   useEffect(() => {
     if (!user?.id) return
     let cancelled = false
-    listFriendships(user.id)
-      .then((l) => { if (!cancelled) setFriendsCount(l.friends.length) })
+    listFriends(user.id)
+      .then((l) => { if (!cancelled) setFriendsCount(l.length) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [user?.id])
@@ -392,15 +392,15 @@ export function NotificationsPanel({ onClose }) {
   }, [])
 
   // Имена заглушённых берём из списка друзей — отдельного запроса для этого
-  // в проекте нет, а listFriendships уже отдаёт имя и фото.
+  // в проекте нет, а list_friends уже отдаёт имя и фото.
   useEffect(() => {
     if (!user?.id || muted.length === 0) return
     let cancelled = false
-    listFriendships(user.id)
+    listFriends(user.id)
       .then((l) => {
         if (cancelled) return
         const map = {}
-        for (const f of l.friends) map[f.id] = f
+        for (const f of l) map[f.id] = f
         setMutedBriefs(map)
       })
       .catch(() => {})

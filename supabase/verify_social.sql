@@ -7,8 +7,8 @@
 -- Проверяет ДВА разных класса вещей:
 --   • структуру — таблицы, колонки, индексы, политики, функции на месте;
 --   • инварианты модели — то, что структура сама по себе не гарантирует:
---     отсутствие INSERT-политики на уведомлениях, приватность public_id,
---     отсутствие дублей в графе, согласованность username.
+--     отсутствие INSERT-политики на уведомлениях, отсутствие дублей в графе,
+--     согласованность username.
 --
 -- Проверку «пользователь A не видит приватный пост пользователя B» этот файл
 -- не делает и сделать не может: он выполняется от service_role, для которого
@@ -129,16 +129,17 @@ with checks(порядок, проверка, ok, деталь) as (
     'нарушений: ' || (select count(*)::text from public.profiles
       where username is not null and username !~ '^[a-z0-9_]{3,20}$')
 
-  union all select 20, 'public_id НЕ раздаётся публично',
-    -- Прямое чтение profiles закрыто на владельца, а публичные RPC (user_cards,
-    -- search_users, user_profile) не содержат public_id в списке возврата.
-    not exists (
-      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname='public'
-        and p.proname in ('user_cards','search_users','user_profile','list_followers','list_following')
-        and pg_get_functiondef(p.oid) ~* '\mpublic_id\M'
-    ),
-    'ни одна публичная RPC не отдаёт public_id'
+  union all select 20, 'поиск людей идёт только по нику',
+    -- Отображаемое имя выпало из условия поиска: оно неуникально, и по нему
+    -- нельзя выбрать нужного человека. Проверяем, что display_name не
+    -- участвует в WHERE функции поиска.
+    coalesce((
+      select pg_get_functiondef(p.oid) not like '%lower(p.display_name) like%'
+         and pg_get_functiondef(p.oid) like '%p.username like%'
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname='search_users' limit 1
+    ), false),
+    'search_users сопоставляет только username'
 
   union all select 21, 'прямое чтение profiles ограничено владельцем',
     exists (select 1 from pg_policies
@@ -208,11 +209,13 @@ with checks(порядок, проверка, ok, деталь) as (
     ),
     'аватаров в профилях: ' || (select count(*)::text from public.profiles where avatar_url is not null)
 
-  union all select 30, 'user_brief не раздаёт public_id посторонним',
-    (select pg_get_functiondef(p.oid) like '%coach_links%'
+  union all select 30, 'user_brief отдаёт ник, а не удалённый код',
+    coalesce((
+      select pg_get_functiondef(p.oid) not like '%public_id%'
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname='public' and p.proname='user_brief'),
-    'код добавления в друзья виден только владельцу и связанному тренеру'
+      where n.nspname='public' and p.proname='user_brief'
+    ), false),
+    'прятать больше нечего: ник и так публичен, его отдаёт поиск'
 
   union all select 31, 'сообщения по-прежнему только между друзьями',
     exists (select 1 from pg_policies
@@ -260,6 +263,6 @@ order by порядок;
 --   6. A блокирует B. Проверить: B не видит постов A ни на каком уровне
 --      visibility, включая 'public'; строки follows между ними исчезли.
 --
---   7. От B: select public_id from profiles where user_id = '<A>';
+--   7. От B: select * from profiles where user_id = '<A>';
 --                                                          → 0 строк
 -- ═══════════════════════════════════════════════════════════════════════════

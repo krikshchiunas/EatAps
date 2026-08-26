@@ -1,5 +1,8 @@
 // Список людей: результаты поиска, подписчики, подписки, друзья.
 //
+// Строка показывает имя и под ним ник — без приставки «@»: ник в EatAps
+// пишется так же, как хранится и как его вводят в поиске.
+//
 // Один компонент на все четыре случая намеренно — раньше каждый список рисовал
 // строку человека сам, и они успели разойтись в мелочах. Отличаются списки
 // только источником данных и тем, показывать ли кнопку подписки.
@@ -32,7 +35,7 @@ export function PersonRow({ person, myId, rel, onRelChange, onOpen, showFollow =
             {name}
           </div>
           <div className="muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            @{person.username}{label ? ` · ${label}` : ''}
+            {person.username}{label ? ` · ${label}` : ''}
           </div>
         </div>
       </button>
