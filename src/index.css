@@ -655,17 +655,40 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 /* ── Слайдер активности ── */
+/* Зона ползунка активности: горизонтальный жест здесь принадлежит ползунку,
+   а не пейджеру дней (см. data-no-pager в DayScreen). По вертикали зона
+   по-прежнему скроллится — прокрутка экрана дня не ломается. */
+.activity-zone { touch-action: pan-y; }
+
 .activity-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 6px;
-  border-radius: 3px;
+  /* Высота — это зона захвата пальцем, а не толщина полосы: сама полоса
+     рисуется на псевдоэлементе трека. Было 6px, и попасть по ползунку с
+     первого раза почти не получалось. Отрицательные margin возвращают
+     карточке прежнюю плотность. */
+  height: 36px;
+  margin: -8px 0;
+  background: transparent;
   outline: none;
   cursor: pointer;
   padding: 0;
-  margin: 0;
   display: block;
+  /* Жест по ползунку — только ползунку: ни прокрутки страницы, ни свайпа дня. */
+  touch-action: none;
+}
+/* --activity-pct приходит инлайном из React (доля заполнения трека). */
+.activity-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--primary) 0%,
+    var(--primary) var(--activity-pct, 0%),
+    var(--border) var(--activity-pct, 0%),
+    var(--border) 100%
+  );
 }
 .activity-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -678,7 +701,7 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   box-shadow: 0 1px 8px rgba(0,0,0,0.18);
   cursor: grab;
   transition: transform 0.12s;
-  margin-top: -11px;
+  margin-top: -11px; /* центр бегунка 28px по треку 6px */
 }
 .activity-slider:active::-webkit-slider-thumb { transform: scale(1.15); cursor: grabbing; }
 .activity-slider::-moz-range-thumb {
@@ -689,10 +712,21 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   border: 2.5px solid var(--primary);
   box-shadow: 0 1px 8px rgba(0,0,0,0.18);
   cursor: grab;
+  transition: transform 0.12s;
 }
-.activity-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; }
+.activity-slider:active::-moz-range-thumb { transform: scale(1.15); cursor: grabbing; }
 .activity-slider::-moz-range-track { height: 6px; border-radius: 3px; background: var(--border); }
 .activity-slider::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--primary); }
+
+/* Цель дня, пересчитанная под текущий балл активности: подтверждение, что
+   ползунок меняет КБЖУ, а не только подпись под собой. */
+.activity-goal {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 13px;
+}
+.activity-goal__delta { font-size: 12px; margin-top: 6px; line-height: 1.45; }
 
 /* ── Статистика ── */
 .stat-seg button { height: 44px; font-size: 14px; }

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
-import { targetsForDay, ACTIVITY_ORDER, ACTIVITY_DAY, dayWeight, hasDayActivity, effectiveActivity } from '../lib/body.js'
+import { targetsForDay, baselineTargetsForDay, profileScore, ACTIVITY_ORDER, ACTIVITY_DAY, dayWeight, hasDayActivity, effectiveActivity } from '../lib/body.js'
 import { isLowLogged } from '../lib/stats.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { getMealSections, foodsForMeal, resolvedTime, newCustomSection } from '../lib/meals.js'
@@ -112,8 +112,10 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 
     const onStart = (e) => {
       if (animating.current) return
-      // Свайп строки приёма пищи имеет приоритет — не перехватываем.
-      if (e.target.closest?.('[data-swipeable]')) return
+      // Свайп строки приёма пищи и собственные горизонтальные жесты (ползунок
+      // активности) имеют приоритет — пейджер туда не лезет. Без исключения
+      // палец, ведущий ползунок влево/вправо, листал день вместо перетаскивания.
+      if (e.target.closest?.('[data-swipeable],[data-no-pager]')) return
       const t = e.touches[0]
       cancelAnim()
       gesture.current = {
@@ -317,6 +319,9 @@ function DayBody({
   // этого дня. День на диване и день с тренировкой — разные цели по калориям
   // (см. lib/body.js). Без записей вес и активность берутся из профиля, как раньше.
   const t = useMemo(() => targetsForDay(days, date, profile) || profile?.targets || {}, [days, date, profile])
+  // Та же дата и тот же вес, но активность из анкеты — база для подписи
+  // «ползунок добавил/убрал N ккал».
+  const baseT = useMemo(() => baselineTargetsForDay(days, date, profile) || profile?.targets || {}, [days, date, profile])
   const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0)
   const calGoal = num(t.calories)
   const proteinGoal = num(t.protein)
@@ -365,6 +370,8 @@ function DayBody({
         date={date}
         day={day}
         profile={profile}
+        targets={t}
+        baseTargets={baseT}
         calGoal={calGoal}
         setDayWeight={setDayWeight}
         setDayActivityScore={setDayActivityScore}
@@ -656,21 +663,13 @@ function scoreEmoji(score) {
   return '🔥'
 }
 
-function profileDefaultScore(profile) {
-  const key = profile?.activity
-  if (key === 'sedentary') return 12
-  if (key === 'moderate')  return 62
-  if (key === 'high')      return 87
-  return 37 // light
-}
-
-function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivityScore }) {
+function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWeight, setDayActivityScore }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const weight = dayWeight(day)
 
   const hasScore = day.activityScore != null && Number.isFinite(Number(day.activityScore))
-  const score = hasScore ? Number(day.activityScore) : profileDefaultScore(profile)
+  const score = hasScore ? Number(day.activityScore) : profileScore(profile)
   const isDefault = !hasScore
 
   useEffect(() => { setDraft(weight != null ? String(weight) : '') }, [date, weight])
@@ -683,10 +682,25 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivitySco
     setDayWeight(date, n)
   }
 
-  const pct = score
-  const trackStyle = {
-    background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${pct}%, var(--border) ${pct}%, var(--border) 100%)`,
-  }
+  // Полоса рисуется на псевдоэлементе трека, поэтому долю заполнения передаём
+  // переменной: сам input теперь высокий (зона захвата пальцем), см. index.css.
+  const trackStyle = { '--activity-pct': `${score}%` }
+
+  // Насколько балл сдвинул цель относительно активности из анкеты — это и есть
+  // ответ на «ползунок вообще на что-то влияет?».
+  const goal = useMemo(() => {
+    const n = (x) => (Number.isFinite(Number(x)) ? Math.round(Number(x)) : null)
+    const calories = n(targets?.calories)
+    if (!calories || calories <= 0) return null
+    const baseCal = n(baseTargets?.calories)
+    return {
+      calories,
+      protein: n(targets?.protein) ?? 0,
+      fat: n(targets?.fat) ?? 0,
+      carbs: n(targets?.carbs) ?? 0,
+      delta: baseCal ? calories - baseCal : 0,
+    }
+  }, [targets, baseTargets])
 
   return (
     <div className="card" style={{ marginTop: 14 }}>
@@ -729,7 +743,9 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivitySco
             </p>
           </div>
 
-          <div>
+          {/* data-no-pager: вся зона ползунка исключена из горизонтального жеста
+              пейджера дней — иначе перетаскивание влево/вправо листало день. */}
+          <div className="activity-zone" data-no-pager="true">
             <div className="row between" style={{ alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 550 }}>Активность дня</div>
               <span className="tabular" style={{ fontSize: 24, fontWeight: 700, color: 'var(--primary)', letterSpacing: '-0.5px', lineHeight: 1 }}>
@@ -753,6 +769,26 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivitySco
               {ACTIVITY_HINT(score)}
               {isDefault && <span style={{ color: 'var(--ink-3)' }}> — из анкеты, передвиньте для изменения</span>}
             </p>
+
+            {goal && (
+              <div className="activity-goal">
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Цель на этот день</div>
+                <div className="row" style={{ gap: 14, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                  <span className="tabular" style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.4px' }}>
+                    {goal.calories}
+                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-3)' }}> ккал</span>
+                  </span>
+                  <span className="tabular" style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+                    Б {goal.protein} · Ж {goal.fat} · У {goal.carbs} г
+                  </span>
+                </div>
+                <div className="activity-goal__delta" style={{ color: goal.delta === 0 ? 'var(--ink-3)' : 'var(--primary)' }}>
+                  {goal.delta === 0
+                    ? 'Столько же, сколько по активности из анкеты'
+                    : `${goal.delta > 0 ? '+' : '−'}${Math.abs(goal.delta)} ккал к цели по анкете — ползунок пересчитал КБЖУ`}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -15,12 +15,24 @@ export const GOALS = {
 
 const round10 = (n) => Math.round(n / 10) * 10
 
+// Активность влияет и на белок: при тяжёлых нагрузках растёт потребность в
+// восстановлении мышц, при постельном режиме — падает. Считаем от «лёгкой»
+// активности (1.375), для которой proteinPerKg целей и подобран, и сдвигаем
+// умеренно — рамки не дают уйти в крайности при score 0 и 100.
+const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n))
+const proteinPerKgFor = (base, factor) => base + clamp((factor - 1.375) * 0.6, -0.15, 0.35)
+
+// activityFactor (число) имеет приоритет над activity (ключ): день задаёт
+// активность непрерывным баллом 0–100, профиль — одним из четырёх уровней.
 export function computeTargets(profile) {
-  const { sex, age, height, weight, activity, goal } = profile
+  const { sex, age, height, weight, activity, goal, activityFactor } = profile
   const bmr = 10 * weight + 6.25 * height - 5 * age + (sex === 'male' ? 5 : -161)
-  const tdee = bmr * (ACTIVITY[activity]?.factor ?? 1.375)
+  const factor = Number.isFinite(Number(activityFactor))
+    ? Number(activityFactor)
+    : (ACTIVITY[activity]?.factor ?? 1.375)
+  const tdee = bmr * factor
   const calories = round10(Math.max(1200, tdee + (GOALS[goal]?.kcalAdjust ?? 0)))
-  const protein = Math.round(weight * (GOALS[goal]?.proteinPerKg ?? 1.6))
+  const protein = Math.round(weight * proteinPerKgFor(GOALS[goal]?.proteinPerKg ?? 1.6, factor))
   const fat = Math.round((calories * 0.27) / 9)
   const carbs = Math.round((calories - protein * 4 - fat * 9) / 4)
   return {
@@ -30,6 +42,7 @@ export function computeTargets(profile) {
     carbs: Math.max(0, carbs),
     bmr: Math.round(bmr),
     tdee: Math.round(tdee),
+    activityFactor: factor,
   }
 }
 
