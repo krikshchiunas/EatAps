@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store.jsx'
+import { planByTier } from '../lib/subscription.js'
 
 // Форма ввода промокода — общая для экрана тарифов и «Настроек».
 // Логика гашения одна (applyPromo из store), здесь только UI и текст ошибок:
@@ -31,7 +32,7 @@ export default function PromoRedeemForm({ label = 'Есть промокод?' }
     setBusy(false)
     if (res?.ok) {
       const until = new Date(res.until).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
-      const name = res.tier === 'AI_PLUS' ? 'AI+' : 'AI'
+      const name = planByTier(res.tier)?.name || res.tier
       setResult({ ok: true, text: `Готово: ${name} до ${until}.` })
       setCode('')
     } else {

@@ -26,6 +26,7 @@ import ConfirmDialog from './ConfirmDialog.jsx'
 import PromoRedeemForm from './PromoRedeemForm.jsx'
 import LegalSheet from './LegalSheet.jsx'
 import { Avatar } from './FriendsScreen.jsx'
+import { planByTier } from '../lib/subscription.js'
 
 // Версию подставляет сборка из package.json (см. vite.config.js). Фолбэк —
 // на случай запуска в среде без define (например, тестовый рендер).
@@ -127,7 +128,7 @@ export function PromoPanel({ onClose }) {
         <Group note="Промокод действует, пока не закончится подписка Stripe того же или более высокого уровня — тогда он просто перестанет быть нужен.">
           <div className="set-row" style={{ alignItems: 'flex-start' }}>
             <span style={{ minWidth: 0 }}>
-              {subscription.tier === 'AI_PLUS' ? 'AI+' : 'AI'} по коду {subscription.promoCode}
+              {planByTier(subscription.tier)?.name || subscription.tier} по коду {subscription.promoCode}
               <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2 }}>
                 до {new Date(subscription.promoUntil).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
               </span>
