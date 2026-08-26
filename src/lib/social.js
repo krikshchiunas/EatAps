@@ -12,6 +12,7 @@
 import { supabase } from './supabase.js'
 import { normalizeError } from './authErrors.js'
 import { toRelationship, EMPTY_RELATIONSHIP } from './relationship.js'
+import { isMissingColumn } from './pgErrors.js'
 
 // «Миграция ещё не прогнана»: функции или таблицы нет. Это не ошибка
 // приложения — раздел просто недоступен, и красный текст тут не нужен.
@@ -212,24 +213,69 @@ export async function markAllNotificationsRead() {
 
 // Realtime на уведомления. Источник истины — таблица, а не локальный счётчик:
 // пометив прочитанным на телефоне, человек должен увидеть это и на ноутбуке.
+//
+// Канал ОДИН на пользователя, слушателей у него сколько угодно. Это не
+// экономия сокетов, а обязательное условие: supabase-js на один и тот же topic
+// отдаёт ОДИН И ТОТ ЖЕ объект канала (RealtimeClient.channel ищет существующий
+// по topic), а второй `.on('postgres_changes')` по уже подписанному каналу
+// библиотека считает ошибкой и бросает исключение:
+//
+//   cannot add `postgres_changes` callbacks for realtime:notifications:… after `subscribe()`
+//
+// Подписчиков ровно два — бейдж в нижней навигации (App) и хаб «Общение»
+// (FriendsScreen), — и второй ронял всё приложение в RootErrorBoundary.
+let notifications = null // { userId, channel, listeners: Set }
+
 export function subscribeToNotifications(myId, onChange) {
   if (!supabase || !myId) return () => {}
-  const ch = supabase
-    .channel(`notifications:${myId}`)
-    .on('postgres_changes', {
-      event: '*', schema: 'public', table: 'notifications',
-      filter: `recipient_id=eq.${myId}`,
-    }, (payload) => onChange?.(payload))
-    .subscribe()
-  return () => { try { supabase.removeChannel(ch) } catch {} }
+
+  // Канал мёртв (сменился аккаунт или его сняли снаружи) — заводим заново.
+  const alive = notifications
+    && notifications.userId === myId
+    && supabase.getChannels().includes(notifications.channel)
+  if (notifications && !alive) {
+    try { supabase.removeChannel(notifications.channel) } catch {}
+    notifications = null
+  }
+
+  if (!notifications) {
+    const listeners = new Set()
+    const channel = supabase
+      .channel(`notifications:${myId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'notifications',
+        filter: `recipient_id=eq.${myId}`,
+      }, (payload) => {
+        // Копия списка: обработчик может отписаться прямо изнутри. Упавший
+        // слушатель не должен лишить события остальных.
+        for (const fn of [...listeners]) { try { fn?.(payload) } catch {} }
+      })
+      .subscribe()
+    notifications = { userId: myId, channel, listeners }
+  }
+
+  const hub = notifications
+  hub.listeners.add(onChange)
+  // Канал живёт до смены аккаунта, а не до последнего отписавшегося. Снимать и
+  // заводить его заново на каждый уход с вкладки — лишний join на ровном месте,
+  // а на быстром пере-монтировании (StrictMode в разработке) ещё и гонка с
+  // removeChannel, из которой вылезает то же самое исключение.
+  return () => { hub.listeners.delete(onChange) }
 }
 
 // ---------------- Посты ----------------
 // Видимость поста задаёт автор. Значение по умолчанию приходит из
 // relationship.js, чтобы клиент и база не разошлись в трактовке «по умолчанию».
 
+// База без миграции социального графа колонки visibility не знает. Тогда
+// менять нечего: пост и так живёт по прежнему правилу «видит только друг», а
+// человек об этом не просил — он просто правил текст (в ComposerSheet
+// post.visibility приходит undefined, селектор показывает значение по
+// умолчанию, и «изменение видимости» получается на ровном месте). Красная
+// ошибка здесь была бы про то, чего пользователь не делал и не может починить.
 export async function setPostVisibility(postId, visibility) {
   if (!supabase) return { error: 'Нет подключения к серверу' }
   const { error } = await supabase.from('posts').update({ visibility }).eq('id', postId)
+  if (error && isMissingColumn(error)) return { ok: true, unsupported: true }
   return error ? fail(error) : { ok: true }
 }

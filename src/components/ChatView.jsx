@@ -14,6 +14,7 @@ import { normalizeError } from '../lib/authErrors.js'
 import { setActiveChat } from '../lib/notifications.js'
 import { getMealSections, foodsForMeal } from '../lib/meals.js'
 import { mealCardFromGroup, normalizeMealCard } from '../lib/mealCard.js'
+import { createDoubleTap } from '../lib/doubleTap.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
@@ -27,7 +28,6 @@ const REDUCED_MOTION = typeof window !== 'undefined' && window.matchMedia?.('(pr
 // вторая морковка (второй двойной тап) снимает первую — переключение, а не
 // добавление новой реакции поверх старой.
 const CARROT = '🥕'
-const DOUBLE_TAP_MS = 320
 
 function timeShort(iso) {
   if (!iso) return ''
@@ -502,34 +502,49 @@ export default function ChatView({ friend, onClose }) {
   // не имеет и не отключается вместе с ним.
   //
   // Двойной тап по пузырю (не по свайпу, не по ссылке/кнопке внутри) —
-  // реакция 🥕. Обычный одиночный тап по фону сообщения и раньше не делал
-  // ничего (mode остаётся null, onEnd выходил сразу) — это ровно та точка,
-  // где можно посчитать вторую метку без риска зацепить существующие жесты.
+  // реакция 🥕. Двойной КЛИК мышью считается здесь же, а не отдельным
+  // onDoubleClick на пузыре: на телефоне срабатывали оба пути сразу. Двойной
+  // тап-зум у нас выключен вьюпортом (user-scalable=no), поэтому браузер
+  // синтезирует из пары тапов полноценный dblclick — реакция ставилась по
+  // touchend и тут же снималась обратно синтезированным событием.
   useEffect(() => {
     const el = listRef.current
     if (!el) return
     let g = null
-    let lastTap = { mid: null, time: 0 }
+    // Счёт меток и глушитель синтезированного dblclick — в doubleTap.js:
+    // внутри компонента эту логику нечем проверить, кроме пальца на телефоне.
+    const taps = createDoubleTap()
 
     const rowOf = (t) => t.closest?.('[data-mid]')
+    const react = (mid) => {
+      const m = messagesRef.current.find((x) => String(x.id) === mid)
+      if (m) toggleReactionRef.current(m)
+    }
 
     const onStart = (e) => {
       const row = rowOf(e.target)
       if (!row) { g = null; return }
       const t = e.touches[0]
       const interactive = !!e.target.closest?.('a, button')
-      g = { row, bubble: row.querySelector('.msg'), mid: row.dataset.mid, x: t.clientX, y: t.clientY, decided: false, mode: null, interactive }
+      g = { row, bubble: row.querySelector('.msg'), mid: row.dataset.mid, x: t.clientX, y: t.clientY, drift: 0, decided: false, mode: null, interactive }
     }
     const onMove = (e) => {
       if (!g) return
       const t = e.touches[0]
       const dx = t.clientX - g.x, dy = t.clientY - g.y
+      // Максимальный отход от точки касания за весь жест — по нему onEnd
+      // отличает тап от скролла. Именно максимальный, а не последний: палец,
+      // уехавший на пол-экрана и вернувшийся к началу, тапом не был.
+      g.drift = Math.max(g.drift, Math.hypot(dx, dy))
       if (!g.decided) {
         if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
         // Владеем только явным горизонтальным ВЛЕВО. Иначе — скролл / back-жест.
         g.mode = (dx < 0 && Math.abs(dx) > Math.abs(dy) * 1.3) ? 'swipe' : 'none'
         g.decided = true
-        if (g.mode !== 'swipe') { g = null; return }
+        // Раньше здесь жест выбрасывался целиком (g = null), и вместе с ним
+        // терялся тап: дрогнувший на 8 пикселей палец переставал считаться
+        // нажатием вовсе. Теперь жест доживает до touchend, а решает drift.
+        if (g.mode !== 'swipe') return
         g.row.classList.add('swiping')
       }
       if (g.mode === 'swipe' && g.bubble) {
@@ -541,7 +556,7 @@ export default function ChatView({ friend, onClose }) {
     }
     const onEnd = () => {
       if (!g) return
-      const row = g.row, bubble = g.bubble, mid = g.mid, mode = g.mode, interactive = g.interactive
+      const row = g.row, bubble = g.bubble, mid = g.mid, mode = g.mode, interactive = g.interactive, drift = g.drift
       g = null
 
       if (mode === 'swipe') {
@@ -559,22 +574,24 @@ export default function ChatView({ friend, onClose }) {
       // Палец почти не сдвинулся — это тап, а не жест. Ссылки, кнопки внутри
       // пузыря (цитата, карточка еды, «повторить») отрабатывают сами через
       // нативный click, в счёт двойного тапа не идут.
-      if (mode === null && !interactive) {
-        const now = Date.now()
-        if (lastTap.mid === mid && now - lastTap.time < DOUBLE_TAP_MS) {
-          lastTap = { mid: null, time: 0 }
-          const m = messagesRef.current.find((x) => String(x.id) === mid)
-          if (m) toggleReactionRef.current(m)
-        } else {
-          lastTap = { mid, time: now }
-        }
-      }
+      if (taps.touchEnd({ id: mid, drift, interactive })) react(mid)
+    }
+
+    // Мышь и трекпад. С тача сюда прилетает синтезированное событие — его
+    // гасит взведённый выше глушитель, иначе реакция снялась бы сразу после
+    // того, как её поставил жест.
+    const onDblClick = (e) => {
+      const row = rowOf(e.target)
+      if (!row) return
+      const interactive = !!e.target.closest?.('a, button')
+      if (taps.dblClick({ id: row.dataset.mid, interactive })) react(row.dataset.mid)
     }
 
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
     el.addEventListener('touchcancel', onEnd, { passive: true })
+    el.addEventListener('dblclick', onDblClick)
     const noCtx = (e) => e.preventDefault()
     el.addEventListener('contextmenu', noCtx)
     return () => {
@@ -582,6 +599,7 @@ export default function ChatView({ friend, onClose }) {
       el.removeEventListener('touchmove', onMove)
       el.removeEventListener('touchend', onEnd)
       el.removeEventListener('touchcancel', onEnd)
+      el.removeEventListener('dblclick', onDblClick)
       el.removeEventListener('contextmenu', noCtx)
     }
   }, [])
@@ -635,7 +653,7 @@ export default function ChatView({ friend, onClose }) {
             <MessageList
               messages={messages} myId={myId} friendName={friendName}
               onQuoteTap={jumpTo} onImgLoad={onImgLoad} onRetry={retry}
-              onOpenMeal={setMealCard} onToggleReaction={toggleReaction}
+              onOpenMeal={setMealCard}
             />
           )}
           {peerTyping && <TypingBubble name={friendName} />}
@@ -713,7 +731,7 @@ export default function ChatView({ friend, onClose }) {
 }
 
 // ── message list (memoized — не перерисовывается при вводе текста) ─────────────
-const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry, onOpenMeal, onToggleReaction }) {
+const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
   return messages.map((m, i) => {
     const mine = m.sender === myId
     const prev = messages[i - 1]
@@ -727,7 +745,7 @@ const MessageList = memo(function MessageList({ messages, myId, friendName, onQu
         <MessageRow
           m={m} mine={mine} tail={!sameAsNext} grouped={sameAsPrev}
           friendName={friendName} onQuoteTap={onQuoteTap} onImgLoad={onImgLoad}
-          onRetry={onRetry} onOpenMeal={onOpenMeal} onToggleReaction={onToggleReaction}
+          onRetry={onRetry} onOpenMeal={onOpenMeal}
         />
       </div>
     )
@@ -809,16 +827,12 @@ function MealRefCard({ meal: raw, onOpen }) {
   )
 }
 
-function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, onOpenMeal, onToggleReaction }) {
+// Реакции здесь нет намеренно: и двойной тап, и двойной клик считает один
+// делегированный обработчик на списке (см. ChatView). Собственный
+// onDoubleClick на пузыре означал бы два независимых пути к одному действию —
+// на телефоне они срабатывали оба и гасили друг друга.
+function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
   const status = m.status // sending | failed | undefined(=sent)
-
-  // Двойной клик — фолбэк для мыши/трекпада (тач-версия жеста живёт в
-  // делегированном обработчике на списке, см. ChatView). Ссылки и кнопки
-  // внутри пузыря отрабатывают сами, в реакцию не идут.
-  const onDoubleClick = (e) => {
-    if (e.target.closest?.('a, button')) return
-    onToggleReaction?.(m)
-  }
 
   return (
     <div className={`msg-row ${mine ? 'mine' : 'theirs'}${grouped ? ' grouped' : ''}`} data-mid={m.id}>
@@ -830,7 +844,7 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, on
           <circle cx="6" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="18" cy="12" r="1.8" />
         </svg>
       </span>
-      <div className={`msg ${mine ? 'mine' : 'theirs'}${tail ? ' tail' : ''}`} onDoubleClick={onDoubleClick}>
+      <div className={`msg ${mine ? 'mine' : 'theirs'}${tail ? ' tail' : ''}`}>
         {m.forwarded_name && (
           <div className="msg-forward">Переслано от {m.forwarded_name}</div>
         )}
