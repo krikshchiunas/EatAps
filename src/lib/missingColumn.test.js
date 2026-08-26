@@ -29,3 +29,28 @@ test('пустой и отсутствующий вход не бросают и
     assert.equal(isMissingColumn(bad), false)
   }
 })
+
+// INSERT/UPDATE отвечает не Postgres, а сам PostgREST — своим кодом и своим
+// текстом. Ровно на этом фолбэк в createPost и не срабатывал: публикация
+// мысли на базе без миграции социального графа падала с «Что-то пошло не так».
+test('распознаёт отсутствующую колонку в теле INSERT (PostgREST, PGRST204)', () => {
+  assert.equal(isMissingColumn({
+    code: 'PGRST204',
+    message: "Could not find the 'visibility' column of 'posts' in the schema cache",
+  }), true)
+})
+
+test('распознаёт тот же случай по одному тексту, без кода', () => {
+  assert.equal(isMissingColumn({
+    message: "Could not find the 'reactions' column of 'messages' in the schema cache",
+  }), true)
+})
+
+test('«нет таблицы» в кэше схемы не считается отсутствующей колонкой', () => {
+  // PGRST205 — это isMissingRelation, у него другая реакция: раздел целиком
+  // недоступен, а не повтор запроса без одного поля.
+  assert.equal(isMissingColumn({
+    code: 'PGRST205',
+    message: "Could not find the table 'public.posts' in the schema cache",
+  }), false)
+})
