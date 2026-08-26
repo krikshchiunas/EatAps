@@ -41,19 +41,22 @@ export function effortFor(model) {
   return EFFORT_CAPABLE.includes(model) ? DEFAULT_EFFORT : null
 }
 
-// Модель по тарифу. FREE и AI живут на Haiku, AI+ — на Sonnet.
+// Модель по тарифу. FREE и AI живут на Haiku, остальные — на Sonnet.
 export const MODEL_BY_TIER = Object.freeze({
   [TIER.FREE]: 'claude-haiku-4-5',
   [TIER.AI]: 'claude-haiku-4-5',
   [TIER.AI_PLUS]: 'claude-sonnet-4-6',
+  [TIER.AI_PREMIUM]: 'claude-sonnet-4-6',
 })
 
 // Месячный потолок расходов на токены, микродолларов.
 // null = без потолка.
+// TODO: пересчитать лимиты по новой схеме.
 export const MONTHLY_BUDGET = Object.freeze({
   [TIER.FREE]: 1 * MICRO,        // $1.00
   [TIER.AI]: 3.5 * MICRO,        // $3.50
-  [TIER.AI_PLUS]: null,          // без лимита — см. docs/ai-assistant.md
+  [TIER.AI_PLUS]: null,          // без лимита
+  [TIER.AI_PREMIUM]: null,       // без лимита
 })
 
 // Запас, который резервируется до запроса. Реальную цену мы узнаём только из

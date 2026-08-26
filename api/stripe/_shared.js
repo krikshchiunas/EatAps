@@ -25,11 +25,13 @@ export function admin() {
 export const PRICE_BY_TIER = {
   AI: process.env.STRIPE_PRICE_AI,
   AI_PLUS: process.env.STRIPE_PRICE_AI_PLUS,
+  AI_PREMIUM: process.env.STRIPE_PRICE_AI_PREMIUM,
 }
 
 export const TIER_BY_PRICE = {
   [process.env.STRIPE_PRICE_AI]: 'AI',
   [process.env.STRIPE_PRICE_AI_PLUS]: 'AI_PLUS',
+  [process.env.STRIPE_PRICE_AI_PREMIUM]: 'AI_PREMIUM',
 }
 
 // Достаём пользователя по Bearer-JWT из фронта. Возвращает объект юзера или null.

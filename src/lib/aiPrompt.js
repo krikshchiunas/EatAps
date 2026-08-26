@@ -115,9 +115,10 @@ export function resolveTone(prefs) {
 // Расход считается деньгами, а не штуками — таблица бюджетов и цен живёт в
 // aiBudget.js. Здесь только то, что деньгами не измеряется: память и пуши.
 export const TIER_FEATURES = Object.freeze({
-  [TIER.FREE]:    { memory: false, push: false, photo: true, digest: false },
-  [TIER.AI]:      { memory: false, push: true,  photo: true, digest: true },
-  [TIER.AI_PLUS]: { memory: true,  push: true,  photo: true, digest: true },
+  [TIER.FREE]:       { memory: false, push: false, photo: true, digest: false },
+  [TIER.AI]:         { memory: false, push: true,  photo: true, digest: true },
+  [TIER.AI_PLUS]:    { memory: true,  push: true,  photo: true, digest: true },
+  [TIER.AI_PREMIUM]: { memory: true,  push: true,  photo: true, digest: true },
 })
 
 // Нормализованный тариф: 'FREE' | 'AI' | 'AI_PLUS', с учётом того, что
