@@ -20,8 +20,13 @@
 --
 -- Это удобнее, чем руками искать user_id по email в таблице subscriptions.
 -- Столбцы, которые реально что-то меняют: stripe_tier, stripe_status,
--- stripe_until, cancel_at_period_end. Столбцы tier/source/until —
--- вычисляемые (лучшее из Stripe и промокода), их редактировать бессмысленно.
+-- until, cancel_at_period_end. Столбцы tier/source — целиком вычисляемые
+-- (лучшее из Stripe и промокода), их редактировать бессмысленно.
+--
+-- ВАЖНО: во внешнем SELECT view нет колонки stripe_until — только until
+-- (уже посчитанный «эффективный» срок). Если в этот момент активен более
+-- старший промокод, until покажет его срок, а не срок Stripe-подписки —
+-- при записи just that until уйдёт в subscriptions.current_period_end.
 --
 -- Если у пользователя действует промокод СТАРШЕ того тарифа, что вы здесь
 -- поставите, эффективный tier всё равно останется от промокода (тот же
@@ -43,7 +48,7 @@ begin
     NEW.user_id,
     coalesce(NEW.stripe_tier, 'FREE'),
     coalesce(NEW.stripe_status, 'active'),
-    NEW.stripe_until,
+    NEW.until,
     coalesce(NEW.cancel_at_period_end, false),
     now()
   )
