@@ -18,7 +18,7 @@ import { hasAIPlus } from '../lib/subscription.js'
 import { sendChat, sendPhoto, fileToImage, AIError } from '../lib/aiClient.js'
 import { buildContext } from '../lib/aiContext.js'
 import { resolveTone } from '../lib/aiPrompt.js'
-import { usedShare, resetsAt, budgetForTier, periodKey } from '../lib/aiBudget.js'
+import { usedShare, budgetForTier, periodKey } from '../lib/aiBudget.js'
 import { pullAiUsage } from '../lib/supabase.js'
 import { keyOf } from '../lib/date.js'
 import { autoStandardMealId } from '../lib/meals.js'
@@ -308,18 +308,18 @@ function BudgetBar({ share, onUpgrade }) {
   )
   if (low && onUpgrade) {
     return (
-      <button className="ai-budget ai-budget--action" onClick={onUpgrade} title={`Израсходовано ${pct}% месячного лимита`}>
+      <button className="ai-budget ai-budget--action" onClick={onUpgrade} title={`Израсходовано ${pct}% дневного лимита`}>
         {bar}
       </button>
     )
   }
-  return <div className="ai-budget" title={`Израсходовано ${pct}% месячного лимита`}>{bar}</div>
+  return <div className="ai-budget" title={`Израсходовано ${pct}% дневного лимита`}>{bar}</div>
 }
 
 // Лимит кончился. Показываем дату обнуления — без неё экран читается как
 // «всё, конец», хотя на самом деле это до первого числа.
 function Exhausted({ tier, onUpgrade }) {
-  const reset = resetsAt().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+  const reset = 'завтра'
   const free = tier === 'FREE'
   return (
     <div className="screen ai-home">
@@ -329,15 +329,15 @@ function Exhausted({ tier, onUpgrade }) {
             <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
           </svg>
         </div>
-        <h1 className="h1 ai-home__title">Лимит на месяц исчерпан</h1>
+        <h1 className="h1 ai-home__title">Дневной лимит исчерпан</h1>
         <p className="ai-home__sub">
           {free
-            ? 'Бесплатного объёма на этот месяц больше нет. Обновится 1 ' + reset.split(' ')[1] + '.'
+            ? `Бесплатный объём на сегодня закончился. Обновится ${reset}.`
             : `Ассистент снова заработает ${reset}.`}
         </p>
         {onUpgrade && (
           <button className="btn" style={{ marginTop: 18 }} onClick={onUpgrade}>
-            {free ? 'Посмотреть тарифы' : 'Перейти на AI+ — без лимита'}
+            {free ? 'Посмотреть тарифы' : 'Перейти на Carrot Pro — без лимита'}
           </button>
         )}
       </div>

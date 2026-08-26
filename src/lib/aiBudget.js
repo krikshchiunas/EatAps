@@ -41,22 +41,25 @@ export function effortFor(model) {
   return EFFORT_CAPABLE.includes(model) ? DEFAULT_EFFORT : null
 }
 
-// Модель по тарифу. FREE и AI живут на Haiku, остальные — на Sonnet.
+// Модель по тарифу.
+// FREE + AI + AI_PLUS — Haiku 4.5 (дешевле, лимиты считаются).
+// AI_PREMIUM — Sonnet 4.6 (умнее, без лимита).
 export const MODEL_BY_TIER = Object.freeze({
   [TIER.FREE]: 'claude-haiku-4-5',
   [TIER.AI]: 'claude-haiku-4-5',
-  [TIER.AI_PLUS]: 'claude-sonnet-4-6',
+  [TIER.AI_PLUS]: 'claude-haiku-4-5',
   [TIER.AI_PREMIUM]: 'claude-sonnet-4-6',
 })
 
-// Месячный потолок расходов на токены, микродолларов.
-// null = без потолка.
-// TODO: пересчитать лимиты по новой схеме.
+// Месячный потолок расходов на токены, микродолларов. null = без потолка.
+// Фронт и бэкенд работают с ДНЕВНЫМ лимитом: dailyBudgetForTier делит сумму
+// на количество дней в текущем месяце, чтобы пользователь не мог сжечь весь
+// месячный объём за один день.
 export const MONTHLY_BUDGET = Object.freeze({
-  [TIER.FREE]: 1 * MICRO,        // $1.00
-  [TIER.AI]: 3.5 * MICRO,        // $3.50
-  [TIER.AI_PLUS]: null,          // без лимита
-  [TIER.AI_PREMIUM]: null,       // без лимита
+  [TIER.FREE]: 0.5 * MICRO,   // $0.50/мес → ~$0.017/день
+  [TIER.AI]: 5 * MICRO,       // $5.00/мес → ~$0.167/день
+  [TIER.AI_PLUS]: null,       // без лимита
+  [TIER.AI_PREMIUM]: null,    // без лимита
 })
 
 // Запас, который резервируется до запроса. Реальную цену мы узнаём только из
@@ -72,17 +75,30 @@ export function modelForTier(tier) {
   return MODEL_BY_TIER[tier] || MODEL_BY_TIER[TIER.FREE]
 }
 
-export function budgetForTier(tier) {
-  const b = MONTHLY_BUDGET[tier]
-  return b === undefined ? MONTHLY_BUDGET[TIER.FREE] : b
+// Количество дней в UTC-месяце даты.
+export function daysInMonth(date = new Date()) {
+  const d = new Date(date)
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()
 }
 
-// Расчётный период — календарный месяц в UTC. Не «30 дней с оплаты»: так
-// пользователю понятно, когда лимит обнулится, и период одинаков на всех
-// устройствах независимо от их часового пояса.
+// Дневной лимит = месячный / дней_в_месяце. null = без лимита.
+// Деление целочисленное (floor): остаток пойдёт в запас на последний день.
+export function dailyBudgetForTier(tier, date = new Date()) {
+  const monthly = MONTHLY_BUDGET[tier] === undefined ? MONTHLY_BUDGET[TIER.FREE] : MONTHLY_BUDGET[tier]
+  if (monthly === null) return null
+  return Math.floor(monthly / daysInMonth(date))
+}
+
+// Алиас для обратной совместимости — везде где уже используется budgetForTier.
+export function budgetForTier(tier, date = new Date()) {
+  return dailyBudgetForTier(tier, date)
+}
+
+// Расчётный период — календарный ДЕНЬ в UTC. Пользователь видит чёткую границу
+// «на сегодня», а не размытый месячный объём, который кончился на 5-е число.
 export function periodKey(date = new Date()) {
   const d = new Date(date)
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
 }
 
 // Цена ответа по факту. usage — объект из Anthropic API.
@@ -141,8 +157,8 @@ export function usedShare(tier, spent = 0) {
   return Math.min(1, spent / budget)
 }
 
-// Когда обнулится: первое число следующего месяца UTC.
+// Когда обнулится: начало следующего дня UTC.
 export function resetsAt(date = new Date()) {
   const d = new Date(date)
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1))
 }
