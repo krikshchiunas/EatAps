@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useStore } from '../store.jsx'
-import { hasAIPlus } from '../lib/subscription.js'
+import { hasAIPlus, hasAIPremium, planByTier } from '../lib/subscription.js'
 import { sendChat, sendPhoto, fileToImage, AIError } from '../lib/aiClient.js'
 import { buildContext } from '../lib/aiContext.js'
 import { resolveTone } from '../lib/aiPrompt.js'
@@ -37,6 +37,7 @@ export default function AIHomeScreen({ onUpgrade }) {
   const { subscription, session, prefs, addFood, user, supabaseEnabled } = store
   const signedIn = !!user
   const plus = hasAIPlus(subscription)
+  const premium = hasAIPremium(subscription)
   const tier = subscription?.tier || 'FREE'
   const tone = resolveTone(prefs).id
 
@@ -190,11 +191,13 @@ export default function AIHomeScreen({ onUpgrade }) {
             про продажи. Но и совсем без входа нельзя — до этой правки попасть
             на тарифы можно было, только исчерпав лимит, то есть промокод было
             некуда ввести. */}
-        {plus ? (
-          <div className="ai-badge ai-badge--plus">AI+ · умнее</div>
+        {premium ? (
+          <div className="ai-badge ai-badge--plus">{planByTier(tier)?.name} · умнее</div>
+        ) : plus ? (
+          <div className="ai-badge ai-badge--plus">{planByTier(tier)?.name} · без лимита</div>
         ) : (
           <button className="ai-badge ai-badge--action" onClick={onUpgrade} title="Тарифы и промокод">
-            {tier === 'AI' ? 'AI' : 'FREE'}
+            {tier === 'AI' ? planByTier(tier)?.name : 'Carrot Free'}
           </button>
         )}
         {budget?.budgetMicro
