@@ -52,17 +52,29 @@ export function dayWeight(day) {
   return isValidWeight(n) ? n : null
 }
 
-// Активность дня: явная запись дня → значение из профиля → 'light'.
+// Числовой балл (0–100) → ключ активности для расчёта TDEE.
+export function scoreToActivityKey(score) {
+  const n = Number(score)
+  if (!Number.isFinite(n)) return 'light'
+  if (n < 25) return 'sedentary'
+  if (n < 50) return 'light'
+  if (n < 75) return 'moderate'
+  return 'high'
+}
+
+// Активность дня: числовой балл → ключ → из профиля → 'light'.
 // Пустая строка/мусор в day.activity игнорируются, а не ломают расчёт.
 export function effectiveActivity(day, profile) {
+  const score = day?.activityScore
+  if (score != null && Number.isFinite(Number(score))) return scoreToActivityKey(score)
   if (isValidActivity(day?.activity)) return day.activity
   if (isValidActivity(profile?.activity)) return profile.activity
   return 'light'
 }
 
-// Активность задана вручную именно для этого дня (UI показывает это иначе,
-// чем унаследованное из профиля значение).
+// Активность задана вручную именно для этого дня.
 export function hasDayActivity(day) {
+  if (day?.activityScore != null && Number.isFinite(Number(day.activityScore))) return true
   return isValidActivity(day?.activity)
 }
 

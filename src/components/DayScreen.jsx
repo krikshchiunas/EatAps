@@ -20,7 +20,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
   const {
     profile, days, dayOf, removeFood, editFood, toggleWellbeing, addFood,
     upsertMealSection, deleteMealSection, moveMealSection,
-    setDayWeight, setDayActivity, setDayStatsExcluded, confirmDayStats,
+    setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
     repeatDay, repeatMeal,
   } = store
   const [editingFood, setEditingFood] = useState(null)
@@ -204,7 +204,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     profile, days, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
     clipboard, setClipboard, onOpenAdd, onEditFood: setEditingFood, onEditSection: openEditSection,
     onCreateSection: openCreateSection, today,
-    setDayWeight, setDayActivity, setDayStatsExcluded, confirmDayStats,
+    setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
     repeatMeal, prevDate, onToast: setToast,
   }
 
@@ -306,7 +306,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 function DayBody({
   date, interactive, profile, days, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
   clipboard, setClipboard, onOpenAdd, onEditFood, onEditSection, onCreateSection, today,
-  setDayWeight, setDayActivity, setDayStatsExcluded, confirmDayStats,
+  setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
   repeatMeal, prevDate, onToast,
 }) {
   const day = dayOf(date)
@@ -367,7 +367,7 @@ function DayBody({
         profile={profile}
         calGoal={calGoal}
         setDayWeight={setDayWeight}
-        setDayActivity={setDayActivity}
+        setDayActivityScore={setDayActivityScore}
       />
 
       {grade.level !== 'none' && (
@@ -633,15 +633,46 @@ function QualityBar({ label, value, max, invert, hint }) {
 // лежит на кровати, другой много ходит — и норма у этих дней разная. Здесь он
 // отмечает то и другое за пару касаний, а кольцо калорий выше сразу
 // пересчитывается (см. targetsForDay в lib/body.js).
-function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivity }) {
+const ACTIVITY_HINT = (score) => {
+  const n = Math.round(score)
+  if (n <= 0)  return 'Постельный режим — весь день лёжа, почти не вставал'
+  if (n <= 12) return 'Минимум движения — диван, кресло, почти без ходьбы'
+  if (n <= 24) return 'Малоподвижно — работа за столом, редкие выходы'
+  if (n <= 36) return 'Немного — обычный день, выход до магазина'
+  if (n <= 48) return 'Умеренно — нормальный день, лёгкие дела по дому'
+  if (n <= 60) return 'Активный день — хорошая прогулка или лёгкая тренировка'
+  if (n <= 72) return 'Заметная нагрузка — спортзал, бег или длительная ходьба'
+  if (n <= 84) return 'Интенсивно — серьёзная тренировка или весь день на ногах'
+  if (n <= 92) return 'Очень активно — тяжёлые нагрузки или физический труд'
+  if (n <= 97) return 'Сверхактивно — несколько тренировок или ударный день'
+  return 'Максимум — профессиональный уровень нагрузки'
+}
+
+function scoreEmoji(score) {
+  const n = Math.round(score)
+  if (n <= 24) return '🛋️'
+  if (n <= 49) return '🚶'
+  if (n <= 74) return '🏃'
+  return '🔥'
+}
+
+function profileDefaultScore(profile) {
+  const key = profile?.activity
+  if (key === 'sedentary') return 12
+  if (key === 'moderate')  return 62
+  if (key === 'high')      return 87
+  return 37 // light
+}
+
+function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivityScore }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const weight = dayWeight(day)
-  const marked = hasDayActivity(day)
-  const current = effectiveActivity(day, profile)
 
-  // Черновик синхронизируем с днём: при свайпе на другую дату поле не должно
-  // показывать вес соседнего дня.
+  const hasScore = day.activityScore != null && Number.isFinite(Number(day.activityScore))
+  const score = hasScore ? Number(day.activityScore) : profileDefaultScore(profile)
+  const isDefault = !hasScore
+
   useEffect(() => { setDraft(weight != null ? String(weight) : '') }, [date, weight])
 
   const commitWeight = () => {
@@ -650,6 +681,11 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivity })
     const n = Number(raw)
     if (!Number.isFinite(n) || n < 20 || n > 400) { setDraft(weight != null ? String(weight) : ''); return }
     setDayWeight(date, n)
+  }
+
+  const pct = score
+  const trackStyle = {
+    background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${pct}%, var(--border) ${pct}%, var(--border) 100%)`,
   }
 
   return (
@@ -664,7 +700,7 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivity })
           <span className="tabular" style={{ fontSize: 13, color: weight != null ? 'var(--ink-2)' : 'var(--ink-3)' }}>
             {weight != null ? `${weight} кг` : 'вес не указан'}
           </span>
-          <span style={{ fontSize: 15 }}>{ACTIVITY_DAY[current].emoji}</span>
+          <span style={{ fontSize: 15 }}>{scoreEmoji(score)}</span>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}>
             <polyline points="6 9 12 15 18 9" />
           </svg>
@@ -693,27 +729,31 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivity })
             </p>
           </div>
 
-          <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 8 }}>Каким был день</div>
-          <div className="row wrap gap8">
-            {ACTIVITY_ORDER.map((k) => {
-              const on = marked && day.activity === k
-              return (
-                <button
-                  key={k}
-                  className={`chip ${on ? 'on' : ''}`}
-                  onClick={() => setDayActivity(date, on ? null : k)}
-                  style={on ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}
-                >
-                  {ACTIVITY_DAY[k].emoji} {ACTIVITY_DAY[k].short}
-                </button>
-              )
-            })}
+          <div>
+            <div className="row between" style={{ alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 550 }}>Активность дня</div>
+              <span className="tabular" style={{ fontSize: 24, fontWeight: 700, color: 'var(--primary)', letterSpacing: '-0.5px', lineHeight: 1 }}>
+                {Math.round(score)}
+              </span>
+            </div>
+
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={Math.round(score)}
+              onChange={(e) => setDayActivityScore(date, Number(e.target.value))}
+              className="activity-slider"
+              style={trackStyle}
+              aria-label="Уровень активности дня"
+            />
+
+            <p style={{ fontSize: 12, color: isDefault ? 'var(--ink-3)' : 'var(--ink-2)', marginTop: 10, lineHeight: 1.5, minHeight: 32 }}>
+              {ACTIVITY_HINT(score)}
+              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — из анкеты, передвиньте для изменения</span>}
+            </p>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8, lineHeight: 1.45 }}>
-            {marked
-              ? `${ACTIVITY_DAY[day.activity].desc}. Цель на этот день — ${calGoal > 0 ? `${calGoal} ккал` : 'по вашей анкете'}.`
-              : `Не отмечено — берём «${ACTIVITY_DAY[current].short.toLowerCase()}» из анкеты. Отметьте день, и норма калорий пересчитается под него.`}
-          </p>
         </div>
       )}
     </div>
