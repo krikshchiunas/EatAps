@@ -21,7 +21,8 @@ import { useStore } from '../store.jsx'
 import { Panel, Group, Row } from './SettingsPanels.jsx'
 import { TONES, DEFAULT_TONE, TONE_PREF, TONE_CONSENT_PREF, TONE_CONSENT_VERSION, hasToneConsent } from '../lib/aiPrompt.js'
 
-const ORDER = ['calm', 'coach', 'strict', 'savage']
+// Порядок показа: от нейтрального к жёсткому. savage последним — он за опт-ином.
+const ORDER = ['calm', 'buddy', 'doctor', 'coach', 'strict', 'savage']
 
 export default function AITonePanel({ onClose }) {
   const { prefs, setPref } = useStore()
