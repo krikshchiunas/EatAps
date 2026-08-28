@@ -134,6 +134,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
   const [openMenu, setOpenMenu] = useState(null) // friend.id with open menu
   const [dropUp, setDropUp] = useState(false)    // раскрывать меню вверх
   const [menuErr, setMenuErr] = useState(null)
+  const [loadErr, setLoadErr] = useState(null)
   const [view, setView] = useState('friends')
   const [profileUser, setProfileUser] = useState(null)
   const [pinned, setPinned] = useState(getPinned)
@@ -218,13 +219,29 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
     }
   }, [setTab])
 
+  // Два запроса — две независимые судьбы.
+  //
+  // Раньше здесь стоял Promise.all с глухим `catch { /* ignore */ }`: любая
+  // ошибка ЛЮБОГО из двух запросов означала, что setFriends не вызывался вовсе,
+  // и экран показывал «Пока никого нет». То есть сбой выборки сообщений (она
+  // нужна только для порядка сортировки) стирал весь список друзей, а причина
+  // не доходила ни до человека, ни до консоли. «Друзья пропали» и «не
+  // загрузилось» выглядели одинаково — а это разные вещи, и лечатся они
+  // по-разному.
   const reload = async () => {
-    try {
-      setLoading(true)
-      const [f, c] = await Promise.all([listFriends(myId), listConversations(myId)])
-      setFriends(f)
-      setConvs(c)
-    } catch { /* ignore */ } finally { setLoading(false) }
+    setLoading(true)
+    setLoadErr(null)
+    const [f, c] = await Promise.allSettled([listFriends(myId), listConversations(myId)])
+    if (f.status === 'fulfilled') setFriends(f.value)
+    else {
+      console.error('Не удалось загрузить друзей:', f.reason)
+      setLoadErr(f.reason?.message || 'Не удалось загрузить список друзей')
+    }
+    // Диалоги нужны только чтобы поднять наверх тех, с кем недавно переписка.
+    // Их сбой — это потеря порядка, а не потеря друзей: список остаётся.
+    if (c.status === 'fulfilled') setConvs(c.value)
+    else console.error('Не удалось загрузить диалоги:', c.reason)
+    setLoading(false)
   }
 
   useEffect(() => { if (myId) reload(); else setLoading(false) }, [myId])
@@ -327,6 +344,13 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
       {/* Список друзей */}
       {loading ? (
         <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
+      ) : loadErr ? (
+        /* Честная ошибка вместо «пока никого нет»: список друзей не пуст — он
+           не загрузился, и это разные сообщения. */
+        <div className="card">
+          <p style={{ fontSize: 15, lineHeight: 1.5, color: 'var(--danger)' }}>{loadErr}</p>
+          <button className="btn ghost" style={{ marginTop: 12 }} onClick={reload}>Повторить</button>
+        </div>
       ) : sorted.length === 0 ? (
         <div className="card">
           <p className="muted" style={{ fontSize: 15, lineHeight: 1.5 }}>

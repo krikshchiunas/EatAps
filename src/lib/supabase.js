@@ -228,8 +228,18 @@ export async function listFriends(myId) {
     p_user_id: myId, p_limit: 100, p_offset: 0,
   })
   if (error) {
-    // Миграция ещё не прогнана — раздел просто пуст, а не сломан.
-    if (isMissingRelation(error)) return []
+    // Миграция ещё не прогнана — раздел просто пуст, а не сломан. Но молчать
+    // здесь нельзя: без записи в консоли «друзья пропали» и «функции нет в
+    // базе» выглядят одинаково, и искать причину человек идёт в интерфейс,
+    // где её нет.
+    if (isMissingRelation(error)) {
+      console.error(
+        'RPC list_friends недоступна — похоже, не прогнана миграция ' +
+        'supabase/migrations/2026-08-26_nickname_identity.sql. Список друзей будет пуст.',
+        error,
+      )
+      return []
+    }
     throw error
   }
   return (data || []).map((r) => ({
