@@ -63,7 +63,7 @@ export function Avatar({ src, name, size = 44 }) {
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',
-      background: 'var(--primary-weak)', color: 'var(--primary-strong)',
+      background: 'var(--mint-soft)', color: 'var(--on-mint)',
       display: 'grid', placeItems: 'center',
       fontSize: size * 0.42, fontWeight: 600, flex: '0 0 auto',
     }}>

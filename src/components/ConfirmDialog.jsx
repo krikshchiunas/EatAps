@@ -27,7 +27,7 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
       padding: '0 24px',
     }} onClick={onNo}>
       <div style={{
-        background: 'var(--surface)',
+        background: 'var(--surface-solid)',
         borderRadius: 20,
         padding: '28px 24px 20px',
         maxWidth: 360,

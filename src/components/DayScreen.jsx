@@ -215,24 +215,28 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     : false
 
   return (
-    <div className="screen">
-      {/* Шапка с датой — статична, не свайпается. Grid 1fr/auto/1fr держит дату
-          по центру независимо от ширины боковых групп (справа стрелка + статистика). */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', marginBottom: 20 }}>
-        <div style={{ justifySelf: 'start' }}>
+    <div className="screen day-screen">
+      {/* Шапка с датой — статична, не свайпается: лежит поверх пейджера
+          (position: absolute), поэтому при листании дней она остаётся на месте,
+          а градиентная плита с кольцом уезжает под ней. Место под шапку
+          зарезервировано верхним отступом самой плиты (см. index.css). */}
+      <div className="day-topbar">
+        {/* Листалка дня — одной группой: ‹ дата ›. Раньше стрелки стояли по
+            краям строки, и дата зажималась между ними и кнопками справа. */}
+        <div className="day-topbar__nav">
           <button className="iconbtn" onClick={() => go(-1)} aria-label="Предыдущий день">‹</button>
-        </div>
-        <button onClick={onOpenCalendar} aria-label="Открыть календарь" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-          <span className="row gap8" style={{ alignItems: 'center' }}>
-            <span style={{ fontSize: 18, fontWeight: 650, letterSpacing: '-0.3px' }}>{humanDay(date, today)}</span>
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-3)' }}>
-              <rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9h17M8 3v3M16 3v3" />
-            </svg>
-          </span>
-          <span style={{ fontSize: 12, color: 'var(--ink-3)', textTransform: 'capitalize' }}>{humanDow(date)}</span>
-        </button>
-        <div className="row gap8" style={{ justifySelf: 'end' }}>
+          <button className="day-topbar__date" onClick={onOpenCalendar} aria-label="Открыть календарь">
+            <span className="row gap8" style={{ alignItems: 'center' }}>
+              <span className="day-topbar__day">{humanDay(date, today)}</span>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="day-topbar__cal">
+                <rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9h17M8 3v3M16 3v3" />
+              </svg>
+            </span>
+            <span className="day-topbar__dow">{humanDow(date)}</span>
+          </button>
           <button className="iconbtn" onClick={() => go(1)} aria-label="Следующий день" style={{ opacity: canNext ? 1 : 0.4 }} disabled={!canNext}>›</button>
+        </div>
+        <div className="row gap8">
           <button className="iconbtn" onClick={onOpenStats} aria-label="Статистика питания">
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 20V10M10 20V4M16 20v-7M4 20h16" />
@@ -341,19 +345,27 @@ function DayBody({
 
   return (
     <div className="day-body" style={interactive ? undefined : { pointerEvents: 'none' }}>
-      <div className="card" style={{ textAlign: 'center' }}>
-        <Ring value={totals.kcal} max={calGoal} size={196} stroke={16}>
+      {/* Кольцо и итоги дня лежат ВНУТРИ градиентной плиты и едут вместе с
+          пейджером: свайп перелистывает плиту целиком, а не только карточки под
+          ней. Раньше кольцо жило в белой карточке, наезжавшей на шапку снизу —
+          получалось два слоя вместо одного, и цифры дня оставались на месте. */}
+      <div className="day-hero">
+        <Ring
+          value={totals.kcal} max={calGoal} size={184} stroke={15}
+          trackColor="var(--hero-line)" progressColor="var(--ring-hero)"
+        >
           <div>
-            <div className="tabular" style={{ fontSize: 44, fontWeight: 700, lineHeight: 1 }}>{hasCalGoal ? Math.abs(remaining) : totals.kcal}</div>
-            <div className="muted" style={{ fontSize: 14, marginTop: 4 }}>{hasCalGoal ? (remaining >= 0 ? 'ккал осталось' : 'ккал перебор') : 'ккал съедено'}</div>
+            <div className="display day-hero__num">{hasCalGoal ? Math.abs(remaining) : totals.kcal}</div>
+            <div className="day-hero__cap">{hasCalGoal ? (remaining >= 0 ? 'ккал осталось' : 'ккал перебор') : 'ккал съедено'}</div>
           </div>
         </Ring>
-        <div className="row" style={{ justifyContent: 'center', gap: 20, marginTop: 18 }}>
-          <ChipStat label="Съедено" value={`${totals.kcal}`} />
-          <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch' }} />
-          <ChipStat label="Цель" value={hasCalGoal ? `${calGoal}` : '—'} />
-          <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch' }} />
-          <ChipStat label={remaining >= 0 ? 'Недобор' : 'Перебор'} value={hasCalGoal ? `${remaining >= 0 ? '' : '+'}${Math.abs(remaining)}` : '—'} accent={hasCalGoal && remaining < 0 ? 'var(--warn)' : 'var(--primary)'} />
+        <div className="day-hero__stats">
+          <HeroStat label="Съедено" value={`${totals.kcal}`} />
+          <HeroStat label="Цель" value={hasCalGoal ? `${calGoal}` : '—'} />
+          <HeroStat
+            label={remaining >= 0 ? 'Недобор' : 'Перебор'}
+            value={hasCalGoal ? `${remaining >= 0 ? '' : '+'}${Math.abs(remaining)}` : '—'}
+          />
         </div>
       </div>
 
@@ -453,7 +465,7 @@ function DayBody({
         <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Самочувствие</div>
         <div className="row wrap gap8">
           {WELLBEING.map((w) => (
-            <button key={w} className={`chip ${day.wellbeing.includes(w) ? 'on' : ''}`} onClick={() => toggleWellbeing(date, w)} style={day.wellbeing.includes(w) ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}>
+            <button key={w} className={`chip ${day.wellbeing.includes(w) ? 'on' : ''}`} onClick={() => toggleWellbeing(date, w)}>
               {w}
             </button>
           ))}
@@ -845,11 +857,13 @@ function StatsFlagBanner({ date, day, profile, calGoal, setDayStatsExcluded, con
   return null
 }
 
-function ChipStat({ label, value, accent }) {
+// Ячейка итогов внутри градиентной плиты. Цвета не задаются здесь: текст
+// наследует --on-hero от плиты, разделители рисует .day-hero__stats.
+function HeroStat({ label, value }) {
   return (
-    <div style={{ textAlign: 'center' }}>
-      <div className="tabular" style={{ fontSize: 18, fontWeight: 680, color: accent || 'var(--ink)' }}>{value}</div>
-      <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{label}</div>
+    <div>
+      <div className="display day-hero__val">{value}</div>
+      <div className="day-hero__lab">{label}</div>
     </div>
   )
 }
@@ -944,7 +958,7 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit }) {
       <div
         ref={contentRef}
         data-swipeable="true"
-        style={{ transform: `translateX(${offsetX}px)`, transition: dragging ? 'none' : 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)', touchAction: 'pan-y', userSelect: 'none', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
+        style={{ transform: `translateX(${offsetX}px)`, transition: dragging ? 'none' : 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)', touchAction: 'pan-y', userSelect: 'none', background: 'var(--surface-solid)', borderBottom: '1px solid var(--border)' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

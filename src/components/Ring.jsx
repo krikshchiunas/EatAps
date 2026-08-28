@@ -1,4 +1,6 @@
-export default function Ring({ value, max, size = 168, stroke = 14, children }) {
+// trackColor/progressColor нужны кольцу на тёмной плите дня: там --track и
+// --primary тонут в градиенте. По умолчанию цвета прежние.
+export default function Ring({ value, max, size = 168, stroke = 14, children, trackColor, progressColor }) {
   // Приводим к конечным числам: NaN/Infinity/undefined/строки/null не должны
   // попасть в SVG-атрибуты (иначе React ругается и кольцо ломается).
   const v = Number.isFinite(Number(value)) ? Number(value) : 0
@@ -8,13 +10,14 @@ export default function Ring({ value, max, size = 168, stroke = 14, children }) 
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
   const dash = c * pct
-  const color = over ? 'var(--warn)' : 'var(--primary)'
+  const color = over ? 'var(--warn)' : (progressColor || 'var(--primary)')
+  const track = trackColor || 'var(--track)'
   // margin auto: блок с фиксированной шириной не центрируется text-align'ом
   // родителя — без этого кольцо прижималось к левому краю карточки.
   return (
     <div style={{ position: 'relative', width: size, height: size, margin: '0 auto' }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }} aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--track)" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={track} strokeWidth={stroke} />
         <circle
           cx={size / 2}
           cy={size / 2}

@@ -29,11 +29,11 @@ function ListEditor({ label, hint, placeholder, items, onChange, tone }) {
             <span
               key={x}
               className="chip"
+              /* «Не ем» — нейтральный тон, «люблю» — базовый мятный чип
+                 (собственных стилей .chip достаточно). */
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
-                ...(tone === 'no'
-                  ? { background: 'var(--surface-2)', color: 'var(--ink-2)' }
-                  : { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' }),
+                ...(tone === 'no' ? { background: 'var(--surface-2)', color: 'var(--ink-2)' } : null),
               }}
             >
               {x}

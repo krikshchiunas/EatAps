@@ -55,9 +55,10 @@ function ListBlock({ title, items, emoji, tone }) {
           <span
             key={x}
             className="chip"
-            style={tone === 'no'
-              ? { background: 'var(--surface-2)', color: 'var(--ink-2)' }
-              : { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' }}
+            /* Два тона тега: «не ем» — нейтральный, «люблю» — базовый мятный
+               чип. Второму хватает собственных стилей .chip, поэтому инлайном
+               задаётся только нейтральный случай. */
+            style={tone === 'no' ? { background: 'var(--surface-2)', color: 'var(--ink-2)' } : undefined}
           >
             {x}
           </span>

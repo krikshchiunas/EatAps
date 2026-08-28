@@ -350,14 +350,12 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
               <div style={{ display: 'grid', gridTemplateRows: 'repeat(2, auto)', gridAutoFlow: 'column', gridAutoColumns: 'max-content', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10 }}>
                 <button
                   className={`chip ${!section ? 'on' : ''}`}
-                  style={!section ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}
                   onClick={() => setSection(null)}
                 >Всё</button>
                 {SECTIONS.map((s) => (
                   <button
                     key={s.key}
-                    className="chip"
-                    style={section === s.key ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}
+                    className={`chip ${section === s.key ? 'on' : ''}`}
                     onClick={() => setSection(section === s.key ? null : s.key)}
                   >{s.label}</button>
                 ))}
@@ -513,7 +511,7 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
                     <input className="input" type="text" inputMode="decimal" value={grams} onChange={(e) => setGrams(e.target.value)} style={{ marginBottom: 10 }} />
                     <div className="row wrap gap8">
                       {ps.map((p) => (
-                        <button key={p.label} className={`chip ${g === p.grams ? 'on' : ''}`} onClick={() => setGrams(String(p.grams))} style={g === p.grams ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}>
+                        <button key={p.label} className={`chip ${g === p.grams ? 'on' : ''}`} onClick={() => setGrams(String(p.grams))}>
                           {p.label} · {p.grams} {unit}
                         </button>
                       ))}
@@ -828,7 +826,7 @@ function AlcoholBuilder({ item, onBack, onAdd, onClose, type }) {
         <input className="input" type="text" inputMode="decimal" value={ml} onChange={(e) => setMl(e.target.value)} style={{ marginBottom: 10 }} />
         <div className="row wrap gap8">
           {quickMls.map((v) => (
-            <button key={v} className={`chip ${mlN === v ? 'on' : ''}`} onClick={() => setMl(String(v))} style={mlN === v ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}>
+            <button key={v} className={`chip ${mlN === v ? 'on' : ''}`} onClick={() => setMl(String(v))}>
               {v} мл
             </button>
           ))}
@@ -1323,7 +1321,7 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, recents = [] }) 
         <input className="input" type="text" inputMode="decimal" value={fat} onChange={(e) => setFat(e.target.value)} style={{ marginBottom: 10 }} />
         <div className="row wrap gap8">
           {selected.fats.map((v) => (
-            <button key={v} className={`chip ${fatN === v ? 'on' : ''}`} onClick={() => setFat(String(v))} style={fatN === v ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}>{v}%</button>
+            <button key={v} className={`chip ${fatN === v ? 'on' : ''}`} onClick={() => setFat(String(v))}>{v}%</button>
           ))}
         </div>
       </div>
@@ -1338,7 +1336,7 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, recents = [] }) 
         <input className="input" type="text" inputMode="decimal" value={grams} onChange={(e) => setGrams(e.target.value)} style={{ marginBottom: 10 }} />
         <div className="row wrap gap8">
           {getPortions(selected).map((p) => (
-            <button key={p.label} className={`chip ${g === p.grams ? 'on' : ''}`} onClick={() => setGrams(String(p.grams))} style={g === p.grams ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}>
+            <button key={p.label} className={`chip ${g === p.grams ? 'on' : ''}`} onClick={() => setGrams(String(p.grams))}>
               {p.label} · {p.grams} г
             </button>
           ))}
