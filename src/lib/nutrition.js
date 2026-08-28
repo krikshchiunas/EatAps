@@ -47,7 +47,7 @@ export function computeTargets(profile) {
 }
 
 export function sumDay(meals = []) {
-  return meals.reduce(
+  const t = meals.reduce(
     (a, m) => ({
       kcal: a.kcal + (Number(m.kcal) || 0),
       protein: a.protein + (Number(m.protein) || 0),
@@ -56,6 +56,16 @@ export function sumDay(meals = []) {
     }),
     { kcal: 0, protein: 0, carbs: 0, fat: 0 }
   )
+  // Складывая дробные граммы, double накапливает мусор: 27.4 + 12.3 + 77
+  // даёт 116.69999999999999, и это уезжало прямо в интерфейс. Десятой доли
+  // грамма хватает с запасом, поэтому срезаем разряды здесь, в единственном
+  // месте, где суммы рождаются, — а не в каждом потребителе по отдельности.
+  return {
+    kcal: round1n(t.kcal),
+    protein: round1n(t.protein),
+    carbs: round1n(t.carbs),
+    fat: round1n(t.fat),
+  }
 }
 
 const nrm = (s) => (s || '').toLowerCase().replace(/ё/g, 'е')

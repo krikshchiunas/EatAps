@@ -354,14 +354,17 @@ function DayBody({
           trackColor="var(--hero-line)" progressColor="var(--ring-hero)"
         >
           <div>
-            <div className="display day-hero__num">{hasCalGoal ? Math.abs(remaining) : totals.kcal}</div>
+            <div className="display day-hero__num">{Math.round(hasCalGoal ? Math.abs(remaining) : totals.kcal)}</div>
             <div className="day-hero__cap">{hasCalGoal ? (remaining >= 0 ? 'ккал осталось' : 'ккал перебор') : 'ккал съедено'}</div>
           </div>
         </Ring>
+        {/* sumDay складывает дробные КБЖУ продуктов, и сумма приходит сырым
+            float'ом (116.69999999999999). В плитке на первом экране нужны целые
+            граммы — точность до десятых остаётся в карточках приёмов пищи. */}
         <div className="day-hero__stats">
-          <HeroStat label="Белки" value={`${totals.protein}${proteinGoal > 0 ? `/${proteinGoal}` : ''}`} />
-          <HeroStat label="Углеводы" value={`${totals.carbs}${carbGoal > 0 ? `/${carbGoal}` : ''}`} />
-          <HeroStat label="Жиры" value={`${totals.fat}${fatGoal > 0 ? `/${fatGoal}` : ''}`} />
+          <HeroStat label="Белки" value={`${Math.round(totals.protein)}${proteinGoal > 0 ? `/${proteinGoal}` : ''}`} />
+          <HeroStat label="Углеводы" value={`${Math.round(totals.carbs)}${carbGoal > 0 ? `/${carbGoal}` : ''}`} />
+          <HeroStat label="Жиры" value={`${Math.round(totals.fat)}${fatGoal > 0 ? `/${fatGoal}` : ''}`} />
         </div>
       </div>
 
@@ -483,7 +486,7 @@ function MealSectionCard({
             </div>
             {foods.length > 0 && (
               <div className="tabular" style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 1 }}>
-                {totals.kcal} ккал · Б{totals.protein} Ж{totals.fat} У{totals.carbs}
+                {Math.round(totals.kcal)} ккал · Б{totals.protein} Ж{totals.fat} У{totals.carbs}
               </div>
             )}
           </div>

@@ -13,9 +13,9 @@ export default function AuthNotice() {
   if (!authError) return null
 
   return (
-    <div className="sync-chip warn" role="status">
+    <div className="auth-notice" role="status">
       <span>{authError.message}</span>
-      <button type="button" className="sync-chip-retry" onClick={dismissAuthError}>Понятно</button>
+      <button type="button" className="auth-notice__ok" onClick={dismissAuthError}>Понятно</button>
     </div>
   )
 }

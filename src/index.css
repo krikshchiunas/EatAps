@@ -935,7 +935,14 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   -webkit-backdrop-filter: var(--blur);
 }
 .day-hero__stats > * + * { border-left: 1px solid var(--border); }
-.day-hero__val { font-size: 20px; color: var(--on-hero); }
+/* min-width: 0 обязателен: у элемента грида по умолчанию min-width: auto, и
+   колонка отказывается сжиматься меньше своего содержимого — длинная пара
+   «значение/цель» распирала карточку за пределы экрана вместо переноса. */
+.day-hero__stats > * { min-width: 0; padding: 0 6px; }
+.day-hero__val {
+  font-size: 19px; color: var(--on-hero);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .day-hero__lab { font-size: 12px; margin-top: 3px; color: var(--on-hero-2); }
 
 /* Строка с датой: статична поверх пейджера, поэтому при свайпе дня она стоит
@@ -1737,26 +1744,25 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   .boot-spinner { animation-duration: 2.4s; }
 }
 
-/* ── Индикатор синхронизации ──────────────────────────────────────────────
-   Появляется только когда есть что сказать: идёт сохранение дольше секунды,
-   данные лежат локально, нет сети, конфликт. «Синхронизировано» мигает
-   коротким подтверждением и исчезает. */
-.sync-chip {
+/* ── Сообщение о проблеме с аккаунтом ─────────────────────────────────────
+   Единственная оставшаяся плашка такого рода. Плашки статуса синхронизации
+   («Сохраняем…», «Сохранено на устройстве», «✓ Синхронизировано») убраны:
+   они всплывали поверх содержимого на каждое действие и были шумом. Эта
+   остаётся, потому что говорит о том, чего человек не видит иначе, — сессия
+   истекла, и без объяснения это выглядит как пропажа данных. */
+.auth-notice {
   position: fixed; z-index: 90;
   left: 50%; transform: translateX(-50%);
   bottom: calc(78px + env(safe-area-inset-bottom));
   display: flex; align-items: center; gap: 10px;
   max-width: calc(100vw - 32px);
-  padding: 8px 14px; border-radius: 999px;
-  background: var(--surface); border: 1px solid var(--border-strong);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
-  font-size: 13px; font-weight: 550; color: var(--ink-2);
-  animation: toast-in 0.22s cubic-bezier(0.22,1,0.36,1) both;
+  padding: 10px 16px; border-radius: var(--r-pill);
+  background: var(--surface-solid); border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-float);
+  font-size: 13px; font-weight: 550; color: var(--warn);
+  animation: toast-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.sync-chip.ok { color: var(--good); }
-.sync-chip.warn { color: var(--warn); }
-.sync-chip.danger { color: var(--danger); }
-.sync-chip-retry {
+.auth-notice__ok {
   font-size: 13px; font-weight: 650; color: var(--primary);
   padding: 0; flex: 0 0 auto;
 }
