@@ -32,6 +32,7 @@ export const ORDER = [
   'supabase/migrations/2026-08-25_social_graph.sql',
   'supabase/migrations/2026-08-26_nickname_identity.sql',
   'supabase/migrations/2026-08-28_audit_fixes.sql',
+  'supabase/migrations/2026-08-28_profile_rework.sql',
 ]
 
 const HEADER = `-- ═══════════════════════════════════════════════════════════════════════════

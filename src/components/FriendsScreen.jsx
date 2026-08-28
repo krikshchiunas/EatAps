@@ -1,41 +1,27 @@
-import { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { listFriends, listConversations } from '../lib/supabase.js'
 import { getMutedFriends, toggleFriendMuted, forgetMutedFriend } from '../lib/notifications.js'
 import ChatView from './ChatView.jsx'
 import UserSearch from './UserSearch.jsx'
 import PublicProfile from './PublicProfile.jsx'
-import NotificationsScreen from './NotificationsScreen.jsx'
-import { unfollow, unreadNotificationCount, subscribeToNotifications } from '../lib/social.js'
+import { unfollow } from '../lib/social.js'
 
-// Разделы социального хаба.
+// Разделы вкладки.
 //
 // Ленты здесь НЕТ намеренно: она переехала в нижнюю навигацию отдельной
 // вкладкой. Держать её ещё и тут значило бы иметь один и тот же экран в двух
 // местах с двумя независимыми состояниями прокрутки и загрузки.
 //
-// Подписчиков и подписок здесь тоже больше нет: списки про МЕНЯ переехали в
-// мой профиль, к остальному про меня. Осталось ровно три вопроса: с кем я уже
-// общаюсь, кого я ищу, что произошло.
+// Подписчики, подписки и «События» тоже уехали — в мой профиль, к остальному
+// про меня: на меня подписались, на мою мысль ответили, мне написали. Здесь
+// остались ровно два вопроса: с кем я уже общаюсь и кого я ищу. Вкладки
+// «＋ По ID» нет с тех пор, как исчезли публичные коды: людей находят по нику
+// в «Поиске».
 const VIEWS = [
   { key: 'friends', label: 'Друзья' },
   { key: 'search',  label: 'Поиск' },
-  { key: 'events',  label: 'События' },
 ]
-
-// «События» — это и уведомления, и челленджи. Челленджи жили за иконкой 🏁 в
-// шапке: соревнование с друзьями — событие, а не постоянный раздел, и находить
-// его человек шёл в единственное место, где о событиях вообще идёт речь.
-const EVENT_TABS = [
-  { key: 'feed',       label: 'Уведомления' },
-  { key: 'challenges', label: 'Челленджи' },
-]
-
-import LazyBoundary from './LazyBoundary.jsx'
-import { lazyWithReload } from '../lib/lazyWithReload.js'
-
-// Челленджи открывает меньшинство — не тянем экран в стартовый бандл.
-const ChallengesScreen = lazyWithReload(() => import('./ChallengesScreen.jsx'))
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 // Список заглушённых живёт в notifications.js: его читает не этот экран, а
@@ -136,7 +122,7 @@ function FriendMenu({ isPinned, isMuted, onPin, onMute, onRemove, onClose, menuE
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
-export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab }) {
+export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab, openChatWith = null, onChatOpened }) {
   const { user, supabaseEnabled } = useStore()
   const myId = user?.id || ''
 
@@ -149,9 +135,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
   const [dropUp, setDropUp] = useState(false)    // раскрывать меню вверх
   const [menuErr, setMenuErr] = useState(null)
   const [view, setView] = useState('friends')
-  const [eventTab, setEventTab] = useState('feed')
   const [profileUser, setProfileUser] = useState(null)
-  const [unreadEvents, setUnreadEvents] = useState(0)
   const [pinned, setPinned] = useState(getPinned)
   const [muted, setMuted] = useState(getMutedFriends)
   const screenRef = useRef(null)
@@ -245,18 +229,16 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
 
   useEffect(() => { if (myId) reload(); else setLoading(false) }, [myId])
 
-  // Счётчик непрочитанных событий — с сервера, а не из localStorage: он должен
-  // совпадать на всех устройствах и переживать перезаход.
-  const refreshEvents = useCallback(async () => {
-    if (!myId) return
-    try { setUnreadEvents(await unreadNotificationCount()) } catch { /* раздел недоступен */ }
-  }, [myId])
-
+  // Уведомление о сообщении открывают в «Профиле», а чат живёт здесь — поэтому
+  // вкладка открывает диалог сама, как только приехал список друзей. Второго
+  // чата в профиле не заводим: экран переписки в приложении один.
   useEffect(() => {
-    if (!myId) return
-    refreshEvents()
-    return subscribeToNotifications(myId, refreshEvents)
-  }, [myId, refreshEvents])
+    if (!openChatWith || loading) return
+    const f = friends.find((x) => x.id === openChatWith)
+    if (f) setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, username: f.username })
+    else setProfileUser(openChatWith) // уже не друг — открываем профиль
+    onChatOpened?.()
+  }, [openChatWith, loading, friends])
 
   const lastById = useMemo(() => new Map(convs.map(c => [c.id, c.last])), [convs])
 
@@ -314,79 +296,28 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
 
   return (
     <div className="screen" ref={screenRef} style={swipeStyle} onClick={() => openMenu && setOpenMenu(null)}>
-      {/* В шапке больше нет кнопок. «＋ По ID» ушла вместе с публичными
-          кодами — людей теперь находят по нику во вкладке «Поиск», а 🏁
-          переехала в «События». */}
+      {/* В шапке нет кнопок. «＋ По ID» ушла вместе с публичными кодами —
+          людей находят по нику во вкладке «Поиск», а 🏁 переехала в «События»
+          в профиле. */}
       <h1 className="h1" style={{ margin: '4px 0 14px' }}>Общение</h1>
 
-      <div className="seg" style={{ marginBottom: 16, overflowX: 'auto' }}>
+      <div className="seg" style={{ marginBottom: 16 }}>
         {VIEWS.map((v) => (
-          <button
-            key={v.key}
-            className={view === v.key ? 'on' : ''}
-            onClick={() => setView(v.key)}
-            style={{ position: 'relative', whiteSpace: 'nowrap' }}
-          >
+          <button key={v.key} className={view === v.key ? 'on' : ''} onClick={() => setView(v.key)}>
             {v.label}
-            {v.key === 'events' && unreadEvents > 0 && (
-              <span style={{
-                marginLeft: 6, minWidth: 18, height: 18, borderRadius: 999,
-                background: 'var(--danger)', color: '#fff', fontSize: 11, fontWeight: 700,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
-              }}>
-                {unreadEvents > 99 ? '99+' : unreadEvents}
-              </span>
-            )}
           </button>
         ))}
       </div>
 
-      {view === 'events' && (
-        <div>
-          <div className="seg" style={{ marginBottom: 14 }}>
-            {EVENT_TABS.map((t) => (
-              <button key={t.key} className={eventTab === t.key ? 'on' : ''} onClick={() => setEventTab(t.key)}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {eventTab === 'feed' && (
-            <NotificationsScreen
-              onChanged={refreshEvents}
-              onNavigate={(t) => {
-                if (t.screen === 'profile') setProfileUser(t.userId)
-                // Реакции и ответы приходят только на СВОИ мысли, поэтому пост
-                // всегда лежит в собственном профиле — туда и открываем, а не в
-                // ленту, где его пришлось бы искать прокруткой.
-                else if (t.screen === 'post') setProfileUser(myId)
-                else if (t.screen === 'chat') {
-                  const f = friends.find((x) => x.id === t.userId)
-                  if (f) setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, username: f.username })
-                  else setProfileUser(t.userId)
-                }
-              }}
-            />
-          )}
-
-          {eventTab === 'challenges' && (
-            <LazyBoundary onClose={() => setEventTab('feed')}>
-              <Suspense fallback={<p className="muted" style={{ fontSize: 14 }}>Загружаем…</p>}>
-                <ChallengesScreen />
-              </Suspense>
-            </LazyBoundary>
-          )}
-        </div>
-      )}
-
       {view === 'search' && <UserSearch onOpenProfile={setProfileUser} />}
 
       {view === 'friends' && (<>
-      {/* Поиск */}
+      {/* Фильтр по своему списку — не путать со вкладкой «Поиск», которая
+          ищет людей по всей базе. */}
       <div className="field" style={{ marginBottom: 14 }}>
         <input
           className="input"
-          placeholder="Поиск по нику…"
+          placeholder="Фильтр по имени или нику…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={{ height: 46, fontSize: 15 }}

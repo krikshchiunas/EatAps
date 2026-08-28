@@ -17,7 +17,7 @@
 // комментарием: еда в дневнике — не пост, и обсуждать её при всех человек не
 // просил. Публичные реакции есть только у «Мыслей».
 // ─────────────────────────────────────────────────────────────────────────────
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { sumDay } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { groupDayByMeal, resolvedTime } from '../lib/meals.js'
@@ -25,10 +25,13 @@ import { foodHabits } from '../lib/stats.js'
 import { Avatar } from './FriendsScreen.jsx'
 import ThoughtsFeed from './ThoughtsFeed.jsx'
 
+// Порядок вкладок: сначала то, что человек сказал сам («Мысли»), потом то, что
+// он ест, и только потом анкета. Профиль читают сверху вниз, а самое живое в
+// нём — мысли, а не поля о себе.
 const TABS = [
-  { key: 'self', label: 'Я' },
-  { key: 'diet', label: 'Питание' },
   { key: 'thoughts', label: 'Мысли' },
+  { key: 'diet', label: 'Питание' },
+  { key: 'self', label: 'О себе' },
 ]
 
 function Stat({ label, v }) {
@@ -40,74 +43,25 @@ function Stat({ label, v }) {
   )
 }
 
-// Список-«облако» для «да в еде» / «нет в еде». Пустой список не рисуем вовсе:
-// ни у себя, ни у друга — чужой профиль не место для подсказок.
-function ListBlock({ title, items, emoji, tone }) {
-  if (!items?.length) return null
-  return (
-    <div style={{ marginTop: 16 }}>
-      <div className="row gap8" style={{ alignItems: 'baseline', marginBottom: 8 }}>
-        <span style={{ fontSize: 15 }}>{emoji}</span>
-        <span style={{ fontSize: 14, fontWeight: 620 }}>{title}</span>
-      </div>
-      <div className="row wrap gap8">
-        {items.map((x) => (
-          <span
-            key={x}
-            className="chip"
-            style={tone === 'no'
-              ? { background: 'var(--surface-2)', color: 'var(--ink-2)' }
-              : { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' }}
-          >
-            {x}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// Строка «подпись → значение» для всего, что в профиле держится одной строкой:
-// любимое блюдо, ресторан и посчитанные привычки. hint — пояснение справа от
-// значения (например, сколько раз человек ел этот продукт).
-function FavRow({ emoji, label, value, hint }) {
+// Строка «О себе»: служебная подпись сверху, значение под ней.
+//
+// Ни эмодзи, ни счётчиков, ни пояснений справа. Раньше здесь была строка с
+// иконкой и хвостом вида «12 раз»: цифра превращала рассказ о себе в отчёт по
+// дневнику, а иконка спорила с подписью за внимание. Осталась подпись
+// (светло-серая, служебная) и то, ради чего строка существует, — значение.
+function ProfileRow({ label, value, multiline = false }) {
   if (!value) return null
   return (
-    <div className="row gap8" style={{ alignItems: 'center', marginTop: 10 }}>
-      <span>{emoji}</span>
-      <div style={{ minWidth: 0 }}>
-        <div className="muted" style={{ fontSize: 11 }}>{label}</div>
-        <div className="row gap8" style={{ alignItems: 'baseline' }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{value}</span>
-          {hint && <span className="muted" style={{ fontSize: 12 }}>{hint}</span>}
-        </div>
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.3 }}>{label}</div>
+      <div style={{
+        fontSize: 15, lineHeight: 1.45, marginTop: 3, color: 'var(--ink)',
+        whiteSpace: multiline ? 'pre-wrap' : 'normal',
+      }}>
+        {value}
       </div>
     </div>
   )
-}
-
-// Био — такой же раздел профиля, как остальные, только текст многострочный.
-function BioRow({ value }) {
-  if (!value) return null
-  return (
-    <div className="row gap8" style={{ alignItems: 'flex-start', marginTop: 10 }}>
-      <span style={{ lineHeight: 1.35 }}>📝</span>
-      <div style={{ minWidth: 0 }}>
-        <div className="muted" style={{ fontSize: 11 }}>Био</div>
-        <div style={{ fontSize: 14, lineHeight: 1.45, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{value}</div>
-      </div>
-    </div>
-  )
-}
-
-// Число употреблений словами: «12 раз», «2 раза». Правило то же, что в
-// аналитике, — цифра рядом со значением, а не отдельная строка.
-function timesLabel(n) {
-  const mod10 = n % 10
-  const mod100 = n % 100
-  if (mod10 === 1 && mod100 !== 11) return `${n} раз`
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} раза`
-  return `${n} раз`
 }
 
 function FoodRow({ food, customFoods, onReact }) {
@@ -204,10 +158,21 @@ export default function UserProfileView({
   onEditProfile,
   onReactToMeal,
   signInPrompt = null,
+  focusTab = null,
+  onFocusHandled,
 }) {
-  const [tab, setTab] = useState('self')
+  const [tab, setTab] = useState('thoughts')
   const [date, setDate] = useState(keyOf())
   const today = keyOf()
+
+  // Внешняя навигация (событие «отреагировали на вашу мысль») открывает нужную
+  // вкладку этого же профиля. Вызывающий сбрасывает focusTab обратно в null,
+  // поэтому повторное нажатие по такому же событию срабатывает снова.
+  useEffect(() => {
+    if (!focusTab) return
+    setTab(focusTab)
+    onFocusHandled?.()
+  }, [focusTab])
 
   const p = profile || {}
   const name = p.name || (isOwnProfile ? 'Без имени' : 'Друг')
@@ -217,22 +182,19 @@ export default function UserProfileView({
   const groups = groupDayByMeal(day)
   const dayEmpty = groups.every((g) => g.foods.length === 0)
 
-  // «Чаще всего ем» / «Реже всего ем» — не поля анкеты, а факт из дневника.
-  // Считаются здесь, потому что дневник есть в обоих режимах: свой — из стора,
-  // друга — из friend_state. Отдельного переключателя приватности у них нет:
-  // еда друга и так видна на вкладке «Питание», и это тот же самый круг людей.
+  // «Я это обожаю» / «Ок» — не поля анкеты, а факт из дневника. Считаются
+  // здесь, потому что дневник есть в обоих режимах: свой — из стора, друга — из
+  // friend_state. Отдельного переключателя приватности у них нет: еда друга и
+  // так видна на вкладке «Питание», и это тот же самый круг людей.
   const habits = useMemo(() => foodHabits(days), [days])
 
-  const hasSelfDetails = Boolean(
-    p.bio || p.favRestaurant || p.favDish || p.toGos?.length || p.noGos?.length || habits.most,
-  )
+  const hasSelfDetails = Boolean(p.bio || p.guiltyPleasure || habits.most || habits.rare)
 
   return (
     <>
       {/* ── Шапка: лицо, имя, друзья ──────────────────────────────────────── */}
-      {/* Био здесь больше нет: оно переехало в раздел «Я», к остальному
-          рассказу о себе. В шапке оно висело над всеми тремя вкладками и
-          отрывалось от вкусов, с которыми читается вместе. */}
+      {/* Био здесь больше нет: оно переехало в «О себе», к остальному
+          рассказу о себе. В шапке оно висело над всеми тремя вкладками. */}
       <div style={{ textAlign: 'center', marginBottom: 18 }}>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <Avatar src={p.avatar} name={name} size={112} />
@@ -253,6 +215,10 @@ export default function UserProfileView({
           на локальном профиле. Раньше здесь стояла одна кнопка «Друзья · N». */}
       {counts}
 
+      {/* Приглашение войти стоит НАД вкладками. Внутри «О себе» оно было бы
+          спрятано: эта вкладка теперь третья, и гость до неё не доходит. */}
+      {signInPrompt}
+
       {/* ── Три части профиля ─────────────────────────────────────────────── */}
       <div className="seg" style={{ marginBottom: 16 }}>
         {TABS.map((t) => (
@@ -262,30 +228,15 @@ export default function UserProfileView({
 
       {tab === 'self' && (
         <>
-          {signInPrompt}
           {hasSelfDetails ? (
-            <div className="card">
-              <BioRow value={p.bio} />
-              <FavRow emoji="🍲" label="Любимое блюдо" value={p.favDish} />
-              <FavRow emoji="🍴" label="Любимый ресторан" value={p.favRestaurant} />
-              <ListBlock title="Да в еде" emoji="💚" items={p.toGos} tone="yes" />
-              <ListBlock title="Нет в еде" emoji="🚫" items={p.noGos} tone="no" />
-              {habits.most && (
-                <FavRow
-                  emoji={habits.most.emoji}
-                  label="Чаще всего ем"
-                  value={habits.most.name}
-                  hint={timesLabel(habits.most.count)}
-                />
-              )}
-              {habits.rare && (
-                <FavRow
-                  emoji={habits.rare.emoji}
-                  label="Реже всего ем"
-                  value={habits.rare.name}
-                  hint={timesLabel(habits.rare.count)}
-                />
-              )}
+            /* Четыре строки — весь рассказ о себе. Списки «да в еде» / «нет в
+               еде» отсюда убраны вместе со всей моделью тегов: их нельзя ни
+               завести, ни отредактировать, и в профиле их больше нет. */
+            <div className="card" style={{ display: 'grid', gap: 16 }}>
+              <ProfileRow label="Био" value={p.bio} multiline />
+              <ProfileRow label="Я это обожаю" value={habits.most?.name} />
+              <ProfileRow label="Ок" value={habits.rare?.name} />
+              <ProfileRow label="MY guilty pleasure" value={p.guiltyPleasure} />
             </div>
           ) : (
             <div className="card">

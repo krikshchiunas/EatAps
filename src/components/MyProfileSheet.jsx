@@ -1,75 +1,14 @@
+// Редактор своего профиля.
+//
+// Полей ровно столько, сколько рисует витрина: имя, аватар, ник, био и
+// guilty pleasure. Списки «да в еде» / «нет в еде», любимое блюдо и любимый
+// ресторан убраны вместе со старой моделью профиля — «Я это обожаю» и «Ок»
+// теперь считаются по дневнику, а не заполняются руками.
 import { useState, useEffect } from 'react'
 import { useStore } from '../store.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
 import { userProfile, setUsername } from '../lib/social.js'
-import { addProfileListItem, removeProfileListItem, normalizeProfileList, MAX_LEN } from '../lib/profileLists.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
-
-// Редактор списка «да в еде» / «нет в еде». Пункты добавляются по Enter или кнопкой,
-// удаляются крестиком на чипе — отдельного режима редактирования нет: список
-// короткий, и лишний экран здесь только мешал бы.
-function ListEditor({ label, hint, placeholder, items, onChange, tone }) {
-  const [draft, setDraft] = useState('')
-  const [err, setErr] = useState(null)
-
-  const add = () => {
-    const res = addProfileListItem(items, draft)
-    setErr(res.error)
-    if (!res.error) setDraft('')
-    onChange(res.list)
-  }
-
-  return (
-    <div className="field">
-      <label>{label}{hint ? <span className="muted" style={{ fontWeight: 400 }}> — {hint}</span> : null}</label>
-      {items.length > 0 && (
-        <div className="row wrap gap8" style={{ marginBottom: 10 }}>
-          {items.map((x) => (
-            <span
-              key={x}
-              className="chip"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                ...(tone === 'no'
-                  ? { background: 'var(--surface-2)', color: 'var(--ink-2)' }
-                  : { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' }),
-              }}
-            >
-              {x}
-              <button
-                onClick={() => onChange(removeProfileListItem(items, x))}
-                aria-label={`Убрать «${x}»`}
-                style={{ fontSize: 13, opacity: 0.65, lineHeight: 1 }}
-              >
-                ✕
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="row gap8">
-        <input
-          className="input"
-          placeholder={placeholder}
-          value={draft}
-          maxLength={MAX_LEN}
-          onChange={(e) => { setDraft(e.target.value); setErr(null) }}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
-          style={{ flex: 1 }}
-        />
-        <button
-          className="btn ghost"
-          style={{ width: 'auto', flex: '0 0 auto', padding: '0 18px' }}
-          onClick={add}
-          disabled={!draft.trim()}
-        >
-          ＋
-        </button>
-      </div>
-      {err && <p style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6 }}>{err}</p>}
-    </div>
-  )
-}
 
 export default function MyProfileSheet({ onClose }) {
   const { user, profile, setProfile } = useStore()
@@ -99,10 +38,7 @@ export default function MyProfileSheet({ onClose }) {
     name: profile?.name || '',
     avatar: profile?.avatar || null,
     bio: profile?.bio || '',
-    favRestaurant: profile?.favRestaurant || '',
-    favDish: profile?.favDish || '',
-    noGos: normalizeProfileList(profile?.noGos),
-    toGos: normalizeProfileList(profile?.toGos),
+    guiltyPleasure: profile?.guiltyPleasure || '',
   })
 
   const set = (p) => setDraft((d) => ({ ...d, ...p }))
@@ -121,19 +57,22 @@ export default function MyProfileSheet({ onClose }) {
       setNick(res.ok)
     }
 
-    // Пустой список пишем как undefined, а не []: профиль — обычный объект в
+    // Пустое поле пишем как undefined, а не '': профиль — обычный объект в
     // синхронизируемом состоянии, и пустые ключи там ни к чему.
-    const noGos = normalizeProfileList(draft.noGos)
-    const toGos = normalizeProfileList(draft.toGos)
+    //
+    // Поля старой модели (любимое блюдо, ресторан, списки «да/нет в еде»)
+    // затираются здесь же. Их больше нигде не видно и негде завести, а молча
+    // возить их в блобе и отдавать друзьям — раздача данных без причины.
     setProfile({
       ...(profile || {}),
       name: draft.name.trim() || undefined,
       avatar: draft.avatar || undefined,
       bio: draft.bio.trim() || undefined,
-      favRestaurant: draft.favRestaurant.trim() || undefined,
-      favDish: draft.favDish.trim() || undefined,
-      noGos: noGos.length ? noGos : undefined,
-      toGos: toGos.length ? toGos : undefined,
+      guiltyPleasure: draft.guiltyPleasure.trim() || undefined,
+      favRestaurant: undefined,
+      favDish: undefined,
+      noGos: undefined,
+      toGos: undefined,
     })
     onClose()
   }
@@ -200,33 +139,19 @@ export default function MyProfileSheet({ onClose }) {
           />
         </div>
 
+        {/* Единственное поле профиля, которое человек заполняет про еду сам.
+            «Я это обожаю» и «Ок» рядом с ним в профиле считаются по дневнику —
+            их здесь нет и быть не должно. */}
         <div className="field">
-          <label>Любимое блюдо</label>
-          <input className="input" placeholder="Напр. Паста карбонара" value={draft.favDish} onChange={(e) => set({ favDish: e.target.value })} maxLength={60} />
+          <label>MY guilty pleasure</label>
+          <input
+            className="input"
+            placeholder="Напр. Шоколадный торт"
+            value={draft.guiltyPleasure}
+            onChange={(e) => set({ guiltyPleasure: e.target.value })}
+            maxLength={60}
+          />
         </div>
-
-        <div className="field">
-          <label>Любимый ресторан</label>
-          <input className="input" placeholder="Напр. Dodo Pizza" value={draft.favRestaurant} onChange={(e) => set({ favRestaurant: e.target.value })} maxLength={60} />
-        </div>
-
-        <ListEditor
-          label="Да в еде"
-          hint="увидят друзья"
-          placeholder="Напр. Суши"
-          items={draft.toGos}
-          onChange={(toGos) => set({ toGos })}
-          tone="yes"
-        />
-
-        <ListEditor
-          label="Нет в еде"
-          hint="увидят друзья"
-          placeholder="Напр. Молоко"
-          items={draft.noGos}
-          onChange={(noGos) => set({ noGos })}
-          tone="no"
-        />
 
         <button className="btn" style={{ marginTop: 10 }} onClick={save} disabled={busy}>
           {busy ? 'Сохраняем…' : 'Сохранить'}

@@ -249,7 +249,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
             // Друг присылает дни без своих приёмов пищи — groupDayByMeal об
             // этом знает и ничего не теряет.
             dayOf={(date) => state.days?.[date] || { meals: [] }}
-            // Вся история друга — из неё считаются «чаще/реже всего ем».
+            // Вся история друга — из неё считаются «Я это обожаю» и «Ок».
             // Отдельного запроса нет: friend_state и так присылает дни целиком.
             days={state.days}
             customFoods={state.customFoods || []}

@@ -15,7 +15,6 @@ import { keyOf, addDays } from './date.js'
 import { sumDay } from './nutrition.js'
 import { targetsForDay } from './body.js'
 import { getMealSections, foodsForMeal, labelForMealId } from './meals.js'
-import { normalizeProfileList } from './profileLists.js'
 import { TIER } from './subscription.js'
 
 const r = (n) => Math.round(Number(n) || 0)
@@ -106,16 +105,15 @@ function historyBlock(state, dateKey, depth) {
   return out
 }
 
+// Единственное, что человек сам рассказывает о своей еде после переработки
+// профиля. Списки «не ест» / «любит» и любимое блюдо ушли вместе со старой
+// моделью профиля: их негде завести, а читать поле, которое никто не может
+// заполнить, — это мёртвый код, а не предпочтения пользователя.
 function prefsBlock(state) {
   const p = state.profile
   if (!p) return null
-  const noGos = normalizeProfileList(p.noGos)
-  const toGos = normalizeProfileList(p.toGos)
-  const block = {}
-  if (noGos.length) block['не ест'] = noGos
-  if (toGos.length) block['любит'] = toGos
-  if (p.favDish) block['любимое блюдо'] = p.favDish
-  return Object.keys(block).length ? block : null
+  const guilty = typeof p.guiltyPleasure === 'string' ? p.guiltyPleasure.trim() : ''
+  return guilty ? { 'иногда позволяет себе': guilty } : null
 }
 
 // Единственная точка сборки. Возвращает объект под buildUserContext().

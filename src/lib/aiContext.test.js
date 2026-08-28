@@ -67,11 +67,23 @@ test('память отдаётся только на AI+', () => {
   assert.deepEqual(ai.memory, [], 'на AI память не подмешивается — тариф её не включает')
 })
 
-test('аллергии и предпочтения доезжают до ассистента', () => {
+test('guilty pleasure доезжает до ассистента', () => {
   const text = render({
-    profile: { sex: 'male', age: 30, height: 180, weight: 80, goal: 'lose', activity: 'moderate', noGos: ['Творог'], toGos: ['Рыба'] },
+    profile: { sex: 'male', age: 30, height: 180, weight: 80, goal: 'lose', activity: 'moderate', guiltyPleasure: 'Шоколадный торт' },
     days: {},
   })
-  assert.ok(text.includes('Творог'))
-  assert.ok(text.includes('Рыба'))
+  assert.ok(text.includes('Шоколадный торт'))
+})
+
+// Списки «не ест» / «любит» удалены вместе со старой моделью профиля: завести
+// их негде. Читать их из блоба давнего аккаунта — значит подмешивать в промпт
+// то, что человек уже не может ни увидеть, ни исправить.
+test('списки старой модели профиля в промпт не подмешиваются', () => {
+  const text = render({
+    profile: { sex: 'male', age: 30, height: 180, weight: 80, goal: 'lose', activity: 'moderate', noGos: ['Творог'], toGos: ['Рыба'], favDish: 'Харчо' },
+    days: {},
+  })
+  assert.ok(!text.includes('Творог'))
+  assert.ok(!text.includes('Рыба'))
+  assert.ok(!text.includes('Харчо'))
 })
