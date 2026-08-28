@@ -6,6 +6,7 @@ export const TIER = Object.freeze({
   FREE: 'FREE',
   AI: 'AI',
   AI_PLUS: 'AI_PLUS',
+  AI_PREMIUM: 'AI_PREMIUM',
 })
 
 export const STATUS = Object.freeze({
@@ -22,17 +23,25 @@ export const STATUS = Object.freeze({
 export const PLANS = [
   {
     tier: TIER.AI,
-    name: 'AI',
-    priceLabel: '4,99 €',
-    priceAmount: 499,
+    name: 'Carrot+',
+    priceLabel: '7,99 €',
+    priceAmount: 799,
     currency: 'EUR',
     period: 'мес',
   },
   {
     tier: TIER.AI_PLUS,
-    name: 'AI+',
-    priceLabel: '8,99 €',
-    priceAmount: 899,
+    name: 'Carrot Pro',
+    priceLabel: '12,99 €',
+    priceAmount: 1299,
+    currency: 'EUR',
+    period: 'мес',
+  },
+  {
+    tier: TIER.AI_PREMIUM,
+    name: 'Carrot Premium',
+    priceLabel: '24,99 €',
+    priceAmount: 2499,
     currency: 'EUR',
     period: 'мес',
   },
@@ -43,7 +52,7 @@ export const PLANS = [
 // промокод (promo_grants). Складывать их в одну строку нельзя — вебхук Stripe
 // перезаписывает свою строку целиком и стёр бы выданный доступ. Поэтому
 // действующий тариф считается здесь, в одном месте на весь проект.
-export const TIER_RANK = Object.freeze({ [TIER.FREE]: 0, [TIER.AI]: 1, [TIER.AI_PLUS]: 2 })
+export const TIER_RANK = Object.freeze({ [TIER.FREE]: 0, [TIER.AI]: 1, [TIER.AI_PLUS]: 2, [TIER.AI_PREMIUM]: 3 })
 
 export function bestTier(a, b) {
   return (TIER_RANK[b] ?? 0) > (TIER_RANK[a] ?? 0) ? b : (a || TIER.FREE)
@@ -111,7 +120,8 @@ export function isActive(sub) {
 }
 
 export function hasAI(sub) { return isActive(sub) }
-export function hasAIPlus(sub) { return isActive(sub) && sub.tier === TIER.AI_PLUS }
+export function hasAIPlus(sub) { return isActive(sub) && (sub.tier === TIER.AI_PLUS || sub.tier === TIER.AI_PREMIUM) }
+export function hasAIPremium(sub) { return isActive(sub) && sub.tier === TIER.AI_PREMIUM }
 
 // Оформление подписки: сервер создаёт Checkout Session, редиректим на Stripe.
 // Возвращает { pending: true }; результат придёт по вебхуку в таблицу subscriptions,

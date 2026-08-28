@@ -21,6 +21,7 @@ import {
 } from './SettingsPanels.jsx'
 import AITonePanel from './AITonePanel.jsx'
 import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiPrompt.js'
+import { planByTier } from '../lib/subscription.js'
 
 // AuthSheet тянет тяжёлый Web3-стек — грузим только когда его открывают.
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
@@ -35,7 +36,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
 
   const toneLabel = (TONES[prefs?.[TONE_PREF]] || TONES[DEFAULT_TONE]).label
   const promoValue = subscription?.via === 'promo'
-    ? (subscription.tier === 'AI_PLUS' ? 'AI+ активен' : 'AI активен')
+    ? `${planByTier(subscription.tier)?.name || subscription.tier} активен`
     : null
   const themeLabel = theme === 'light' ? 'Светлая' : theme === 'dark' ? 'Тёмная' : 'Как в системе'
   const accountValue = supabaseEnabled

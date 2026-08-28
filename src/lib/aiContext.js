@@ -20,10 +20,14 @@ import { TIER } from './subscription.js'
 
 const r = (n) => Math.round(Number(n) || 0)
 
+// Глубина истории по тарифам — числа совпадают с обещаниями на экране тарифов
+// (AIPlansScreen): «История за неделю / 30 дней / 90 дней». Если поменять
+// обещание — поменять и здесь, иначе Carrot расскажет не то, что человек купил.
 export const HISTORY_DAYS = Object.freeze({
   [TIER.FREE]: 3,
-  [TIER.AI]: 7,
-  [TIER.AI_PLUS]: 30,
+  [TIER.AI]: 7,          // Carrot+
+  [TIER.AI_PLUS]: 30,    // Carrot Pro
+  [TIER.AI_PREMIUM]: 90, // Carrot Premium
 })
 
 export function historyDepth(tier) {
@@ -125,6 +129,7 @@ export function buildContext(state, { tier = TIER.FREE, dateKey = keyOf(), memor
     today: todayBlock(state, dateKey),
     history: historyBlock(state, dateKey, historyDepth(tier)),
     prefs: prefsBlock(state),
-    memory: tier === TIER.AI_PLUS ? memory : [],
+    // Долгая память — на Carrot Pro и Premium (оба обещают память на экране тарифов).
+    memory: (tier === TIER.AI_PLUS || tier === TIER.AI_PREMIUM) ? memory : [],
   }
 }

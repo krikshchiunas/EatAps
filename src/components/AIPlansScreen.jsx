@@ -3,12 +3,9 @@ import { useStore } from '../store.jsx'
 import { PLANS, TIER } from '../lib/subscription.js'
 import PromoRedeemForm from './PromoRedeemForm.jsx'
 
-// Описания тарифов. Обещаем ровно то, что делает код: объём в 3,5 раза
-// больше бесплатного на AI и снятый потолок плюс более умная модель на AI+.
-// Никаких «приоритетной скорости» — её в реализации нет.
 const PLAN_COPY = {
   [TIER.AI]: {
-    tagline: 'В 3,5 раза больше запросов к ассистенту.',
+    tagline: 'Больше запросов к ассистенту каждый месяц.',
     bullets: [
       'Фото еды, разбор дневника, ответы на вопросы',
       'История за неделю — ассистент видит ваши паттерны',
@@ -16,11 +13,19 @@ const PLAN_COPY = {
     ],
   },
   [TIER.AI_PLUS]: {
-    tagline: 'Без месячного лимита и на более умной модели.',
+    tagline: 'Больше запросов и умная модель.',
     bullets: [
       'Более умная модель — точнее распознаёт блюда по фото',
       'История за 30 дней и долгая память о ваших привычках',
-      'Сколько угодно запросов',
+      'Больше запросов в месяц',
+    ],
+  },
+  [TIER.AI_PREMIUM]: {
+    tagline: 'Максимум без ограничений.',
+    bullets: [
+      'Самая умная модель и максимальный контекст',
+      'История за 90 дней и глубокая память о привычках',
+      'Без месячного лимита запросов',
     ],
   },
 }
@@ -92,17 +97,19 @@ export default function AIPlansScreen({ onClose }) {
 }
 
 function PlanCard({ plan, copy, index, busy, disabled, onBuy }) {
-  const isPlus = plan.tier === TIER.AI_PLUS
+  const isHighlighted = plan.tier === TIER.AI_PLUS
+  const isPremium = plan.tier === TIER.AI_PREMIUM
   return (
     <article
-      className={`ai-card ${isPlus ? 'ai-card--plus' : ''}`}
+      className={`ai-card ${isHighlighted ? 'ai-card--plus' : ''} ${isPremium ? 'ai-card--premium' : ''}`}
       style={{ animationDelay: `${80 + index * 90}ms` }}
     >
-      {isPlus && <div className="ai-card__glow" aria-hidden />}
+      {(isHighlighted || isPremium) && <div className="ai-card__glow" aria-hidden />}
       <div className="ai-card__body">
         <div className="ai-card__head">
           <div className="ai-card__name">{plan.name}</div>
-          {isPlus && <span className="ai-card__badge">Premium</span>}
+          {isHighlighted && <span className="ai-card__badge">Popular</span>}
+          {isPremium && <span className="ai-card__badge">Max</span>}
         </div>
 
         <div className="ai-card__price">
@@ -122,7 +129,7 @@ function PlanCard({ plan, copy, index, busy, disabled, onBuy }) {
         </ul>
 
         <button
-          className={`btn ai-card__cta ${isPlus ? '' : 'ghost'}`}
+          className={`btn ai-card__cta ${isHighlighted || isPremium ? '' : 'ghost'}`}
           onClick={onBuy}
           disabled={disabled}
         >

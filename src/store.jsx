@@ -685,6 +685,11 @@ export function StoreProvider({ children }) {
     setDayField(date, 'activity', valid)
   }, [setDayField])
 
+  const setDayActivityScore = useCallback((date, score) => {
+    const n = score != null ? Math.round(Math.max(0, Math.min(100, Number(score)))) : null
+    setDayField(date, 'activityScore', Number.isFinite(n) ? n : null)
+  }, [setDayField])
+
   // ── Учёт дня в статистике ─────────────────────────────────────────────────
   // «Пропустить день» — против самой частой причины вранья в статистике: было
   // лень записать всё съеденное, и средние поехали вниз. Продукты дня при этом
@@ -933,7 +938,7 @@ export function StoreProvider({ children }) {
     state, auth, phase, recovering, syncStatus,
     setProfile, setTheme, addFood, addFoods, repeatDay, repeatMeal, removeFood, editFood, upsertMealSection, deleteMealSection,
     moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient,
-    setDayWeight, setDayActivity, setWeightGoal, setDayStatsExcluded, confirmDayStats,
+    setDayWeight, setDayActivity, setDayActivityScore, setWeightGoal, setDayStatsExcluded, confirmDayStats,
     setPref, purchaseSubscription, openSubscriptionPortal, refreshSubscription, applyPromo,
     resetAll, signOut, stopSync, beginSignIn, endSignIn, completeRecovery, cancelRecovery,
     retryData, retrySync, dismissAuthError,
