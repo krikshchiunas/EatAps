@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build && node scripts/inject-precache.mjs",
     "preview": "vite preview",
-    "test": "node --test src/lib/*.test.js api/stripe/*.test.js api/telegram/*.test.js api/ai/*.test.js"
+    "test": "node --test src/lib/*.test.js api/stripe/*.test.js api/telegram/*.test.js api/ai/*.test.js supabase/*.test.js",
+    "build:sql": "node scripts/build-setup-all.mjs"
   },
   "dependencies": {
     "@reown/appkit": "^1.8.23",

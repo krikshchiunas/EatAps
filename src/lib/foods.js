@@ -1039,6 +1039,68 @@ const posNum = (v, max) => {
   return Number.isFinite(n) && n > 0 && n <= max ? n : null
 }
 
+// ── Обращения к Open Food Facts ──────────────────────────────────────────────
+//
+// Запросы идут прямо из браузера пользователя, и до этой правки — без таймаута,
+// без повторов и без кэша. Последствия у каждого пункта свои:
+//
+//   • без таймаута зависший ответ держал экран сканера в загрузке бесконечно:
+//     сигнал отмены приходил только при уходе с экрана;
+//   • без повтора одна потерянная пачка на мобильной сети означала «товар не
+//     найден» — то есть чужую ошибку сети мы показывали как факт о продукте;
+//   • без кэша один и тот же йогурт запрашивался при каждом сканировании.
+//
+// User-Agent проект тоже не представлял, хотя условия API Open Food Facts этого
+// просят. Из браузера заголовок User-Agent задать нельзя (он запрещён к
+// изменению), поэтому представляемся параметром запроса — это тот способ,
+// который у клиентского кода есть.
+const OFF_TIMEOUT_MS = 8000
+const OFF_RETRIES = 2
+const OFF_UA = `EatAps/${typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'} (https://www.eataps.com)`
+
+// Небольшой кэш в памяти вкладки. Не localStorage: данные о продуктах живут
+// своей жизнью, и «вечный» кэш означал бы, что исправленный в базе состав к
+// человеку не доедет никогда.
+const offCache = new Map()
+const OFF_CACHE_MAX = 200
+
+offCache.set = function set(k, v) {
+  if (this.size >= OFF_CACHE_MAX) this.delete(this.keys().next().value)
+  return Map.prototype.set.call(this, k, v)
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// fetch с собственным таймаутом и повтором на сетевых сбоях и 5xx.
+// 404 повторять нечего — это ответ, а не сбой.
+async function offFetch(url, signal, attempt = 0) {
+  const withUa = url + (url.includes('?') ? '&' : '?') + 'user_agent=' + encodeURIComponent(OFF_UA)
+  const ctl = new AbortController()
+  const onAbort = () => ctl.abort()
+  signal?.addEventListener('abort', onAbort, { once: true })
+  const timer = setTimeout(() => ctl.abort(), OFF_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(withUa, { signal: ctl.signal })
+    if (res.status >= 500 && attempt < OFF_RETRIES) {
+      await sleep(300 * (attempt + 1))
+      return offFetch(url, signal, attempt + 1)
+    }
+    return res
+  } catch (e) {
+    // Отмену снаружи (ушли с экрана, начали новый поиск) не повторяем.
+    if (signal?.aborted) throw e
+    if (attempt < OFF_RETRIES) {
+      await sleep(300 * (attempt + 1))
+      return offFetch(url, signal, attempt + 1)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+  }
+}
+
 // Поиск продукта по считанному коду.
 //
 // Возвращает:
@@ -1051,12 +1113,25 @@ export async function lookupBarcode(code, signal) {
   let product = null
   // Один и тот же товар лежит в базе то с ведущим нулём, то без — пробуем оба.
   for (const variant of barcodeVariants(code)) {
+    // Найденное запоминаем: один и тот же йогурт сканируется каждое утро, а
+    // ходить за ним в чужую базу каждый раз незачем.
+    const cached = offCache.get(`b:${variant}`)
+    if (cached !== undefined) {
+      if (cached === null) continue
+      product = cached
+      break
+    }
     const url = `https://ru.openfoodfacts.org/api/v2/product/${encodeURIComponent(variant)}.json?fields=${OFF_FIELDS}`
-    const res = await fetch(url, { signal })
-    if (res.status === 404) continue
+    const res = await offFetch(url, signal)
+    if (res.status === 404) { offCache.set(`b:${variant}`, null); continue }
     if (!res.ok) throw new Error('off_http_' + res.status)
     const data = await res.json()
-    if (data && data.status === 1 && data.product) { product = data.product; break }
+    if (data && data.status === 1 && data.product) {
+      product = data.product
+      offCache.set(`b:${variant}`, product)
+      break
+    }
+    offCache.set(`b:${variant}`, null)
   }
   if (!product) return { status: 'not-found' }
 
@@ -1128,7 +1203,7 @@ export async function searchOpenFoodFacts(query, signal) {
     encodeURIComponent(query) +
     '&search_simple=1&action=process&json=1&page_size=25' +
     '&fields=product_name,product_name_ru,brands,nutriments'
-  const res = await fetch(url, { signal })
+  const res = await offFetch(url, signal)
   if (!res.ok) throw new Error('off_http_' + res.status)
   const data = await res.json()
   const seen = new Set()

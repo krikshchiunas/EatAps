@@ -15,12 +15,39 @@ export const GOALS = {
 
 const round10 = (n) => Math.round(n / 10) * 10
 
+// Границы, за которыми формула Mifflin-St Jeor перестаёт что-либо значить.
+// Совпадают с проверками онбординга; здесь они нужны как второй слой: профиль
+// приезжает из синхронизируемого блоба, то есть может прийти с другого
+// устройства, из старой версии приложения или из слияния двух состояний.
+const LIMITS = {
+  age: [10, 120],
+  height: [80, 250],
+  weight: [20, 400],
+}
+
+const inRange = (v, [min, max]) => {
+  const n = Number(v)
+  return Number.isFinite(n) && n >= min && n <= max ? n : null
+}
+
+// Возвращает цели либо null, если считать не из чего.
+//
+// Возврат null, а не объекта с NaN, — существенная разница. Math.max(1200, NaN)
+// это NaN, round10(NaN) это NaN, и раньше при неполном профиле функция отдавала
+// { calories: NaN, protein: NaN, … }. Такой объект выглядит валидным, проходит
+// дальше по коду и всплывает уже на экране в виде «NaN ккал» и пустых колец.
+// null проверяется одной строкой и не притворяется числом.
 export function computeTargets(profile) {
-  const { sex, age, height, weight, activity, goal } = profile
-  const bmr = 10 * weight + 6.25 * height - 5 * age + (sex === 'male' ? 5 : -161)
-  const tdee = bmr * (ACTIVITY[activity]?.factor ?? 1.375)
-  const calories = round10(Math.max(1200, tdee + (GOALS[goal]?.kcalAdjust ?? 0)))
-  const protein = Math.round(weight * (GOALS[goal]?.proteinPerKg ?? 1.6))
+  const p = profile && typeof profile === 'object' ? profile : {}
+  const age = inRange(p.age, LIMITS.age)
+  const height = inRange(p.height, LIMITS.height)
+  const weight = inRange(p.weight, LIMITS.weight)
+  if (age == null || height == null || weight == null) return null
+
+  const bmr = 10 * weight + 6.25 * height - 5 * age + (p.sex === 'male' ? 5 : -161)
+  const tdee = bmr * (ACTIVITY[p.activity]?.factor ?? 1.375)
+  const calories = round10(Math.max(1200, tdee + (GOALS[p.goal]?.kcalAdjust ?? 0)))
+  const protein = Math.round(weight * (GOALS[p.goal]?.proteinPerKg ?? 1.6))
   const fat = Math.round((calories * 0.27) / 9)
   const carbs = Math.round((calories - protein * 4 - fat * 9) / 4)
   return {

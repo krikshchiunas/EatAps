@@ -199,9 +199,18 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
             authorAvatar={card?.avatar_url}
           />
         )}
-        {tab !== 'thoughts' && (
+        {/* Пока список грузится, PeopleList не рисуем вовсе.
+            Раньше сюда уходило `people || []`, и на каждом рендере это был
+            НОВЫЙ пустой массив — он попадал в зависимости эффекта внутри
+            PeopleList и раскручивал цикл перерисовки до прихода ответа.
+            Причину закрыли и в самом PeopleList, но показывать «Загружаем…»
+            здесь всё равно правильнее, чем пустой список. */}
+        {tab !== 'thoughts' && people === null && (
+          <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '28px 0' }}>Загружаем…</p>
+        )}
+        {tab !== 'thoughts' && people !== null && (
           <PeopleList
-            people={people || []}
+            people={people}
             myId={myId}
             onOpen={onOpenProfile}
             empty={

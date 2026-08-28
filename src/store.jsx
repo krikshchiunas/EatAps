@@ -21,6 +21,7 @@ import { GUEST, clearCache, clockStorage, migrateLegacyCache, readCache, writeCa
 import { normalizeError } from './lib/authErrors.js'
 import { onAuthSignal, postAuthSignal } from './lib/tabBus.js'
 import { setUpdateSafetyCheck } from './lib/swUpdate.js'
+import { clearCardCache } from './lib/avatarCache.js'
 import { log, shortId } from './lib/log.js'
 
 // useStore живёт в lib/storeContext.js, но импортируется отовсюду как
@@ -433,6 +434,11 @@ export function StoreProvider({ children }) {
     grantsRef.current = []
     setState((s) => (s.subscription?.tier === 'FREE' ? s : { ...s, subscription: defaultSubscription() }))
   }, [uid])
+
+  // Кэш карточек и аватаров привязан к пользователю: user_cards не отдаёт
+  // заблокированных, то есть содержимое кэша зависит от того, кто спрашивает.
+  // Переносить его между аккаунтами нельзя.
+  useEffect(() => { clearCardCache() }, [uid])
 
   // Возврат из Stripe Checkout: успех — доопрашиваем несколько раз, пока вебхук
   // не запишет активную подписку (обычно приходит за 1–3 сек, но бывает дольше).

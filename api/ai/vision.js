@@ -6,9 +6,11 @@
 // Картинка приходит base64 в теле, а не ссылкой на storage: фото тарелки не
 // должно оседать в облаке ради одного распознавания. Модель его видит, ответ
 // возвращается, оригинал остаётся на устройстве пользователя.
+//
+// Проверки доступа и лимитов — общие с чатом, в preflight (_shared.js).
 import {
-  getUser, tierOf, spentThisPeriod, reserve, settle, callClaude, parseReply, budgetError,
-  modelForTier, checkBudget, costOf, periodKey, budgetForTier,
+  preflight, reserve, settle, callClaude, parseReply, budgetError,
+  checkBudget, costOf, budgetForTier,
   MAX_OUTPUT_TOKENS, roughTokens, IMAGE_TOKENS,
   buildSystemPrompt, buildUserContext, resolveTone, capContext,
 } from './_shared.js'
@@ -22,39 +24,37 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 // на остальное тело. Клиент и так жмёт снимок до ~300 КБ (fileToImage).
 const MAX_BASE64_CHARS = 3.5 * 1024 * 1024
 
+// base64 состоит из строго определённого алфавита. Проверка нужна не ради
+// красоты: строка произвольного содержимого уедет в модель как «картинка»,
+// будет оплачена по IMAGE_TOKENS и вернётся ошибкой — то есть станет способом
+// потратить чужой бюджет впустую.
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' })
 
-  const user = await getUser(req)
-  if (!user) return res.status(401).json({ error: 'unauthorized' })
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
+  const image = body.image
 
-  const image = req.body?.image
-  if (!image?.data || !ALLOWED_TYPES.includes(image.media_type)) {
+  if (!image || typeof image !== 'object' || typeof image.data !== 'string'
+      || !ALLOWED_TYPES.includes(image.media_type)) {
     return res.status(400).json({ error: 'bad_image', message: 'Нужен JPEG, PNG или WebP.' })
   }
   if (image.data.length > MAX_BASE64_CHARS) {
     return res.status(413).json({ error: 'image_too_large', message: 'Фото слишком большое — сожмите его.' })
   }
-
-  const tier = await tierOf(user.id)
-  const model = modelForTier(tier)
-  const period = periodKey()
-
-  let spent
-  try {
-    spent = await spentThisPeriod(user.id, period)
-  } catch {
-    // Учёт недоступен (не прогнана миграция, лежит база) — отказываем. Пустить
-    // запрос значило бы работать без лимита за счёт владельца ключа.
-    return res.status(503).json({
-      error: 'accounting_unavailable',
-      message: 'Ассистент временно недоступен. Попробуйте позже.',
-    })
+  // Пустая или битая строка до модели доходить не должна.
+  if (image.data.length < 64 || !BASE64_RE.test(image.data)) {
+    return res.status(400).json({ error: 'bad_image', message: 'Не удалось прочитать фото. Попробуйте другое.' })
   }
 
-  const system = buildSystemPrompt({ tone: resolveTone(req.body?.prefs).id, sub: { tier, status: 'active' } })
-  const context = capContext(buildUserContext(req.body?.context || {}))
-  const note = String(req.body?.note || '').slice(0, 500)
+  const pre = await preflight(req, res, { maxOutputTokens: MAX_OUTPUT_TOKENS.vision })
+  if (!pre) return // preflight уже ответил: 401, 403, 429 или 503
+  const { user, tier, period, day, spent, spentDay, model } = pre
+
+  const system = buildSystemPrompt({ tone: resolveTone(body.prefs).id, sub: { tier, status: 'active' } })
+  const context = capContext(buildUserContext(body.context || {}))
+  const note = typeof body.note === 'string' ? body.note.slice(0, 500) : ''
 
   const messages = [{
     role: 'user',
@@ -65,13 +65,15 @@ export default async function handler(req, res) {
   }]
 
   const inputTokens = IMAGE_TOKENS + roughTokens(system) + roughTokens(context) + roughTokens(note)
-  const check = checkBudget({ tier, spent, inputTokens, maxOutputTokens: MAX_OUTPUT_TOKENS.vision })
+  const check = checkBudget({
+    tier, spent, spentDay, inputTokens, maxOutputTokens: MAX_OUTPUT_TOKENS.vision,
+  })
   if (!check.ok) return budgetError(res, check, tier)
 
   // Резервируем верхнюю оценку до похода в модель — иначе несколько запросов,
   // отправленных одновременно, пройдут проверку по одному и тому же остатку.
   const reserved = check.needed
-  if (!(await reserve(user.id, reserved, period))) {
+  if (!(await reserve(user.id, reserved, period, day))) {
     return res.status(503).json({
       error: 'accounting_unavailable',
       message: 'Ассистент временно недоступен. Попробуйте позже.',
@@ -85,13 +87,13 @@ export default async function handler(req, res) {
     // Упавший запрос мог сжечь токены — платит за них пользователь, остальной
     // резерв возвращаем. Не списать вовсе значило бы сделать обрыв на середине
     // способом обойти лимит.
-    await settle(user.id, { reserved, actual: e.usage ? costOf(e.usage, model) : 0 }, period)
+    await settle(user.id, { reserved, actual: e.usage ? costOf(e.usage, model) : 0 }, period, day)
     const status = [429, 529, 504].includes(e.status) ? 503 : 502
     return res.status(status).json({ error: 'upstream', message: 'Не удалось разобрать фото. Попробуйте ещё раз.' })
   }
 
   const cost = costOf(data.usage, model)
-  await settle(user.id, { reserved, actual: cost }, period)
+  await settle(user.id, { reserved, actual: cost }, period, day)
 
   const parsed = parseReply(data)
   const budget = budgetForTier(tier)

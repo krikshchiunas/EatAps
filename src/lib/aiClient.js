@@ -14,12 +14,20 @@ export class AIError extends Error {
     this.status = status
     this.usage = usage
   }
-  // Лимит исчерпан — фронт показывает апгрейд, а не «ошибка сети».
+  // Месячный лимит исчерпан — фронт показывает апгрейд, а не «ошибка сети».
   get isBudget() { return this.code === 'budget_exhausted' }
+  // Суточный подпотолок — отдельный случай: доступ вернётся завтра сам, и
+  // предлагать здесь апгрейд неуместно.
+  get isDailyLimit() { return this.code === 'daily_limit' }
+  // Слишком часто. Ошибка временная и лечится ожиданием, а не действием.
+  get isRateLimited() { return this.code === 'rate_limited' }
 }
 
 const MESSAGES = {
   unauthorized: 'Нужно войти в аккаунт.',
+  banned: 'Доступ к ассистенту закрыт.',
+  rate_limited: 'Слишком часто. Подождите минуту.',
+  daily_limit: 'На сегодня лимит ассистента исчерпан. Он обновится завтра.',
   bad_image: 'Нужен JPEG, PNG или WebP.',
   image_too_large: 'Фото больше 5 МБ — сожмите его.',
   empty_request: 'Пустой запрос.',

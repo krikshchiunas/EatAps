@@ -225,7 +225,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export async function listFriends(myId) {
   if (!supabase || !myId) return []
   const { data, error } = await supabase.rpc('list_friends', {
-    p_user_id: myId, p_limit: 100, p_offset: 0,
+    p_user_id: myId, p_limit: 100,
   })
   if (error) {
     // Миграция ещё не прогнана — раздел просто пуст, а не сломан.
@@ -244,21 +244,20 @@ export async function listFriends(myId) {
 // Имя и фото по списку ID. RPC friend_briefs отдаёт только эти два поля и
 // только для принятых друзей; прямое чтение чужого app_state закрыто политикой.
 // Фолбэк — для проектов без миграции friend_privacy.
+// Фолбэк на прямое чтение app_state убран. Он был написан «для проектов без
+// миграции friend_privacy» (август 2026) и с тех пор недостижим, а после
+// миграции 2026-08-28 прямое чтение чужого состояния закрыто окончательно —
+// то есть фолбэк молча возвращал бы пустые имена вместо ошибки.
 async function fetchFriendBriefs(ids) {
   const out = {}
   if (!supabase || !ids?.length) return out
 
   const { data, error } = await supabase.rpc('friend_briefs', { p_user_ids: ids })
-  if (!error) {
-    for (const r of data || []) out[r.user_id] = { name: r.name || null, avatar: r.avatar || null }
+  if (error) {
+    log.error('supabase', 'friend_briefs недоступна', error)
     return out
   }
-
-  const legacy = await supabase
-    .from('app_state')
-    .select('user_id, fname:state->profile->>name, favatar:state->profile->>avatar')
-    .in('user_id', ids)
-  for (const r of legacy.data || []) out[r.user_id] = { name: r.fname || null, avatar: r.favatar || null }
+  for (const r of data || []) out[r.user_id] = { name: r.name || null, avatar: r.avatar || null }
   return out
 }
 
@@ -274,15 +273,16 @@ export async function pullFriendState(friendId) {
   if (!supabase || !friendId) return null
 
   const { data, error } = await supabase.rpc('friend_state', { p_user_id: friendId })
-  if (!error) {
-    if (!data) return null // нет строки либо дружба не принята
-    return { state: projectFriendState(data), updatedAt: null }
+  // Фолбэка на pullState(friendId) здесь больше нет. Он был написан на случай
+  // непрогнанной миграции friend_privacy, а с миграции 2026-08-28 прямое чтение
+  // чужого app_state закрыто окончательно: фолбэк не сработал бы, но при этом
+  // прятал бы настоящую причину отказа.
+  if (error) {
+    log.error('supabase', 'friend_state недоступна', error)
+    return null
   }
-
-  // Миграция friend_privacy ещё не прогнана — читаем по старой политике,
-  // но наружу всё равно отдаём только разрешённые поля.
-  const legacy = await pullState(friendId)
-  return legacy ? { ...legacy, state: projectFriendState(legacy.state) } : null
+  if (!data) return null // нет строки либо люди не друзья
+  return { state: projectFriendState(data), updatedAt: null }
 }
 
 // Быстрый лукап имени и аватара по id — используется при пуше о новом сообщении.
@@ -617,14 +617,33 @@ export async function sendChatMessage({ sender, recipient, text, imageUrl, mealR
   return { ok: data }
 }
 
-export async function listMessagesWith(myId, friendId, limit = 300) {
-  if (!supabase) return []
-  const query = (cols) => supabase
-    .from('messages')
-    .select(cols)
-    .or(`and(sender.eq.${myId},recipient.eq.${friendId}),and(sender.eq.${friendId},recipient.eq.${myId})`)
-    .order('created_at', { ascending: true })
-    .limit(limit)
+// История переписки — ПОСЛЕДНИЕ сообщения, с подгрузкой вверх по курсору.
+//
+// Было: .order('created_at', { ascending: true }).limit(300) — то есть ПЕРВЫЕ
+// триста сообщений диалога, а не последние. После трёхсотого сообщения человек
+// открывал чат и видел переписку многомесячной давности; всё, что он написал и
+// получил за сессию, исчезало при следующем открытии. Данные при этом целы, но
+// выглядит это как потеря переписки.
+//
+// Читаем по убыванию и разворачиваем на клиенте: индекс messages_pair_idx
+// (least, greatest, created_at desc) обслуживает и выборку, и курсор.
+//
+// before — created_at самого старого показанного сообщения. Возвращаем
+// { messages, hasMore }: hasMore считаем по тому, пришла ли страница полной,
+// ДО фильтрации скрытых — иначе чат со скрытыми сообщениями решил бы, что
+// история кончилась.
+export async function listMessagesWith(myId, friendId, { limit = 60, before = null } = {}) {
+  if (!supabase) return { messages: [], hasMore: false }
+  const query = (cols) => {
+    let q = supabase
+      .from('messages')
+      .select(cols)
+      .or(`and(sender.eq.${myId},recipient.eq.${friendId}),and(sender.eq.${friendId},recipient.eq.${myId})`)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    if (before) q = q.lt('created_at', before)
+    return q
+  }
 
   let { data, error } = await query(MSG_COLS)
   if (error && isMissingColumn(error)) {
@@ -632,9 +651,15 @@ export async function listMessagesWith(myId, friendId, limit = 300) {
     if (data) data = data.map((m) => ({ ...m, reactions: {} }))
   }
   if (error) throw error
+
+  const rows = data || []
+  const hasMore = rows.length === limit
   // Скрытые «у меня» не показываем — в БД они остаются для собеседника.
   const hidden = getHiddenMessageIds()
-  return (data || []).filter((m) => !hidden.has(String(m.id)))
+  const messages = rows
+    .filter((m) => !hidden.has(String(m.id)))
+    .reverse() // от старых к новым: именно в этом порядке чат и рисуется
+  return { messages, hasMore }
 }
 
 // ── Присутствие (онлайн/офлайн) ───────────────────────────────────────────────
@@ -678,15 +703,16 @@ export async function touchLastSeen() {
 
 // Отметка живёт в таблице presence (миграция 2026-08-06). Раньше она лежала в
 // app_state, но heartbeat раз в минуту трогал строку состояния и по Realtime
-// рассылал бы весь блоб на все устройства. Фолбэк на старую колонку оставлен
-// для проектов, где миграция ещё не прогнана.
+// рассылал бы весь блоб на все устройства.
+//
+// Фолбэк на колонку app_state.last_seen убран: чужое состояние теперь не
+// читается вовсе, и запасной путь возвращал бы null молча, вместо того чтобы
+// показать причину.
 export async function fetchLastSeen(userId) {
   if (!supabase || !userId) return null
   const { data, error } = await supabase.rpc('get_last_seen', { p_user_id: userId })
-  if (!error) return data || null
-  const legacy = await supabase
-    .from('app_state').select('last_seen').eq('user_id', userId).maybeSingle()
-  return legacy.data?.last_seen || null
+  if (error) return null
+  return data || null
 }
 
 // ── Индикатор «печатает…» ─────────────────────────────────────────────────────
@@ -737,35 +763,75 @@ export function subscribeToChat(myId, friendId, onEvent) {
 }
 
 // Последнее сообщение в каждом диалоге — для списка чатов.
-export async function listConversations(myId, limit = 200) {
+//
+// Раньше клиент брал 200 последних сообщений ПО ВСЕМ диалогам и схлопывал их
+// по собеседнику у себя. Активная переписка занимала все двести строк, и
+// остальные диалоги из списка ПРОПАДАЛИ — не «уезжали вниз», а исчезали.
+// distinct on в RPC отдаёт ровно по строке на собеседника независимо от того,
+// сколько сообщений в самом активном чате.
+export async function listConversations(myId, limit = 100) {
   if (!supabase) return []
-  const { data, error } = await supabase
-    .from('messages')
-    .select('id, sender, recipient, text, image_url, created_at')
-    .or(`sender.eq.${myId},recipient.eq.${myId}`)
-    .order('created_at', { ascending: false })
-    .limit(limit)
-  if (error) throw error
-  const byPartner = new Map()
-  for (const m of data || []) {
-    const partner = m.sender === myId ? m.recipient : m.sender
-    if (!byPartner.has(partner)) byPartner.set(partner, m)
+  const { data, error } = await supabase.rpc('list_conversations', { p_limit: limit })
+  if (error) {
+    if (isMissingRelation(error)) return []
+    throw error
   }
-  return Array.from(byPartner, ([id, last]) => ({ id, last }))
+  return (data || []).map((r) => ({
+    id: r.partner_id,
+    unread: r.unread || 0,
+    last: {
+      id: r.message_id,
+      sender: r.sender,
+      recipient: r.sender === myId ? r.partner_id : myId,
+      text: r.text,
+      image_url: r.image_url,
+      created_at: r.created_at,
+    },
+  }))
 }
 
-// DSGVO «право на удаление»: стираем данные из облака и удаляем сам аккаунт.
-// Данные удаляем всегда (RLS: свои); аккаунт — через RPC delete_current_user
-// (SECURITY DEFINER, см. schema.sql). Если RPC нет — возвращаем partial.
+// DSGVO «право на удаление».
+//
+// Основной путь — серверный: POST /api/account/delete отменяет подписку Stripe,
+// вычищает фотографии из ПУБЛИЧНЫХ бакетов и удаляет пользователя через
+// Auth-админку. Ни того, ни другого из браузера сделать нельзя: чужая папка в
+// storage и отмена подписки требуют прав, которых у клиента нет.
+//
+// До этой правки удаление жило целиком здесь, и обе вещи оставались: фото из
+// личной переписки продолжали открываться по прямой ссылке после удаления
+// аккаунта, а подписка продолжала списываться.
+//
+// Клиентская чистка ниже осталась запасным путём — на случай, когда серверная
+// функция недоступна (локальный запуск без vercel dev, сбой деплоя). Она
+// делает то, что может: стирает данные, видимые другим людям, и убирает сам
+// аккаунт через RPC. Фотографии и подписка в этом случае остаются, и об этом
+// нужно сказать честно, а не отрапортовать успех.
 export async function deleteAccount(userId) {
   if (!supabase) return { error: 'Нет подключения к серверу' }
+
   // uid приходит из уже загруженной сессии — лишний сетевой getUser() здесь
   // только добавлял точку отказа. Подстраховываемся локальным чтением сессии.
   let uid = userId
-  if (!uid) {
-    const { data } = await supabase.auth.getSession()
-    uid = data?.session?.user?.id
+  const { data: sess } = await supabase.auth.getSession()
+  if (!uid) uid = sess?.session?.user?.id
+  const token = sess?.session?.access_token
+
+  if (token) {
+    try {
+      const res = await fetch('/api/account/delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        const body = await res.json().catch(() => ({}))
+        return { ok: true, warnings: body.warnings?.length ? body.warnings : undefined }
+      }
+      // 401/403/404/500 — уходим на запасной путь ниже.
+    } catch {
+      // Сети нет или функция не развёрнута — тоже запасной путь.
+    }
   }
+
   if (uid) {
     // Рвём подписки в обе стороны. Дружбу отдельно удалять не нужно и уже
     // нельзя: строку friendships пишет сервер по подпискам, и она уйдёт
@@ -784,7 +850,9 @@ export async function deleteAccount(userId) {
   }
   const { error } = await supabase.rpc('delete_current_user')
   if (error) return { error: normalizeError(error).message, partial: true } // данные стёрты, аккаунт остался
-  return { ok: true }
+  // Аккаунт удалён, но запасным путём: фотографии в бакетах и подписка Stripe
+  // остались. Вызывающий обязан сказать об этом человеку.
+  return { ok: true, warnings: ['storage', 'stripe'] }
 }
 
 // Снять ВСЕ realtime-каналы. Вызывается при выходе и при смене пользователя:
@@ -866,17 +934,24 @@ export async function listCoachLinks(myId) {
     else invites.push({ rowId: r.id, id: r.client })
   }
 
-  // Имена одним запросом — как в listFriendships.
+  // Имена одним запросом.
+  //
+  // Раньше здесь читался чужой app_state напрямую. Это не работало и до
+  // ужесточения политики: она пускает ТРЕНЕРА к клиенту, а не наоборот, и не
+  // пускает вовсе, пока связь в статусе pending. То есть у клиента имена
+  // тренеров всегда были пусты, а у тренера — имена в неподтверждённых
+  // приглашениях; ошибки при этом не возникало, просто пустые поля.
+  //
+  // user_cards отдаёт ник, имя и аватар любому авторизованному — с 2026-08-25
+  // это публичные поля, и отдельный привилегированный доступ здесь не нужен.
   const ids = [...new Set([...coaches, ...clients, ...invites].map((x) => x.id))]
   if (ids.length) {
-    const { data: rows } = await supabase
-      .from('app_state')
-      .select('user_id, fname:state->profile->>name, favatar:state->profile->>avatar')
-      .in('user_id', ids)
+    const { data: rows } = await supabase.rpc('user_cards', { p_user_ids: ids })
     const byId = Object.fromEntries((rows || []).map((r) => [r.user_id, r]))
     for (const x of [...coaches, ...clients, ...invites]) {
-      x.name = byId[x.id]?.fname
-      x.avatar = byId[x.id]?.favatar
+      x.name = byId[x.id]?.display_name || byId[x.id]?.username
+      x.avatar = byId[x.id]?.avatar_url
+      x.username = byId[x.id]?.username
     }
   }
   return { coaches, clients, invites }

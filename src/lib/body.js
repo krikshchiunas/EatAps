@@ -125,11 +125,13 @@ export function createTargetResolver(days, profile) {
     }
 
     const ck = `${weight}|${activity}`
-    let t = cache.get(ck)
-    if (!t) {
-      t = computeTargets({ ...profile, weight, activity })
-      cache.set(ck, t)
-    }
+    if (cache.has(ck)) return cache.get(ck)
+    // computeTargets возвращает null, если профиля не хватает на расчёт. Тогда
+    // отдаём цели из профиля — как и в ветке выше. Кэшируем и этот случай:
+    // has() вместо проверки на истинность, иначе null пересчитывался бы заново
+    // на каждый день года.
+    const t = computeTargets({ ...profile, weight, activity }) || base
+    cache.set(ck, t)
     return t
   }
 }

@@ -79,22 +79,48 @@ export async function removeFollower(myId, followerId) {
   return error ? fail(error) : { ok: true }
 }
 
-export async function listFollowers(userId, { limit = 50, offset = 0 } = {}) {
+// Списки подписчиков и подписок. Пагинация — курсором (created_at, user_id),
+// а не offset: пока человек листает, сверху приезжают новые подписки, и
+// нумерованные страницы начинают показывать дубли и пропускать строки. Ровно
+// та причина, по которой курсор с самого начала стоит в ленте.
+export async function listFollowers(userId, { limit = 50, cursor = null } = {}) {
   if (!supabase || !userId) return []
   const { data, error } = await supabase.rpc('list_followers', {
-    p_user_id: userId, p_limit: limit, p_offset: offset,
+    p_user_id: userId, p_limit: limit,
+    p_before_at: cursor?.createdAt || null, p_before_id: cursor?.id || null,
   })
   if (error) { if (isMissingRelation(error)) return []; throw error }
   return data || []
 }
 
-export async function listFollowing(userId, { limit = 50, offset = 0 } = {}) {
+export async function listFollowing(userId, { limit = 50, cursor = null } = {}) {
   if (!supabase || !userId) return []
   const { data, error } = await supabase.rpc('list_following', {
-    p_user_id: userId, p_limit: limit, p_offset: offset,
+    p_user_id: userId, p_limit: limit,
+    p_before_at: cursor?.createdAt || null, p_before_id: cursor?.id || null,
   })
   if (error) { if (isMissingRelation(error)) return []; throw error }
   return data || []
+}
+
+// Отношения ПАЧКОЙ. Раньше каждый список людей звал get_relationship на
+// каждого: пятьдесят подписчиков — пятьдесят параллельных запросов. Параллельно
+// не значит бесплатно: на мобильной сети это упирается в лимит соединений, а
+// в базе — в двести индексных сканов на один открытый экран.
+//
+// friend и mutualFollow клиент выводит сам из following && followedBy — это
+// уже делает toRelationship, и дублировать их в ответе незачем.
+export async function getRelationships(ids) {
+  const out = {}
+  if (!supabase || !ids?.length) return out
+  const unique = [...new Set(ids.filter(Boolean))]
+  const { data, error } = await supabase.rpc('get_relationships', { p_user_ids: unique })
+  if (error) {
+    if (isMissingRelation(error)) return out
+    throw error
+  }
+  for (const r of data || []) out[r.user_id] = toRelationship(r)
+  return out
 }
 
 // ---------------- Блокировки ----------------

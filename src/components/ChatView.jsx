@@ -84,6 +84,11 @@ export default function ChatView({ friend, onClose }) {
 
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
+  // Есть ли что подгружать выше. Чат открывается на последних сообщениях
+  // (раньше показывались ПЕРВЫЕ триста и переписка «застывала»), а старое
+  // подтягивается при прокрутке вверх.
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [reply, setReply] = useState(null)          // { id, snapshot }
   const [menuMsg, setMenuMsg] = useState(null)      // сообщение для контекст-меню
   const [forwardMsg, setForwardMsg] = useState(null)
@@ -148,6 +153,45 @@ export default function ChatView({ friend, onClose }) {
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [loading, messages])
+
+  // Подгрузка старых сообщений при прокрутке к верху.
+  //
+  // Позицию восстанавливаем по РАЗНИЦЕ высоты, а не по индексу: дописанные
+  // сверху сообщения сдвигают содержимое вниз ровно на свою высоту, и без
+  // компенсации экран прыгал бы к началу на каждой подгрузке.
+  const keepScrollRef = useRef(null)
+  const loadOlder = useCallback(async () => {
+    const el = listRef.current
+    const oldest = messages[0]
+    if (!el || !oldest || loadingMore || !hasMore) return
+    setLoadingMore(true)
+    const before = el.scrollHeight - el.scrollTop
+    try {
+      const res = await listMessagesWith(myId, friend.id, { before: oldest.created_at })
+      if (!res.messages.length) { setHasMore(false); return }
+      keepScrollRef.current = before
+      setMessages((cur) => {
+        const seen = new Set(cur.map((m) => m.id))
+        return [...res.messages.filter((m) => !seen.has(m.id)), ...cur]
+      })
+      setHasMore(res.hasMore)
+    } catch (e) {
+      flash(normalizeError(e).message)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [messages, loadingMore, hasMore, myId, friend.id, flash])
+
+  useLayoutEffect(() => {
+    const el = listRef.current
+    const keep = keepScrollRef.current
+    if (!el || keep == null) return
+    keepScrollRef.current = null
+    el.scrollTop = el.scrollHeight - keep
+  }, [messages])
+
+  // Слушатель прокрутки в чате уже есть (onScroll ниже) — подгрузка вешается
+  // на него же, а не вторым обработчиком на тот же элемент.
 
   // Скрыть BottomNav пока чат открыт (счётчик — FriendAccount тоже добавляет)
   useEffect(() => {
@@ -216,11 +260,13 @@ export default function ChatView({ friend, onClose }) {
     markChatRead(friend.id)
     markMessagesRead(friend.id)
     let cancelled = false
+    setHasMore(false)
     ;(async () => {
       try {
-        const rows = await listMessagesWith(myId, friend.id)
+        const { messages: rows, hasMore: more } = await listMessagesWith(myId, friend.id)
         if (cancelled) return
         setMessages(rows)
+        setHasMore(more)
         setLoading(false)
       } catch (e) {
         if (!cancelled) { flash(normalizeError(e).message); setLoading(false) }
@@ -334,7 +380,9 @@ export default function ChatView({ friend, onClose }) {
     const nb = nearBottom()
     atBottomRef.current = nb
     if (nb && showJump) setShowJump(false)
-  }, [showJump])
+    // Дошли до верха — подтягиваем более старые сообщения.
+    if (hasMore && (listRef.current?.scrollTop ?? 999) < 120) loadOlder()
+  }, [showJump, hasMore, loadOlder])
 
   // Пин при подгрузке картинок (высота меняется).
   const onImgLoad = useCallback(() => { if (atBottomRef.current) pinBottom(false) }, [])
@@ -638,6 +686,9 @@ export default function ChatView({ friend, onClose }) {
         </header>
 
         <div className="chat-list" ref={listRef} onScroll={onScroll}>
+          {loadingMore && (
+            <div className="chat-state" style={{ padding: '10px 0' }}><span className="chat-spinner" /></div>
+          )}
           {loading ? (
             <div className="chat-state"><span className="chat-spinner" /></div>
           ) : messages.length === 0 ? (

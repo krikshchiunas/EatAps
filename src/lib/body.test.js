@@ -272,3 +272,52 @@ test('activitySummary без отметок отдаёт null вместо вы�
   assert.equal(a.vsProfile, null)
   assert.equal(a.mostCommon, null)
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Регрессии по аудиту 2026-08-28: неполный или битый профиль не должен
+// превращаться в NaN на экране.
+//
+// Раньше computeTargets считала по любому входу: Math.max(1200, NaN) даёт NaN,
+// round10(NaN) даёт NaN, и наружу уходил объект { calories: NaN, … }, который
+// выглядит валидным и всплывает уже в интерфейсе как «NaN ккал».
+// ─────────────────────────────────────────────────────────────────────────────
+test('computeTargets отказывается считать по неполному профилю', () => {
+  const base = { sex: 'male', age: 30, height: 180, weight: 80, activity: 'light', goal: 'maintain' }
+  assert.ok(computeTargets(base), 'полный профиль по-прежнему считается')
+
+  for (const broken of [
+    { ...base, weight: undefined },
+    { ...base, height: null },
+    { ...base, age: NaN },
+    { ...base, weight: 'восемьдесят' },
+    { ...base, height: Infinity },
+    { ...base, weight: 0 },
+    { ...base, weight: -80 },
+    { ...base, age: 500 },
+    { ...base, height: 5 },
+    {},
+    null,
+    undefined,
+  ]) {
+    assert.equal(computeTargets(broken), null, `должен быть null для ${JSON.stringify(broken)}`)
+  }
+})
+
+test('ни одно поле целей не бывает NaN при валидном входе', () => {
+  for (const activity of ['sedentary', 'light', 'moderate', 'high', 'мусор', undefined]) {
+    for (const goal of ['lose', 'maintain', 'gain', 'мусор', undefined]) {
+      const t = computeTargets({ sex: 'female', age: 25, height: 165, weight: 55, activity, goal })
+      for (const [k, v] of Object.entries(t)) {
+        assert.ok(Number.isFinite(v), `${k} должно быть конечным числом, получено ${v}`)
+        assert.ok(v >= 0, `${k} не должно быть отрицательным`)
+      }
+    }
+  }
+})
+
+test('битый профиль не ломает цели дня — берутся цели из профиля', () => {
+  const profile = { targets: { calories: 2000, protein: 100 }, height: null, age: null }
+  const days = { '2026-08-01': { meals: [], weight: 70 } }
+  const targets = targetsForDay(days, '2026-08-01', profile)
+  assert.equal(targets, profile.targets, 'должны вернуться цели профиля, а не NaN')
+})

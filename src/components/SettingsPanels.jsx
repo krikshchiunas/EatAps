@@ -188,6 +188,14 @@ export function AccountPanel({ onClose, onOpenAuth }) {
       setNote('Данные на этом устройстве удалены, но стереть их в облаке не получилось. Попробуйте ещё раз, когда появится связь.')
     } else if (res?.partial) {
       setNote('Данные из облака удалены. Сам вход (аккаунт) удалите через поддержку, если требуется.')
+    } else if (res?.warnings?.length) {
+      // Аккаунт удалён, но не всё: фотографии в хранилище или подписка Stripe
+      // остались. Молчать об этом нельзя — из-за подписки продолжатся списания,
+      // а фотографии из личной переписки лежат в публичном бакете.
+      const what = []
+      if (res.warnings.some((w) => w !== 'stripe')) what.push('загруженные фотографии')
+      if (res.warnings.includes('stripe')) what.push('подписку')
+      setNote(`Аккаунт удалён, но убрать ${what.join(' и ')} автоматически не получилось. Напишите разработчику — это доделают вручную.`)
     }
   }
 
@@ -755,31 +763,48 @@ function TipsRow() {
 
 // ── О приложении ──────────────────────────────────────────────────────────────
 export function AboutPanel({ onClose }) {
+  const { session } = useStore()
   const [legal, setLegal] = useState(null) // null | 'impressum' | 'privacy' | 'agb'
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const [status, setStatus] = useState('idle') // idle | sending | sent | error
+  const [note, setNote] = useState(null)
 
   // Существующий канал связи — форма обратной связи в /api/feedback. Другого
   // способа связаться в проекте нет, и придумывать несуществующий адрес
   // поддержки здесь нельзя.
+  //
+  // Токен передаём, если человек вошёл: тогда обращение подписано и владелец
+  // может ответить. Вход не обязателен — форма доступна и гостю.
   const send = async () => {
     const body = text.trim()
-    if (!body) return
+    // Кнопка и так заблокирована при пустом поле, но status !== 'idle' здесь
+    // обязателен: без него двойное нажатие отправляло два сообщения и сжигало
+    // лимит частоты на ровном месте.
+    if (!body || status === 'sending') return
     setStatus('sending')
+    setNote(null)
     try {
+      const headers = { 'Content-Type': 'application/json' }
+      if (session?.access_token) headers.authorization = `Bearer ${session.access_token}`
       const r = await fetch('/api/feedback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ text: body }),
       })
-      if (!r.ok) throw new Error()
+      if (!r.ok) {
+        // Сервер объясняет отказ понятным текстом (слишком часто, слишком
+        // длинно, бан). Показать его честнее, чем общее «не отправилось».
+        const data = await r.json().catch(() => null)
+        setNote(data?.error || null)
+        throw new Error('failed')
+      }
       setStatus('sent')
       setText('')
       setTimeout(() => { setStatus('idle'); setOpen(false) }, 2000)
     } catch {
       setStatus('error')
-      setTimeout(() => setStatus('idle'), 3000)
+      setTimeout(() => { setStatus('idle'); setNote(null) }, 4000)
     }
   }
 
@@ -801,8 +826,13 @@ export function AboutPanel({ onClose }) {
             autoFocus
           />
           <button className="btn" disabled={status === 'sending' || !text.trim()} onClick={send}>
-            {status === 'sending' ? 'Отправка…' : status === 'sent' ? 'Отправлено ✓' : status === 'error' ? 'Ошибка, попробуйте снова' : 'Отправить'}
+            {status === 'sending' ? 'Отправка…' : status === 'sent' ? 'Отправлено ✓' : status === 'error' ? 'Не отправилось' : 'Отправить'}
           </button>
+          {note && (
+            <p className="muted" style={{ fontSize: 13, marginTop: 10, marginBottom: 0, color: 'var(--danger)' }}>
+              {note}
+            </p>
+          )}
         </div>
       )}
 

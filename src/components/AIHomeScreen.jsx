@@ -101,58 +101,78 @@ export default function AIHomeScreen({ onUpgrade }) {
   }, [plus, prefs, store])
 
   const handleFailure = useCallback((e) => {
+    // Месячный лимит — повод показать тарифы. Суточный — нет: он вернётся сам
+    // завтра, и предлагать за это доплатить было бы враньём.
     if (e instanceof AIError && e.isBudget) { setExhausted(true); return }
     setError(e.message || 'Не получилось. Попробуйте ещё раз.')
   }, [])
 
-  const send = async () => {
-    const text = input.trim()
-    if (!text || busy) return
-    haptic()
+  // Флаг «запрос уже летит» держим в ref, а не только в состоянии. setBusy(true)
+  // применяется асинхронно, поэтому два быстрых нажатия (или тап + Enter) оба
+  // видели busy === false и отправляли по запросу — то есть платили дважды за
+  // один вопрос. Ref меняется синхронно и такую пару отсекает.
+  const inFlight = useRef(false)
+  // Ответ, пришедший после ухода с экрана, применять некуда.
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
+
+  // Общая обвязка обоих запросов: одна точка входа в занятость, одна точка
+  // выхода. Раньше setBusy(false) стоял в конце каждой функции и не выполнялся,
+  // если что-то выше по коду бросало вне try — экран оставался заблокированным.
+  const runRequest = useCallback(async (fn) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    setBusy(true)
     setError(null)
+    try {
+      const data = await fn()
+      if (alive.current) applyAnswer(data)
+    } catch (e) {
+      if (alive.current) handleFailure(e)
+    } finally {
+      inFlight.current = false
+      if (alive.current) setBusy(false)
+    }
+  }, [applyAnswer, handleFailure])
+
+  const send = () => {
+    const text = input.trim()
+    if (!text || inFlight.current) return
+    haptic()
     setInput('')
 
     const history = [...messages, { role: 'user', text }]
     setMessages(history)
-    setBusy(true)
-    try {
-      const data = await sendChat({
-        // local — приветствие и служебные плашки: платить за них токенами незачем.
-        history: history.filter((m) => !m.local).map(({ role, text }) => ({ role, text })),
-        context: context(),
-        prefs,
-        session,
-      })
-      applyAnswer(data)
-    } catch (e) {
-      handleFailure(e)
-    }
-    setBusy(false)
+    return runRequest(() => sendChat({
+      // local — приветствие и служебные плашки: платить за них токенами незачем.
+      history: history.filter((m) => !m.local).map(({ role, text }) => ({ role, text })),
+      context: context(),
+      prefs,
+      session,
+    }))
   }
 
-  const pickPhoto = async (event) => {
+  const pickPhoto = (event) => {
     const file = event.target.files?.[0]
     event.target.value = '' // тот же файл можно выбрать повторно
-    if (!file || busy) return
+    if (!file || inFlight.current) return
     haptic()
-    setError(null)
-    setBusy(true)
-    try {
+    const note = input.trim() || undefined
+
+    return runRequest(async () => {
       const image = await fileToImage(file)
-      setMessages((m) => [...m, { role: 'user', text: 'Фото еды', photo: image.preview }])
-      const data = await sendPhoto({
+      if (alive.current) {
+        setMessages((m) => [...m, { role: 'user', text: 'Фото еды', photo: image.preview }])
+        setInput('')
+      }
+      return sendPhoto({
         image: { media_type: image.media_type, data: image.data },
-        note: input.trim() || undefined,
+        note,
         context: context(),
         prefs,
         session,
       })
-      setInput('')
-      applyAnswer(data)
-    } catch (e) {
-      handleFailure(e)
-    }
-    setBusy(false)
+    })
   }
 
   // Карточка → запись в дневнике. Приём пищи берём из карточки, а если модель
@@ -199,7 +219,7 @@ export default function AIHomeScreen({ onUpgrade }) {
         )}
         {budget?.budgetMicro
           ? <BudgetBar share={share} onUpgrade={plus ? null : onUpgrade} />
-          : plus ? <span className="ai-chat__unlimited">без лимита</span> : null}
+          : null}
       </div>
 
       <div className="ai-chat__feed" ref={feedRef}>
@@ -337,7 +357,7 @@ function Exhausted({ tier, onUpgrade }) {
         </p>
         {onUpgrade && (
           <button className="btn" style={{ marginTop: 18 }} onClick={onUpgrade}>
-            {free ? 'Посмотреть тарифы' : 'Перейти на AI+ — без лимита'}
+            {free ? 'Посмотреть тарифы' : 'Перейти на AI+ — больше лимит'}
           </button>
         )}
       </div>

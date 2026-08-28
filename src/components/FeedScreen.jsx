@@ -13,6 +13,7 @@ import { useStore } from '../store.jsx'
 import { listFeed } from '../lib/social.js'
 import { PostCard, ComposerSheet } from './ThoughtsFeed.jsx'
 import { deletePost } from '../lib/supabase.js'
+import { primeCards, getCachedAvatar, onCardsChange } from '../lib/avatarCache.js'
 import ConfirmDialog from './ConfirmDialog.jsx'
 
 export default function FeedScreen({ onOpenProfile }) {
@@ -74,6 +75,20 @@ export default function FeedScreen({ onOpenProfile }) {
     return () => io.disconnect()
   }, [cursor, loadMore])
 
+  // Аватары авторов. Лента их больше не присылает: аватар в EatAps — это
+  // base64-картинка на десятки килобайт, и двадцать постов одного человека
+  // означали двадцать её копий в одном ответе. Добираем по УНИКАЛЬНЫМ авторам
+  // страницы — обычно это три-семь человек на двадцать постов.
+  const [, bumpAvatars] = useState(0)
+  useEffect(() => {
+    if (!posts?.length) return
+    let alive = true
+    primeCards([...new Set(posts.map((p) => p.user_id))])
+      .then(() => { if (alive) bumpAvatars((n) => n + 1) })
+    const off = onCardsChange(() => { if (alive) bumpAvatars((n) => n + 1) })
+    return () => { alive = false; off() }
+  }, [posts])
+
   const replace = (next) => setPosts((prev) => (prev || []).map((p) => (p.id === next.id ? next : p)))
 
   const doDelete = async (post) => {
@@ -125,7 +140,7 @@ export default function FeedScreen({ onOpenProfile }) {
           post={p}
           myId={myId}
           authorName={p.display_name || p.username || 'Без имени'}
-          authorAvatar={p.avatar_url}
+          authorAvatar={getCachedAvatar(p.user_id)}
           onChange={replace}
           onEdit={(post) => setComposer({ post })}
           onDelete={(post) => setConfirmDelete(post)}
