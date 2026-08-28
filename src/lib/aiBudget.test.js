@@ -6,10 +6,11 @@ import {
 } from './aiBudget.js'
 import { TIER } from './subscription.js'
 
-test('модель зависит от тарифа: AI+ получает Sonnet', () => {
+test('умную модель (Sonnet) получает только премиум-тариф', () => {
   assert.equal(modelForTier(TIER.FREE), 'claude-haiku-4-5')
   assert.equal(modelForTier(TIER.AI), 'claude-haiku-4-5')
-  assert.equal(modelForTier(TIER.AI_PLUS), 'claude-sonnet-4-6')
+  assert.equal(modelForTier(TIER.AI_PLUS), 'claude-haiku-4-5')
+  assert.equal(modelForTier(TIER.AI_PREMIUM), 'claude-sonnet-4-6')
   assert.equal(modelForTier('МУСОР'), 'claude-haiku-4-5', 'неизвестный тариф не даёт дорогую модель')
 })
 
@@ -38,10 +39,21 @@ test('неизвестная модель стоит ноль, а не NaN', () 
   assert.equal(estimateCost({ inputTokens: 100, maxOutputTokens: 10, model: 'нет' }), 0)
 })
 
-test('бюджеты тарифов заданы как обещано пользователю', () => {
-  assert.equal(budgetForTier(TIER.FREE), 1 * MICRO)
-  assert.equal(budgetForTier(TIER.AI), 3.5 * MICRO)
-  assert.equal(budgetForTier(TIER.AI_PLUS), null, 'AI+ без потолка')
+test('дневные бюджеты: у дешёвых тарифов есть потолок, у старших — нет', () => {
+  // budgetForTier теперь ДНЕВНОЙ (месячная сумма / дней в месяце).
+  const free = budgetForTier(TIER.FREE)
+  const ai = budgetForTier(TIER.AI)
+  assert.ok(free > 0 && ai > 0, 'у FREE и AI есть дневной потолок')
+  assert.ok(ai > free, 'платный AI щедрее бесплатного')
+  assert.equal(budgetForTier(TIER.AI_PLUS), null, 'Carrot Pro — без потолка')
+  assert.equal(budgetForTier(TIER.AI_PREMIUM), null, 'Carrot Premium — без потолка')
+})
+
+test('дневной бюджет — это месячный, делённый на число дней месяца', () => {
+  const jan = new Date('2026-01-15T00:00:00Z') // 31 день
+  const feb = new Date('2026-02-15T00:00:00Z') // 28 дней
+  assert.ok(budgetForTier(TIER.AI, feb) > budgetForTier(TIER.AI, jan),
+    'в коротком месяце дневная доля больше')
 })
 
 test('исчерпанный бюджет закрывает доступ', () => {
@@ -52,7 +64,9 @@ test('исчерпанный бюджет закрывает доступ', () =
 })
 
 test('дорогой запрос на остатках отклоняется до вызова модели', () => {
-  const r = checkBudget({ tier: TIER.AI, spent: 3.49 * MICRO, inputTokens: 50000, maxOutputTokens: 900 })
+  // Остаток почти исчерпан — тяжёлый запрос не должен пройти.
+  const budget = budgetForTier(TIER.FREE)
+  const r = checkBudget({ tier: TIER.FREE, spent: budget - 100, inputTokens: 50000, maxOutputTokens: 900 })
   assert.equal(r.ok, false)
   assert.equal(r.reason, 'too_expensive')
   assert.ok(r.needed > r.remaining)
@@ -75,10 +89,11 @@ test('AI+ проходит проверку при любом расходе', (
   assert.equal(r.remaining, null)
 })
 
-test('период — календарный месяц UTC, а не локальный', () => {
-  assert.equal(periodKey(new Date('2026-08-24T23:30:00Z')), '2026-08')
-  assert.equal(periodKey(new Date('2026-01-01T00:00:00Z')), '2026-01')
-  assert.equal(resetsAt(new Date('2026-12-15T00:00:00Z')).toISOString(), '2027-01-01T00:00:00.000Z')
+test('период — календарный ДЕНЬ UTC, а не локальный', () => {
+  assert.equal(periodKey(new Date('2026-08-24T23:30:00Z')), '2026-08-24')
+  assert.equal(periodKey(new Date('2026-01-01T00:00:00Z')), '2026-01-01')
+  // Обнуление — начало следующего дня UTC.
+  assert.equal(resetsAt(new Date('2026-12-31T12:00:00Z')).toISOString(), '2027-01-01T00:00:00.000Z')
 })
 
 test('доля израсходованного не вылезает за 100% и не делится на null', () => {
