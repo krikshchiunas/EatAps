@@ -10,16 +10,12 @@
 // возраст, пол, цель, уровень активности, настройки и история поиска в него не
 // входят и входить не должны: их нет на экране друга.
 
-import { normalizeProfileList } from './profileLists.js'
-
-const PROFILE_FIELDS = ['name', 'avatar', 'bio', 'favRestaurant', 'favDish']
-
-// Списки «да в еде» (toGos) / «нет в еде» (noGos). Они на экране профиля с
-// обеих сторон — свой профиль
-// и профиль друга рисует один компонент, — поэтому уезжают другу так же, как
-// bio. Это осознанное расширение видимого, а не побочный эффект: по смыслу это
-// то же «пара слов о себе», только структурированное.
-const PROFILE_LIST_FIELDS = ['noGos', 'toGos']
+// Ровно то, что рисует вкладка «О себе»: имя, аватар, био и guilty pleasure.
+// Любимое блюдо, любимый ресторан и списки «да в еде» / «нет в еде» из модели
+// профиля убраны — их больше нечем заполнить и негде показать, поэтому и
+// возить их другу незачем. «Я это обожаю» и «Ок» здесь не нужны: они
+// считаются по дневнику, который друг получает следующим полем.
+const PROFILE_FIELDS = ['name', 'avatar', 'bio', 'guiltyPleasure']
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v)
 
@@ -28,10 +24,6 @@ export function projectFriendProfile(raw) {
   const out = {}
   for (const k of PROFILE_FIELDS) {
     if (typeof p[k] === 'string' && p[k]) out[k] = p[k]
-  }
-  for (const k of PROFILE_LIST_FIELDS) {
-    const list = normalizeProfileList(p[k])
-    if (list.length) out[k] = list
   }
   // Из целей — только норма калорий: она показана как ориентир под кольцом.
   const calories = Number(p.targets?.calories)

@@ -11,6 +11,9 @@ const FULL = {
     name: 'Аня',
     avatar: 'data:image/jpeg;base64,AAAA',
     bio: 'Люблю супы',
+    guiltyPleasure: 'Шоколадный торт',
+    // Поля старой модели профиля. Лежат здесь намеренно: у давних аккаунтов
+    // они остались в блобе, и проекция обязана их отбрасывать.
     favRestaurant: 'У Ашота',
     favDish: 'Харчо',
     noGos: ['Молоко', 'Свинина'],
@@ -48,16 +51,18 @@ test('видимая часть профиля сохраняется полно
   assert.equal(p.name, 'Аня')
   assert.equal(p.avatar, 'data:image/jpeg;base64,AAAA')
   assert.equal(p.bio, 'Люблю супы')
-  assert.equal(p.favRestaurant, 'У Ашота')
-  assert.equal(p.favDish, 'Харчо')
-  assert.deepEqual(p.noGos, ['Молоко', 'Свинина'])
-  assert.deepEqual(p.toGos, ['Суши', 'Авокадо'])
+  assert.equal(p.guiltyPleasure, 'Шоколадный торт')
 })
 
-test('битые списки «не ем»/«люблю» не уезжают другу и не роняют экран', () => {
-  const p = projectFriendProfile({ noGos: 'молоко', toGos: [42, '', '  Суши  ', 'суши'] })
-  assert.equal(p.noGos, undefined, 'строка вместо списка — не список')
-  assert.deepEqual(p.toGos, ['Суши'], 'мусор отброшен, дубликат схлопнут')
+// Поля старой модели профиля (любимое блюдо, ресторан, списки «да/нет в еде»)
+// в приложении больше не существуют: их нечем заполнить и негде показать. В
+// блобах давних аккаунтов они ещё лежат — и проекция обязана их отбрасывать,
+// иначе удалённая модель продолжает уезжать к другому человеку.
+test('поля старой модели профиля другу не уезжают', () => {
+  const p = projectFriendState(FULL).profile
+  for (const field of ['favRestaurant', 'favDish', 'noGos', 'toGos']) {
+    assert.equal(p[field], undefined, `${field} — часть удалённой модели профиля`)
+  }
 })
 
 test('из целей отдаётся только норма калорий', () => {
@@ -119,9 +124,9 @@ test('пустой, битый и отсутствующий вход не ро�
 })
 
 test('мусор в полях профиля отбрасывается, а не показывается', () => {
-  const p = projectFriendProfile({ name: 42, avatar: null, bio: '', favDish: 'Плов', targets: { calories: 'много' } })
+  const p = projectFriendProfile({ name: 42, avatar: null, bio: '', guiltyPleasure: 'Плов', targets: { calories: 'много' } })
   assert.equal(p.name, undefined, 'число вместо имени не выводим')
   assert.equal(p.bio, undefined, 'пустая строка — не био')
-  assert.equal(p.favDish, 'Плов')
+  assert.equal(p.guiltyPleasure, 'Плов')
   assert.equal(p.targets, undefined, 'нечисловая норма калорий отбрасывается')
 })

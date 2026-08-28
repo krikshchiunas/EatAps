@@ -2,20 +2,23 @@
 // Собственный профиль — публичная витрина, а не настройки.
 //
 // Экран отвечает на те же четыре вопроса, что и профиль друга: кто это, что он
-// любит и не любит, что он ест, чем делится. Рисует его тот же UserProfileView,
+// думает, что он ест, что рассказал о себе. Рисует его тот же UserProfileView,
 // поэтому «как меня видит друг» — это буквально этот экран, а не догадка.
 //
-// Здесь же живут подписчики и подписки: они переехали из социального хаба, где
-// лежали рядом с чужими списками. Списки про МЕНЯ должны быть там же, где
-// остальное про меня, — иначе «мои подписки» приходится искать во вкладке
-// «Друзья», что и происходило.
+// Здесь же живут подписчики, подписки и события: всё, что относится ко МНЕ,
+// собрано в одном месте. Раньше подписчики лежали в социальном хабе рядом с
+// чужими списками, а «События» — во вкладке «Друзья», где о друзьях речи как
+// раз и не идёт: на меня подписались, на мою мысль ответили, мне написали.
 //
 // Настройки (синхронизация, рост/вес, тема, уведомления, сеансы, удаление
 // аккаунта) никуда не делись — они под шестерёнкой, в SettingsScreen.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useStore } from '../store.jsx'
-import { userProfile, listFollowers, listFollowing } from '../lib/social.js'
+import {
+  userProfile, listFollowers, listFollowing,
+  unreadNotificationCount, subscribeToNotifications,
+} from '../lib/social.js'
 import { listFriends } from '../lib/supabase.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 import LazyBoundary from './LazyBoundary.jsx'
@@ -25,11 +28,14 @@ import UserProfileView from './UserProfileView.jsx'
 import ProfileCounts from './ProfileCounts.jsx'
 import PeopleList from './PeopleList.jsx'
 import PublicProfile from './PublicProfile.jsx'
+import NotificationsScreen from './NotificationsScreen.jsx'
 
 // Ленивая загрузка: AuthSheet тянет тяжёлый Web3-стек (AppKit), MyProfileSheet
-// — редактор с обработкой фото. Ядро приложения остаётся лёгким.
+// — редактор с обработкой фото, ChallengesScreen открывает меньшинство. Ядро
+// приложения остаётся лёгким.
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const MyProfileSheet = lazyWithReload(() => import('./MyProfileSheet.jsx'))
+const ChallengesScreen = lazyWithReload(() => import('./ChallengesScreen.jsx'))
 
 const LIST_TITLE = {
   followers: 'Подписчики',
@@ -43,6 +49,14 @@ const LIST_EMPTY = {
   friends: 'Друзья появляются, когда вы подписаны друг на друга',
 }
 
+// «События» — это и уведомления, и челленджи. Соревнование с друзьями — тоже
+// событие, а не постоянный раздел, и искать его человек шёл в единственное
+// место, где о событиях вообще идёт речь.
+const EVENT_TABS = [
+  { key: 'feed',       label: 'Уведомления' },
+  { key: 'challenges', label: 'Челленджи' },
+]
+
 function GearIcon() {
   return (
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -52,7 +66,7 @@ function GearIcon() {
   )
 }
 
-export default function ProfileScreen({ setTab }) {
+export default function ProfileScreen({ setTab, onOpenChat }) {
   const { profile, days, dayOf, customFoods, user, supabaseEnabled } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -61,6 +75,10 @@ export default function ProfileScreen({ setTab }) {
   const [list, setList] = useState(null)      // null | 'followers' | 'following' | 'friends'
   const [people, setPeople] = useState(null)
   const [openProfile, setOpenProfile] = useState(null)
+  const [eventsOpen, setEventsOpen] = useState(false)
+  const [eventTab, setEventTab] = useState('feed')
+  const [unreadEvents, setUnreadEvents] = useState(0)
+  const [focusTab, setFocusTab] = useState(null)
 
   const uid = user?.id
 
@@ -73,6 +91,20 @@ export default function ProfileScreen({ setTab }) {
   }, [uid])
 
   useEffect(() => { loadCard() }, [loadCard])
+
+  // Счётчик непрочитанных событий — с сервера, а не из localStorage: он должен
+  // совпадать на всех устройствах и переживать перезаход. Та же самая функция
+  // питает бейдж в нижней навигации — второй системы уведомлений нет.
+  const refreshEvents = useCallback(async () => {
+    if (!uid) { setUnreadEvents(0); return }
+    try { setUnreadEvents(await unreadNotificationCount()) } catch { /* раздел недоступен */ }
+  }, [uid])
+
+  useEffect(() => {
+    if (!uid) { setUnreadEvents(0); return }
+    refreshEvents()
+    return subscribeToNotifications(uid, refreshEvents)
+  }, [uid, refreshEvents])
 
   // Список грузим только когда его открыли: на профиле их три, и тянуть все
   // три ради счётчиков, которые уже пришли в карточке, незачем.
@@ -107,6 +139,35 @@ export default function ProfileScreen({ setTab }) {
     </div>
   ) : null
 
+  // Подписчики, подписки и события — один блок «про меня» над вкладками
+  // профиля. Бейдж на «Событиях» — те же непрочитанные, что считает сервер.
+  const profileLinks = uid ? (
+    <>
+      <ProfileCounts card={card} onPick={setList} showThoughts={false} />
+      <button
+        className="card"
+        style={{ width: '100%', textAlign: 'left', padding: '13px 14px', marginBottom: 16 }}
+        onClick={() => setEventsOpen(true)}
+      >
+        <div className="row between" style={{ alignItems: 'center' }}>
+          <span className="row gap8" style={{ alignItems: 'center', fontSize: 15, fontWeight: 600 }}>
+            События
+            {unreadEvents > 0 && (
+              <span style={{
+                minWidth: 20, height: 20, borderRadius: 999,
+                background: 'var(--danger)', color: '#fff', fontSize: 11.5, fontWeight: 700,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px',
+              }}>
+                {unreadEvents > 99 ? '99+' : unreadEvents}
+              </span>
+            )}
+          </span>
+          <span className="muted" style={{ fontSize: 18, lineHeight: 1 }}>›</span>
+        </div>
+      </button>
+    </>
+  ) : null
+
   return (
     <div className="screen">
       <div className="row between" style={{ alignItems: 'flex-start', marginBottom: 18 }}>
@@ -127,9 +188,11 @@ export default function ProfileScreen({ setTab }) {
         dayOf={dayOf}
         days={days}
         customFoods={customFoods}
-        counts={uid ? <ProfileCounts card={card} onPick={setList} showThoughts={false} /> : null}
+        counts={profileLinks}
         onEditProfile={() => setEditOpen(true)}
         signInPrompt={signInPrompt}
+        focusTab={focusTab}
+        onFocusHandled={() => setFocusTab(null)}
       />
 
       {list && (
@@ -148,11 +211,61 @@ export default function ProfileScreen({ setTab }) {
         </PushScreen>
       )}
 
+      {eventsOpen && (
+        <PushScreen onClose={() => setEventsOpen(false)}>
+          {(close) => (
+            <div className="screen">
+              <div className="row between" style={{ alignItems: 'center', marginBottom: 16 }}>
+                <h1 className="h1" style={{ margin: 0, fontSize: 22 }}>События</h1>
+                <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+              </div>
+
+              <div className="seg" style={{ marginBottom: 14 }}>
+                {EVENT_TABS.map((t) => (
+                  <button key={t.key} className={eventTab === t.key ? 'on' : ''} onClick={() => setEventTab(t.key)}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {eventTab === 'feed' && (
+                <NotificationsScreen
+                  onChanged={refreshEvents}
+                  onNavigate={(t) => {
+                    if (t.screen === 'profile') { close(); setOpenProfile(t.userId) }
+                    // Реакции и ответы приходят только на СВОИ мысли, поэтому
+                    // пост всегда лежит в этом же профиле: закрываем события и
+                    // открываем вкладку «Мысли», а не ищем его в ленте.
+                    else if (t.screen === 'post') { close(); setFocusTab('thoughts') }
+                    // Переписка живёт во вкладке «Друзья» — туда и ведём, с
+                    // открытым диалогом. Второго чата в профиле не заводим.
+                    else if (t.screen === 'chat') {
+                      close()
+                      if (onOpenChat) onOpenChat(t.userId)
+                      else setOpenProfile(t.userId)
+                    }
+                  }}
+                />
+              )}
+
+              {eventTab === 'challenges' && (
+                <LazyBoundary onClose={() => setEventTab('feed')}>
+                  <Suspense fallback={<p className="muted" style={{ fontSize: 14 }}>Загружаем…</p>}>
+                    <ChallengesScreen />
+                  </Suspense>
+                </LazyBoundary>
+              )}
+            </div>
+          )}
+        </PushScreen>
+      )}
+
       {openProfile && (
         <PublicProfile
           userId={openProfile}
           onClose={() => { setOpenProfile(null); loadCard() }}
           onOpenProfile={setOpenProfile}
+          onOpenChat={onOpenChat ? (peer) => { setOpenProfile(null); onOpenChat(peer.id) } : null}
         />
       )}
 

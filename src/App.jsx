@@ -33,6 +33,9 @@ export default function App() {
   const [clipboard, setClipboard] = useState(null)
   const [unreadCounts, setUnreadCounts] = useState({})
   const [unreadEvents, setUnreadEvents] = useState(0)
+  // Диалог, который просит открыть «Профиль» (уведомление о сообщении). Чат
+  // живёт во вкладке «Друзья», поэтому переход идёт через App: id → вкладка.
+  const [chatWith, setChatWith] = useState(null)
 
   // Актуальный стор для планировщика (не пересоздаём таймер при каждом изменении).
   const stateRef = useRef({ profile, days })
@@ -107,9 +110,9 @@ export default function App() {
     })
   }, [user?.id, refreshUnread])
 
-  // Непрочитанные события — с сервера, как и сообщения. Складываем в один
-  // бейдж: для человека это одно «на меня что-то пришло», а не две разные
-  // цифры на одной вкладке.
+  // Непрочитанные события — с сервера, как и сообщения. Считаются здесь ради
+  // бейджа в навигации; тот же самый счётчик показывает «Профиль → События».
+  // Второй системы уведомлений нет — оба читают unread_notification_count.
   useEffect(() => {
     if (!user?.id) { setUnreadEvents(0); return }
     const refresh = async () => {
@@ -119,7 +122,10 @@ export default function App() {
     return subscribeToNotifications(user.id, refresh)
   }, [user?.id])
 
-  const totalUnread = Object.values(unreadCounts).reduce((s, n) => s + n, 0) + unreadEvents
+  // Бейджи разъехались вместе с разделами: сообщения остались во вкладке
+  // «Друзья», события переехали в «Профиль». Одна общая цифра теперь звала бы
+  // не туда, где лежит непрочитанное.
+  const unreadMessages = Object.values(unreadCounts).reduce((s, n) => s + n, 0)
 
   // Затянувшаяся загрузка — меняем текст, чтобы человек понимал, что происходит,
   // а не смотрел в бесконечный спиннер без объяснений.
@@ -158,10 +164,23 @@ export default function App() {
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={(mealId, mealLabel) => setSheet({ mealId, mealLabel })} onOpenCalendar={() => setCalendarOpen(true)} onOpenStats={() => setStatsOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
       {tab === 'ai' && <AITab />}
       {tab === 'feed' && <FeedTab onChatClosed={refreshUnread} />}
-      {tab === 'friends' && <FriendsScreen unreadCounts={unreadCounts} onChatClosed={refreshUnread} setTab={setTab} />}
-      {tab === 'profile' && <ProfileScreen setTab={setTab} />}
+      {tab === 'friends' && (
+        <FriendsScreen
+          unreadCounts={unreadCounts}
+          onChatClosed={refreshUnread}
+          setTab={setTab}
+          openChatWith={chatWith}
+          onChatOpened={() => setChatWith(null)}
+        />
+      )}
+      {tab === 'profile' && (
+        <ProfileScreen
+          setTab={setTab}
+          onOpenChat={(userId) => { setChatWith(userId); setTab('friends') }}
+        />
+      )}
 
-      <BottomNav tab={tab} setTab={setTab} totalUnread={totalUnread} />
+      <BottomNav tab={tab} setTab={setTab} friendsUnread={unreadMessages} profileUnread={unreadEvents} />
 
       {calendarOpen && (
         <PushScreen onClose={() => setCalendarOpen(false)}>

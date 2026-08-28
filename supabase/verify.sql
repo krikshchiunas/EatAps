@@ -294,14 +294,17 @@ with checks(порядок, проверка, ok, деталь) as (
 
   -- 13. Публичный профиль и «Мои мысли»
   union all
-  select 44, 'friend_state отдаёт списки «не ем» и «люблю»',
+  select 44, 'friend_state отдаёт guilty pleasure и НЕ отдаёт поля старой модели',
     coalesce((
-      select pg_get_functiondef(p.oid) like '%noGos%'
-         and pg_get_functiondef(p.oid) like '%toGos%'
+      select pg_get_functiondef(p.oid) like '%guiltyPleasure%'
+         and pg_get_functiondef(p.oid) not like '%noGos%'
+         and pg_get_functiondef(p.oid) not like '%toGos%'
+         and pg_get_functiondef(p.oid) not like '%favDish%'
+         and pg_get_functiondef(p.oid) not like '%favRestaurant%'
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname='public' and p.proname='friend_state' limit 1
     ), false),
-    'без этого друг видит профиль без того, что человек ест и не ест'
+    'списки «да/нет в еде», любимое блюдо и ресторан удалены из приложения — база не должна возить их дальше'
 
   union all
   select 45, 'friend_state по-прежнему НЕ отдаёт вес, рост и возраст',

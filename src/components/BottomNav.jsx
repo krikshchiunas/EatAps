@@ -37,7 +37,10 @@ const ICONS = {
   ),
 }
 
-export default function BottomNav({ tab, setTab, totalUnread = 0 }) {
+// Два бейджа, а не один общий: непрочитанные сообщения ждут во вкладке
+// «Друзья», непрочитанные события — в «Профиле». Общая цифра на одной вкладке
+// звала бы не туда, где лежит непрочитанное.
+export default function BottomNav({ tab, setTab, friendsUnread = 0, profileUnread = 0 }) {
   return (
     <nav className="bottomnav">
       <button className={tab === 'day' ? 'on' : ''} onClick={() => setTab('day')}>
@@ -51,13 +54,17 @@ export default function BottomNav({ tab, setTab, totalUnread = 0 }) {
       </button>
       <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')} style={{ position: 'relative' }}>
         {ICONS.friends}
-        {totalUnread > 0 && (
-          <span className="nav-badge">{totalUnread > 99 ? '99+' : totalUnread}</span>
+        {friendsUnread > 0 && (
+          <span className="nav-badge">{friendsUnread > 99 ? '99+' : friendsUnread}</span>
         )}
         <span>Друзья</span>
       </button>
-      <button className={tab === 'profile' ? 'on' : ''} onClick={() => setTab('profile')}>
-        {ICONS.profile}<span>Профиль</span>
+      <button className={tab === 'profile' ? 'on' : ''} onClick={() => setTab('profile')} style={{ position: 'relative' }}>
+        {ICONS.profile}
+        {profileUnread > 0 && (
+          <span className="nav-badge">{profileUnread > 99 ? '99+' : profileUnread}</span>
+        )}
+        <span>Профиль</span>
       </button>
     </nav>
   )
