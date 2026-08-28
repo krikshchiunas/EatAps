@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
-import { targetsForDay, baselineTargetsForDay, profileScore, ACTIVITY_ORDER, ACTIVITY_DAY, dayWeight, hasDayActivity, effectiveActivity } from '../lib/body.js'
+import { targetsForDay, baselineTargetsForDay, profileScore, dayWeight, hasDayActivity, effectiveActivity } from '../lib/body.js'
 import { isLowLogged } from '../lib/stats.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { getMealSections, foodsForMeal, resolvedTime, newCustomSection } from '../lib/meals.js'
@@ -12,13 +12,12 @@ import CoachMark from './CoachMark.jsx'
 import Ring from './Ring.jsx'
 import MacroBar from './MacroBar.jsx'
 
-const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
 const EASING = 'cubic-bezier(0.32, 0.72, 0, 1)'
 
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, onOpenStats, clipboard, setClipboard }) {
   const store = useStore()
   const {
-    profile, days, dayOf, removeFood, editFood, toggleWellbeing, addFood,
+    profile, days, dayOf, removeFood, editFood, addFood,
     upsertMealSection, deleteMealSection, moveMealSection,
     setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
     repeatDay, repeatMeal,
@@ -203,7 +202,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
   }
 
   const bodyProps = {
-    profile, days, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
+    profile, days, dayOf, removeFood, addFood, moveMealSection,
     clipboard, setClipboard, onOpenAdd, onEditFood: setEditingFood, onEditSection: openEditSection,
     onCreateSection: openCreateSection, today,
     setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
@@ -310,7 +309,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 
 // ── Контент одного дня (переиспользуется тремя страницами пейджера) ────────────
 function DayBody({
-  date, interactive, profile, days, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
+  date, interactive, profile, days, dayOf, removeFood, addFood, moveMealSection,
   clipboard, setClipboard, onOpenAdd, onEditFood, onEditSection, onCreateSection, today,
   setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
   repeatMeal, prevDate, onToast,
@@ -360,12 +359,9 @@ function DayBody({
           </div>
         </Ring>
         <div className="day-hero__stats">
-          <HeroStat label="Съедено" value={`${totals.kcal}`} />
-          <HeroStat label="Цель" value={hasCalGoal ? `${calGoal}` : '—'} />
-          <HeroStat
-            label={remaining >= 0 ? 'Недобор' : 'Перебор'}
-            value={hasCalGoal ? `${remaining >= 0 ? '' : '+'}${Math.abs(remaining)}` : '—'}
-          />
+          <HeroStat label="Белки" value={`${totals.protein}${proteinGoal > 0 ? `/${proteinGoal}` : ''}`} />
+          <HeroStat label="Углеводы" value={`${totals.carbs}${carbGoal > 0 ? `/${carbGoal}` : ''}`} />
+          <HeroStat label="Жиры" value={`${totals.fat}${fatGoal > 0 ? `/${fatGoal}` : ''}`} />
         </div>
       </div>
 
@@ -461,16 +457,6 @@ function DayBody({
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 14 }}>
-        <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Самочувствие</div>
-        <div className="row wrap gap8">
-          {WELLBEING.map((w) => (
-            <button key={w} className={`chip ${day.wellbeing.includes(w) ? 'on' : ''}`} onClick={() => toggleWellbeing(date, w)}>
-              {w}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
@@ -652,27 +638,20 @@ function QualityBar({ label, value, max, invert, hint }) {
 // лежит на кровати, другой много ходит — и норма у этих дней разная. Здесь он
 // отмечает то и другое за пару касаний, а кольцо калорий выше сразу
 // пересчитывается (см. targetsForDay в lib/body.js).
-const ACTIVITY_HINT = (score) => {
-  const n = Math.round(score)
-  if (n <= 0)  return 'Постельный режим — весь день лёжа, почти не вставал'
-  if (n <= 12) return 'Минимум движения — диван, кресло, почти без ходьбы'
-  if (n <= 24) return 'Малоподвижно — работа за столом, редкие выходы'
-  if (n <= 36) return 'Немного — обычный день, выход до магазина'
-  if (n <= 48) return 'Умеренно — нормальный день, лёгкие дела по дому'
-  if (n <= 60) return 'Активный день — хорошая прогулка или лёгкая тренировка'
-  if (n <= 72) return 'Заметная нагрузка — спортзал, бег или длительная ходьба'
-  if (n <= 84) return 'Интенсивно — серьёзная тренировка или весь день на ногах'
-  if (n <= 92) return 'Очень активно — тяжёлые нагрузки или физический труд'
-  if (n <= 97) return 'Сверхактивно — несколько тренировок или ударный день'
-  return 'Максимум — профессиональный уровень нагрузки'
-}
+// Пять уровней вместо непрерывного ползунка: балл — это якорь для TDEE
+// (scoreToActivityKey в body.js), а не то, что человек выбирает напрямую.
+const ACTIVITY_LEVELS = [
+  { score: 5,  emoji: '🛌', label: 'Постельный режим', desc: 'Весь день лёжа, почти не вставал' },
+  { score: 20, emoji: '🛋️', label: 'Минимум движения', desc: 'Диван, кресло, почти без ходьбы' },
+  { score: 40, emoji: '🚶', label: 'Малоподвижно', desc: 'Обычный день, лёгкие дела по дому' },
+  { score: 65, emoji: '🏃', label: 'Активно', desc: 'Хорошая прогулка или тренировка средней тяжести' },
+  { score: 95, emoji: '🔥', label: 'Максимум', desc: 'Профессиональный уровень нагрузки' },
+]
 
-function scoreEmoji(score) {
-  const n = Math.round(score)
-  if (n <= 24) return '🛋️'
-  if (n <= 49) return '🚶'
-  if (n <= 74) return '🏃'
-  return '🔥'
+function closestActivityLevel(score) {
+  return ACTIVITY_LEVELS.reduce((best, lvl) => (
+    Math.abs(lvl.score - score) < Math.abs(best.score - score) ? lvl : best
+  ))
 }
 
 function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWeight, setDayActivityScore }) {
@@ -694,9 +673,7 @@ function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWei
     setDayWeight(date, n)
   }
 
-  // Полоса рисуется на псевдоэлементе трека, поэтому долю заполнения передаём
-  // переменной: сам input теперь высокий (зона захвата пальцем), см. index.css.
-  const trackStyle = { '--activity-pct': `${score}%` }
+  const level = closestActivityLevel(score)
 
   // Насколько балл сдвинул цель относительно активности из анкеты — это и есть
   // ответ на «ползунок вообще на что-то влияет?».
@@ -726,7 +703,7 @@ function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWei
           <span className="tabular" style={{ fontSize: 13, color: weight != null ? 'var(--ink-2)' : 'var(--ink-3)' }}>
             {weight != null ? `${weight} кг` : 'вес не указан'}
           </span>
-          <span style={{ fontSize: 15 }}>{scoreEmoji(score)}</span>
+          <span style={{ fontSize: 15 }}>{level.emoji}</span>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}>
             <polyline points="6 9 12 15 18 9" />
           </svg>
@@ -755,31 +732,24 @@ function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWei
             </p>
           </div>
 
-          {/* data-no-pager: вся зона ползунка исключена из горизонтального жеста
-              пейджера дней — иначе перетаскивание влево/вправо листало день. */}
-          <div className="activity-zone" data-no-pager="true">
-            <div className="row between" style={{ alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ fontSize: 14, fontWeight: 550 }}>Активность дня</div>
-              <span className="tabular" style={{ fontSize: 24, fontWeight: 700, color: 'var(--primary)', letterSpacing: '-0.5px', lineHeight: 1 }}>
-                {Math.round(score)}
-              </span>
+          <div className="activity-zone">
+            <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 12 }}>Активность дня</div>
+
+            <div className="row wrap gap8">
+              {ACTIVITY_LEVELS.map((lvl) => (
+                <button
+                  key={lvl.label}
+                  className={`chip ${level === lvl ? 'on' : ''}`}
+                  onClick={() => setDayActivityScore(date, lvl.score)}
+                >
+                  {lvl.emoji} {lvl.label}
+                </button>
+              ))}
             </div>
 
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              value={Math.round(score)}
-              onChange={(e) => setDayActivityScore(date, Number(e.target.value))}
-              className="activity-slider"
-              style={trackStyle}
-              aria-label="Уровень активности дня"
-            />
-
             <p style={{ fontSize: 12, color: isDefault ? 'var(--ink-3)' : 'var(--ink-2)', marginTop: 10, lineHeight: 1.5, minHeight: 32 }}>
-              {ACTIVITY_HINT(score)}
-              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — из анкеты, передвиньте для изменения</span>}
+              {level.desc}
+              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — из анкеты, нажмите, чтобы изменить</span>}
             </p>
 
             {goal && (
@@ -797,7 +767,7 @@ function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWei
                 <div className="activity-goal__delta" style={{ color: goal.delta === 0 ? 'var(--ink-3)' : 'var(--primary)' }}>
                   {goal.delta === 0
                     ? 'Столько же, сколько по активности из анкеты'
-                    : `${goal.delta > 0 ? '+' : '−'}${Math.abs(goal.delta)} ккал к цели по анкете — ползунок пересчитал КБЖУ`}
+                    : `${goal.delta > 0 ? '+' : '−'}${Math.abs(goal.delta)} ккал к цели по анкете — активность дня пересчитала КБЖУ`}
                 </div>
               </div>
             )}
