@@ -190,6 +190,20 @@ export function createTargetResolver(days, profile) {
   }
 }
 
+// Норма профиля «вообще» — без привязки к дню: анкетный вес и анкетная
+// активность. Считается заново, а не берётся из profile.targets: сохранённое
+// значение осталось от той версии формулы, при которой человек проходил
+// онбординг, и после любой правки расчёта начинает врать. Сохранённые targets
+// остаются фолбэком для профилей без роста/возраста.
+export function profileTargets(profile) {
+  if (!profile) return null
+  const w = Number(profile.weight)
+  if (!isValidWeight(w) || !Number.isFinite(Number(profile.height)) || !Number.isFinite(Number(profile.age))) {
+    return profile.targets || null
+  }
+  return computeTargets(profile)
+}
+
 // Разовый расчёт целей одного дня (для экрана дня — там дней три, индекс не нужен).
 export function targetsForDay(days, dateKey, profile) {
   return createTargetResolver(days, profile)(dateKey, days?.[dateKey])
