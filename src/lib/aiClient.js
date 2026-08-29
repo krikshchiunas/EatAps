@@ -21,7 +21,7 @@ export class AIError extends Error {
 const MESSAGES = {
   unauthorized: 'Нужно войти в аккаунт.',
   bad_image: 'Нужен JPEG, PNG или WebP.',
-  image_too_large: 'Фото больше 5 МБ — сожмите его.',
+  image_too_large: 'Фото слишком большое — сожмите его.',
   empty_request: 'Пустой запрос.',
   upstream: 'Ассистент сейчас недоступен. Попробуйте через минуту.',
   accounting_unavailable: 'Ассистент временно недоступен. Попробуйте позже.',

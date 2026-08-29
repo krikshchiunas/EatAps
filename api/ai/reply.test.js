@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseReply } from './_shared.js'
+import { parseReply, dedupeAsk } from './_shared.js'
 
 const wrap = (text) => ({ content: [{ type: 'text', text }] })
 
@@ -98,4 +98,97 @@ test('первой репликой всегда пользователь', () =
 test('пустые реплики отбрасываются', () => {
   const out = normalizeTurns([{ role: 'user', text: '' }, { role: 'user', text: 'Есть' }], '')
   assert.equal(out.length, 1)
+})
+
+// ── Обрезанный ответ ──────────────────────────────────────────────────────────
+// Ответ упирается в max_tokens чаще, чем кажется: модель начинает писать
+// карточки еды и не успевает закрыть JSON. Раньше человек видел в чате
+// `{"reply": "Твой завтрак...` — сырую разметку.
+
+test('обрыв по max_tokens: показываем написанный текст, а не сырой JSON', () => {
+  const r = parseReply({
+    content: [{ type: 'text', text: '{"reply": "Завтрак неплохой, но белка маловато' }],
+    stop_reason: 'max_tokens',
+  })
+  assert.equal(r.reply, 'Завтрак неплохой, но белка маловато')
+  assert.equal(r.truncated, true)
+  assert.deepEqual(r.cards, [])
+  assert.ok(!r.reply.includes('{'), 'в ответ уехала разметка JSON')
+})
+
+test('экранирование внутри оборванной строки разворачивается', () => {
+  const r = parseReply({
+    content: [{ type: 'text', text: '{"reply": "Сказал \\"хватит\\" и пошёл\\nдальше, но' }],
+    stop_reason: 'max_tokens',
+  })
+  assert.ok(r.reply.includes('«') || r.reply.includes('"хватит"'), r.reply)
+  assert.ok(!r.reply.includes('\\n'), 'осталась экранированная последовательность')
+})
+
+test('оборвалось до текста — показываем понятную фразу, а не скобки', () => {
+  const r = parseReply({
+    content: [{ type: 'text', text: '{"cards": [{"name": "Овся' }],
+    stop_reason: 'max_tokens',
+  })
+  assert.equal(r.malformed, true)
+  assert.ok(!r.reply.includes('{'), `в ответ уехала разметка: ${r.reply}`)
+  assert.ok(r.reply.length > 10)
+})
+
+test('карточки обрезанного ответа не попадают в дневник', () => {
+  const r = parseReply({
+    content: [{ type: 'text', text: '{"reply":"Записал","cards":[{"name":"Овсянка","kcal":300},{"name":"Кофе"}]}' }],
+    stop_reason: 'max_tokens',
+  })
+  assert.equal(r.reply, 'Записал')
+  assert.deepEqual(r.cards, [], 'недописанная карточка не должна доехать до дневника')
+  assert.equal(r.truncated, true)
+})
+
+test('целый ответ карточки не теряет', () => {
+  const r = parseReply({
+    content: [{ type: 'text', text: '{"reply":"Записал","cards":[{"name":"Овсянка","kcal":300}]}' }],
+    stop_reason: 'end_turn',
+  })
+  assert.equal(r.cards.length, 1)
+  assert.equal(r.truncated, undefined)
+})
+
+// ── Уточняющий вопрос не повторяется дважды ──────────────────────────────────
+// На живом прогоне модель клала один и тот же вопрос и в reply, и в ask, а
+// интерфейс их склеивает — человек читал «Что в бутерброде? Что в бутерброде?».
+
+test('повтор вопроса вырезается из reply', () => {
+  const r = dedupeAsk(
+    'Уточни: что в бутерброде? Хлеб какой, начинка, масло или нет?',
+    'Что в бутерброде? Хлеб какой, начинка, масло или нет?',
+  )
+  assert.equal(r, '', 'reply состоял только из повтора вопроса')
+})
+
+test('полезная часть reply остаётся, повтор уходит', () => {
+  const r = dedupeAsk('Плов бывает разный по жирности. Уточни, с маслом или на бульоне?', 'С маслом или на бульоне?')
+  assert.equal(r, 'Плов бывает разный по жирности.')
+})
+
+test('без ask reply не трогаем', () => {
+  assert.equal(dedupeAsk('Записал 320 г плова.', null), 'Записал 320 г плова.')
+  assert.equal(dedupeAsk('Записал.', ''), 'Записал.')
+})
+
+test('короткий ответ не съедается совпадением служебных слов', () => {
+  assert.equal(dedupeAsk('Ок.', 'Сколько это в граммах?'), 'Ок.')
+})
+
+test('parseReply вычищает повтор целиком', () => {
+  const r = parseReply({
+    content: [{ type: 'text', text: JSON.stringify({
+      reply: 'Уточни: что в бутерброде?',
+      ask: 'Что в бутерброде?',
+      cards: [],
+    }) }],
+    stop_reason: 'end_turn',
+  })
+  assert.equal(r.reply, '')
+  assert.equal(r.ask, 'Что в бутерброде?')
 })

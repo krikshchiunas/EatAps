@@ -186,6 +186,44 @@ export function capContext(text) {
 // Ответ модели — JSON по контракту из aiPrompt.js. Модель иногда оборачивает
 // его в ```json — снимаем обёртку, но не «чиним» содержимое: если пришёл мусор,
 // честнее показать запасной текст, чем угадывать смысл.
+// Достаём поле reply из ОБОРВАННОГО JSON. Ответ упирается в max_tokens, и
+// тогда строка обрывается на полуслове: JSON.parse на такое падает, а показывать
+// человеку `{"reply": "Твой завтрак...` — стыдно. Забираем текст, который модель
+// успела написать, и разворачиваем экранирование.
+function salvageReply(text) {
+  const m = /"reply"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(text)
+  if (!m) return null
+  const raw = m[1]
+  try {
+    // Закрываем строку сами — JSON.parse сделает всё разэкранирование за нас.
+    return String(JSON.parse(`"${raw}"`)).trim() || null
+  } catch {
+    return raw.replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/\\\\/g, '\\').trim() || null
+  }
+}
+
+// Модель нередко дублирует уточняющий вопрос: кладёт его и в "reply", и в "ask".
+// На экране они склеиваются, и человек читает один и тот же вопрос дважды
+// («Уточни: что в бутерброде? Что в бутерброде?»). Убираем повтор из reply —
+// каноничным остаётся ask, по нему интерфейс подсвечивает ожидание ответа.
+const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+export function dedupeAsk(reply, ask) {
+  if (!reply || !ask) return reply
+  const askWords = new Set(norm(ask).split(' ').filter(Boolean))
+  if (askWords.size < 2) return reply
+  // Сравниваем по словам, а не по подстроке: модель любит добавить «Уточни:»
+  // или переставить слова, и точное вхождение такой повтор не ловит.
+  const kept = (reply.match(/[^.!?…]+[.!?…]*/g) || [reply]).filter((sentence) => {
+    const words = norm(sentence).split(' ').filter(Boolean)
+    if (!words.length) return false
+    if (words.length < 2) return true
+    const shared = words.filter((w) => askWords.has(w)).length
+    return shared / words.length < 0.7
+  })
+  return kept.join('').trim()
+}
+
 export function parseReply(data) {
   const text = (data?.content || [])
     .filter((b) => b.type === 'text')
@@ -193,17 +231,36 @@ export function parseReply(data) {
     .join('')
     .trim()
 
+  // Модель упёрлась в потолок ответа — что бы ни пришло, оно неполное.
+  const truncated = data?.stop_reason === 'max_tokens'
+
   const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
   try {
     const parsed = JSON.parse(stripped)
+    const ask = parsed.ask ? String(parsed.ask).trim() : null
     return {
-      reply: String(parsed.reply || '').trim(),
-      ask: parsed.ask ? String(parsed.ask).trim() : null,
-      cards: Array.isArray(parsed.cards) ? parsed.cards.slice(0, 10) : [],
+      reply: dedupeAsk(String(parsed.reply || '').trim(), ask),
+      ask,
+      // Карточки обрезанного ответа не отдаём: последняя из них почти наверняка
+      // недописана, а карточка с половиной КБЖУ хуже, чем её отсутствие.
+      cards: !truncated && Array.isArray(parsed.cards) ? parsed.cards.slice(0, 10) : [],
       memory: parsed.memory ? String(parsed.memory).slice(0, 300) : null,
+      ...(truncated ? { truncated: true } : {}),
     }
   } catch {
-    return { reply: text || 'Не получилось ответить. Попробуйте ещё раз.', ask: null, cards: [], memory: null, malformed: true }
+    const salvaged = salvageReply(stripped)
+    if (salvaged) {
+      return { reply: salvaged, ask: null, cards: [], memory: null, truncated: true }
+    }
+    // Похоже на JSON, но вытащить нечего — сырую разметку человеку не показываем.
+    const looksLikeJson = /^[[{]/.test(stripped) || /"reply"\s*:/.test(stripped)
+    return {
+      reply: (!looksLikeJson && text) || 'Не получилось ответить. Попробуйте ещё раз.',
+      ask: null,
+      cards: [],
+      memory: null,
+      malformed: true,
+    }
   }
 }
 
