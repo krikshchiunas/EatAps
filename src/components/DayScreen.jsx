@@ -52,14 +52,28 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
   const dateRef = useRef(date)
   dateRef.current = date
 
+  // Ширина — ЛЕЙАУТНАЯ (offsetWidth), а не из getBoundingClientRect: на входе
+  // экрана .screen проигрывает scale(0.97), и getBoundingClientRect вернул бы
+  // ширину с этим масштабом. useLayoutEffect выполняется как раз в этот момент,
+  // и трек встал бы на 3% мимо — ровно тот «съехавший» день, который потом
+  // никто не мог объяснить.
   const vw = () => viewportRef.current?.offsetWidth || window.innerWidth
   const base = () => -vw() // сдвиг трека, чтобы показать центральную страницу
+
+  // Положение покоя задаём ПРОЦЕНТАМИ, а не пикселями. Пиксельное смещение
+  // верно ровно для той ширины, при которой его посчитали: поворот экрана,
+  // split view, изменение размера окна, появление полосы прокрутки — и
+  // центральная страница уезжает вбок, а экран дня выглядит поехавшим.
+  // Проценты браузер пересчитывает сам при любой смене ширины, поэтому такой
+  // рассинхрон невозможен в принципе. Пиксели остаются только внутри жеста и
+  // доводки, где они и нужны.
+  const REST = 'translate3d(-100%,0,0)'
 
   // Ставим трек в центр без анимации — на маунте и после каждой смены даты
   // (бесшовный recenter: новая центральная страница = та, что доехала).
   useLayoutEffect(() => {
     const tr = trackRef.current
-    if (tr) tr.style.transform = `translate3d(${base()}px,0,0)`
+    if (tr) tr.style.transform = REST
   }, [date])
 
   const cancelAnim = () => { try { animRef.current?.cancel() } catch {} animRef.current = null }
@@ -69,7 +83,9 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     if (!tr) { onDone?.(); return }
     cancelAnim()
     const dist = Math.abs(to - from)
-    if (dist < 0.5) { tr.style.transform = `translate3d(${to}px,0,0)`; onDone?.(); return }
+    // Доехали — возвращаемся к процентному положению покоя, если это центр.
+    const land = () => { tr.style.transform = Math.abs(to - base()) < 0.5 ? REST : `translate3d(${to}px,0,0)` }
+    if (dist < 0.5) { land(); onDone?.(); return }
     const speed = Math.min(4, Math.max(0.9, Math.abs(vel)))
     const dur = Math.max(190, Math.min(430, dist / speed))
     animRef.current = tr.animate(
@@ -77,7 +93,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
       { duration: dur, easing: EASING, fill: 'forwards' },
     )
     animRef.current.onfinish = () => {
-      tr.style.transform = `translate3d(${to}px,0,0)`
+      land()
       cancelAnim()
       onDone?.()
     }
@@ -425,39 +441,38 @@ function DayBody({
 
       <div className="card" style={{ marginTop: 14 }}>
         <div className="row gap10" style={{ alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <MacroBar label="Белки" value={totals.protein} max={proteinGoal} />
-            <SubMetricRow
-              label="Белок выс. качества"
-              valueText={`${Math.round(advanced.qualityProtein)} г${advanced.qualityProteinShare != null ? ` · ${Math.round(advanced.qualityProteinShare * 100)}%` : ''}`}
-              sub={advanced.qualityProteinConfidence === 'none' ? 'нет данных' : undefined}
-              explain="Ориентировочная оценка качества источника белка (полноценность и усвояемость) — от 1 до 10 по типу продукта. Показан белок из продуктов с оценкой 7+ и его доля от общего белка. Оценка приблизительная, зависит от источника продукта — это не медицинский диагноз и не абсолютная оценка рациона."
-            />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <MacroBar label="Углеводы" value={totals.carbs} max={carbGoal} color="var(--accent)" />
-            <SubMetricRow
-              label="Сложные углеводы"
-              valueText={`${advanced.complexCarbConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.complexCarb)} г${totals.carbs > 0 ? ` · ${Math.round((advanced.complexCarb / totals.carbs) * 100)}%` : ''}`}
-              sub={advanced.complexCarbConfidence === 'none' ? 'нет данных' : undefined}
-              explain="Доля углеводов из круп, картофеля, бобовых и цельнозерновых продуктов — продуктовая классификация по типу продукта, а не медицинский показатель «полезных» углеводов. Сахар, сладости, десерты и напитки в неё не входят."
-            />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <MacroBar label="Жиры" value={totals.fat} max={fatGoal} color="var(--warn)" />
-            <SubMetricRow
-              label="Насыщ. жиры"
-              valueText={`${advanced.satFatConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.satFat)}${satFatMax > 0 ? `/${satFatMax}` : ''} г`}
-              sub={
-                advanced.satFatConfidence === 'none' ? 'нет данных' :
-                advanced.satFatConfidence === 'partial' ? 'неполные данные' :
-                satFatMax > 0 ? (advanced.satFat > satFatMax ? 'превышен ориентир' : 'в пределах ориентира') : undefined
-              }
-              tone={satFatMax > 0 && advanced.satFat > satFatMax ? 'var(--warn)' : undefined}
-              explain="Насыщенные жиры берутся из реальных данных продукта, если они указаны, иначе оцениваются по типу продукта (мясо, молочное, кондитерка и т.п.) — без точности до грамма. Дневной ориентир — не более 10% калорий (рекомендация ВОЗ), считается отдельно от общей нормы жиров."
-            />
-          </div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Белки" value={totals.protein} max={proteinGoal} /></div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Углеводы" value={totals.carbs} max={carbGoal} color="var(--accent)" /></div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Жиры" value={totals.fat} max={fatGoal} color="var(--warn)" /></div>
         </div>
+
+        {/* Подробности качества — отдельными строками во всю ширину, а не третью
+            колонки: в колонке 91 px «Сложные углеводы» и «Усвояемый белок» не
+            помещались никогда и всегда стояли с многоточием. */}
+        <div className="divider" />
+        <SubMetricRow
+          label="Усвояемый белок"
+          valueText={`${Math.round(advanced.qualityProtein)} г${advanced.qualityProteinShare != null ? ` · ${Math.round(advanced.qualityProteinShare * 100)}%` : ''}`}
+          sub={advanced.qualityProteinConfidence === 'none' ? 'нет данных' : advanced.qualityProteinConfidence === 'partial' ? 'часть продуктов не опознана' : undefined}
+          explain="Сколько съеденного белка организм действительно может пустить на строительство мышц и тканей. Считается по DIAAS — международному показателю качества белка (FAO): у яиц, молочного, мяса и рыбы засчитывается почти всё, у круп и бобовых — половина-две трети, у коллагена и желатина — ничего, в них нет триптофана. Значения справочные, по типу продукта, а не измерение конкретной пачки — это ориентир, а не медицинский диагноз."
+        />
+        <SubMetricRow
+          label="Сложные углеводы"
+          valueText={`${advanced.complexCarbConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.complexCarb)} г${totals.carbs > 0 ? ` · ${Math.round((advanced.complexCarb / totals.carbs) * 100)}%` : ''}`}
+          sub={advanced.complexCarbConfidence === 'none' ? 'нет данных' : undefined}
+          explain="Доля углеводов из круп, картофеля, бобовых и цельнозерновых продуктов — продуктовая классификация по типу продукта, а не медицинский показатель «полезных» углеводов. Сахар, сладости, десерты и напитки в неё не входят."
+        />
+        <SubMetricRow
+          label="Насыщенные жиры"
+          valueText={`${advanced.satFatConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.satFat)}${satFatMax > 0 ? `/${satFatMax}` : ''} г`}
+          sub={
+            advanced.satFatConfidence === 'none' ? 'нет данных' :
+            advanced.satFatConfidence === 'partial' ? 'неполные данные' :
+            satFatMax > 0 ? (advanced.satFat > satFatMax ? 'превышен ориентир' : 'в пределах ориентира') : undefined
+          }
+          tone={satFatMax > 0 && advanced.satFat > satFatMax ? 'var(--warn)' : undefined}
+          explain="Насыщенные жиры берутся из реальных данных продукта, если они указаны, иначе оцениваются по типу продукта (мясо, молочное, кондитерка и т.п.) — без точности до грамма. Дневной ориентир — не более 10% калорий (рекомендация ВОЗ), считается отдельно от общей нормы жиров."
+        />
       </div>
 
     </div>
@@ -542,21 +557,33 @@ function MealSectionCard({
 function SubMetricRow({ label, valueText, sub, tone, explain }) {
   const [open, setOpen] = useState(false)
   return (
-    <div style={{ marginTop: 10, minWidth: 0 }}>
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', textAlign: 'left' }}>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
-        <div className="tabular" style={{ fontSize: 11.5, color: tone || 'var(--ink-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{valueText}</div>
-        {sub && <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
+    <div style={{ minWidth: 0 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 0' }}
+      >
+        <span style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, minWidth: 0, flex: 1 }}>
+          {label}
+          <span aria-hidden="true" style={{ color: 'var(--ink-3)', marginLeft: 5, fontSize: 11 }}>{open ? '▴' : '▾'}</span>
+        </span>
+        <span style={{ flex: '0 0 auto', textAlign: 'right' }}>
+          <span className="tabular" style={{ fontSize: 13.5, color: tone || 'var(--ink)', fontWeight: 600 }}>{valueText}</span>
+          {sub && <span style={{ display: 'block', fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{sub}</span>}
+        </span>
       </button>
-      {open && <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6, lineHeight: 1.4 }}>{explain}</p>}
+      {open && <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px', lineHeight: 1.45 }}>{explain}</p>}
     </div>
   )
 }
 
+// Подписи короткие намеренно: карточка уже называется «Качество углеводов», и
+// полные формулировки («Углеводы можно улучшить») вместе с заголовком не
+// помещались в 375 px — бейдж вылезал за край карточки вместе со стрелкой.
 const GRADE = {
-  good: { color: 'var(--good)', bg: 'var(--primary-weak)', emoji: '🟢', title: 'Качественные углеводы' },
-  ok: { color: 'var(--warn)', bg: 'var(--accent-weak)', emoji: '🟡', title: 'Углеводы можно улучшить' },
-  bad: { color: 'var(--danger)', bg: 'rgba(192,104,78,0.12)', emoji: '🔴', title: 'Много быстрых сахаров' },
+  good: { color: 'var(--good)', bg: 'var(--primary-weak)', emoji: '🟢', title: 'Хорошо' },
+  ok: { color: 'var(--warn)', bg: 'var(--accent-weak)', emoji: '🟡', title: 'Можно лучше' },
+  bad: { color: 'var(--danger)', bg: 'rgba(192,104,78,0.12)', emoji: '🔴', title: 'Много сахара' },
 }
 
 function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal }) {
@@ -574,12 +601,19 @@ function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal
 
   return (
     <div className="card" style={{ marginTop: 14 }}>
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, textAlign: 'left' }}>
-        <span className="h2" style={{ fontSize: 17 }}>Качество углеводов</span>
-        <span className="row gap8" style={{ alignItems: 'center', flex: '0 0 auto' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: g.color, background: g.bg, padding: '4px 12px', borderRadius: 999, whiteSpace: 'nowrap' }}>{g.emoji} {g.title}</span>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}><polyline points="6 9 12 15 18 9" /></svg>
+      {/* Заголовок и оценка лежат в ОДНОЙ переносимой группе, а стрелка всегда
+          прижата к правому краю. Помещаются — строка одна; не помещаются (длинная
+          оценка, крупный системный шрифт, узкий экран) — пилюля спокойно уезжает
+          на вторую строку. Обрезать заголовок многоточием тут нечестно: это
+          единственное, что объясняет, о чём карточка. */}
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}>
+        <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
+          <span className="h2" style={{ fontSize: 17 }}>Качество углеводов</span>
+          {/* Смысл несёт сам текст пилюли — цвет остаётся усилением, а не
+              единственным носителем информации. */}
+          <span style={{ fontSize: 13, fontWeight: 600, color: g.color, background: g.bg, padding: '4px 12px', borderRadius: 999, whiteSpace: 'nowrap' }}>{g.title}</span>
         </span>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}><polyline points="6 9 12 15 18 9" /></svg>
       </button>
 
       {open && (
@@ -919,12 +953,12 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit }) {
   return (
     <div style={{ position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <button style={{ color: '#fff', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { onEdit(m); reset() }}>
+        <button style={{ color: 'var(--on-primary)', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { onEdit(m); reset() }}>
           <span style={{ fontSize: 20 }}>✏️</span><span style={{ fontSize: 12, fontWeight: 600 }}>Изменить</span>
         </button>
       </div>
       <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <button style={{ color: '#fff', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { removeFood(date, m.id); reset() }}>
+        <button style={{ color: 'var(--on-danger)', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { removeFood(date, m.id); reset() }}>
           <span style={{ fontSize: 20 }}>🗑️</span><span style={{ fontSize: 12, fontWeight: 600 }}>Удалить</span>
         </button>
       </div>

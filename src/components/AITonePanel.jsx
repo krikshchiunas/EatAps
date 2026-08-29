@@ -162,7 +162,7 @@ function Check({ checked, onChange, children }) {
           width: 22, height: 22, borderRadius: 6, flex: '0 0 auto', marginTop: 1,
           border: `1.8px solid ${checked ? 'var(--primary)' : 'var(--ink-3)'}`,
           background: checked ? 'var(--primary)' : 'transparent',
-          color: '#fff', display: 'grid', placeItems: 'center', fontSize: 14, lineHeight: 1,
+          color: 'var(--on-primary)', display: 'grid', placeItems: 'center', fontSize: 14, lineHeight: 1,
         }}
       >
         {checked ? '✓' : ''}

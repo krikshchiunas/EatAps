@@ -43,6 +43,11 @@
   --track: rgba(31, 49, 43, 0.10);
 
   --danger: #C0684E;
+  /* Что писать ПОВЕРХ опасного цвета. Отдельный токен, а не #fff:
+     в тёмной теме --danger светло-лососевый, и белый текст на нём
+     нечитаем. Такие поломки видны только при переключении темы,
+     поэтому цвет обязан жить в палитре. */
+  --on-danger: #FFFFFF;
   --warn: #C79A4B;
   --good: #4F8375;
 
@@ -113,6 +118,7 @@
   --track: rgba(230, 237, 231, 0.15);
 
   --danger: #D98A72;
+  --on-danger: #1B1512;
   --warn: #D9B36B;
   --good: #8AA891;
 
@@ -993,6 +999,10 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   display: flex;
   align-items: flex-start;
   will-change: transform;
+  /* Стартовое положение — центральная страница. JS почти сразу перезапишет это
+     пиксельным значением (оно нужно для жеста), но до первого кадра трек уже
+     стоит правильно, и экран дня не может «мигнуть» вчерашним днём. */
+  transform: translate3d(-100%, 0, 0);
 }
 .day-page {
   flex: 0 0 100%;
@@ -2047,7 +2057,7 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--surface);
-  color: var(--ink-1);
+  color: var(--ink);
   font: inherit;
   font-size: 16px; /* меньше 16px — iOS зумит страницу при фокусе */
   line-height: 1.35;

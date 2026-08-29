@@ -336,7 +336,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
             {v.key === 'events' && unreadEvents > 0 && (
               <span style={{
                 marginLeft: 6, minWidth: 18, height: 18, borderRadius: 999,
-                background: 'var(--danger)', color: '#fff', fontSize: 11, fontWeight: 700,
+                background: 'var(--danger)', color: 'var(--on-danger)', fontSize: 11, fontWeight: 700,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
               }}>
                 {unreadEvents > 99 ? '99+' : unreadEvents}
@@ -462,7 +462,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab 
                 {unread > 0 && (
                   <span style={{
                     minWidth: 22, height: 22, borderRadius: 999,
-                    background: 'var(--danger)', color: '#fff',
+                    background: 'var(--danger)', color: 'var(--on-danger)',
                     fontSize: 12, fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     padding: '0 5px', flex: '0 0 auto',

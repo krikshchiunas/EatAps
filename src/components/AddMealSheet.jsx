@@ -318,7 +318,7 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
         <div style={{
           position: 'fixed', top: 'calc(env(safe-area-inset-top) + 16px)', left: '50%',
           transform: 'translateX(-50%)', zIndex: 1000,
-          background: 'var(--primary)', color: '#fff',
+          background: 'var(--primary)', color: 'var(--on-primary)',
           padding: '10px 18px', borderRadius: 999,
           fontSize: 14, fontWeight: 600, letterSpacing: -0.1,
           boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
