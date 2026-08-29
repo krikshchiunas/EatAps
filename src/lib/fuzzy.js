@@ -87,6 +87,26 @@ export function fuzzyWordDistance(word, term) {
 
 const splitWords = (text) => text.split(/[^0-9a-zа-я%]+/i).filter(Boolean)
 
+// ── Редукция безударных гласных ──────────────────────────────────────────────
+// Самая частая русская опечатка — не случайный промах по клавише, а письмо
+// «как слышится»: «малако», «карова», «сметанна». В таком слове правок сразу
+// две-три, и порог Дамерау-Левенштейна (одна правка на шесть букв) их не
+// прощает — по-настоящему частый случай оставался ненайденным.
+//
+// Поэтому перед сравнением обе строки сводятся к «звучанию»: гласные,
+// неразличимые в безударной позиции, схлопываются в один символ, удвоенные
+// буквы — в одну. «молоко» и «малако» превращаются в одно и то же «малака».
+const PHONE = { о: 'а', е: 'и', ё: 'и', я: 'а', ю: 'у', ы: 'и', э: 'и', й: 'и', ъ: '', ь: '' }
+export function phoneticKey(word) {
+  let out = ''
+  for (const ch of word) {
+    const mapped = PHONE[ch] !== undefined ? PHONE[ch] : ch
+    if (!mapped) continue
+    if (out[out.length - 1] !== mapped) out += mapped
+  }
+  return out
+}
+
 // Баллы за один термин. -1 — не совпало вовсе.
 // name — нормализованное название (без alias): совпадение по названию ценнее,
 // чем по синониму, иначе синонимы вытаскивают наверх случайные продукты.
@@ -113,6 +133,20 @@ function scoreTerm(text, name, term, allowFuzzy) {
     for (const w of textWords) {
       const d = fuzzyWordDistance(w, term)
       if (d != null) best = Math.max(best, 90 - d * 40)
+    }
+  }
+
+  // Последний рубеж — сравнение по звучанию. Балл ниже обычной опечатки:
+  // совпадение здесь слабее, и точные попадания обязаны стоять выше.
+  if (best < 0) {
+    const key = phoneticKey(term)
+    if (key.length >= 3) {
+      for (const w of nameWords) {
+        const wk = phoneticKey(w)
+        if (wk === key) { best = Math.max(best, 80); continue }
+        // Одна правка поверх редукции — «сметанна» против «сметана».
+        if (Math.abs(wk.length - key.length) <= 1 && editDistance(wk, key, 1) <= 1) best = Math.max(best, 60)
+      }
     }
   }
   return best
