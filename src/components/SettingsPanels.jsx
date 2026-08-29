@@ -272,7 +272,7 @@ export function AccountPanel({ onClose, onOpenAuth }) {
             </div>
           </Group>
 
-          <Group title="Данные для расчёта нормы" note="Видны только вам — друзьям они не передаются. Задаются при первом запуске.">
+          <Group title="Данные для расчёта нормы" note="Видны только вам — друзьям они не передаются. Меняются в разделе «Мои данные и норма».">
             <Row label="Цель" value={GOALS[profile?.goal]?.label || '—'} chevron={false} />
             <Row label="Активность" value={ACTIVITY[profile?.activity]?.label || '—'} chevron={false} />
             <Row label="Возраст" value={profile?.age ? `${profile.age}` : '—'} chevron={false} />

@@ -27,7 +27,7 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
       padding: '0 24px',
     }} onClick={onNo}>
       <div style={{
-        background: 'var(--surface)',
+        background: 'var(--surface-solid)',
         borderRadius: 20,
         padding: '28px 24px 20px',
         maxWidth: 360,
@@ -39,7 +39,7 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
             <p style={{ fontSize: 16, lineHeight: 1.5, color: 'var(--ink)', marginBottom: 24, textAlign: 'center' }}>{text}</p>
             <div className="row gap12">
               <button className="btn ghost" style={{ flex: 1 }} onClick={onNo}>{noLabel}</button>
-              <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }} onClick={confirmYes}>{yesLabel}</button>
+              <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: 'var(--on-danger)' }} onClick={confirmYes}>{yesLabel}</button>
             </div>
           </>
         ) : (
@@ -73,7 +73,7 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
             />
             <div className="row gap12">
               <button className="btn ghost" style={{ flex: 1 }} onClick={onNo}>Отмена</button>
-              <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }} disabled={input !== code} onClick={onYes}>Подтвердить</button>
+              <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: 'var(--on-danger)' }} disabled={input !== code} onClick={onYes}>Подтвердить</button>
             </div>
           </>
         )}

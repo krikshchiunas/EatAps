@@ -286,7 +286,7 @@ function ConfirmLeave({ mine, title, onYes, onNo }) {
           <button className="btn ghost" style={{ flex: 1, width: 'auto' }} onClick={onNo}>Отмена</button>
           <button
             className="btn"
-            style={{ flex: 1, width: 'auto', background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }}
+            style={{ flex: 1, width: 'auto', background: 'var(--danger)', borderColor: 'var(--danger)', color: 'var(--on-danger)' }}
             onClick={onYes}
           >
             {mine ? 'Удалить' : 'Выйти'}

@@ -2,11 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   isValidWeight, isValidActivity, dayWeight, effectiveActivity, hasDayActivity,
-  buildWeightIndex, weightAt, createTargetResolver, targetsForDay,
+  buildWeightIndex, weightAt, createTargetResolver, targetsForDay, baselineTargetsForDay,
   weightSeries, movingAverage, weightTrend, bmi, bmiBand,
-  weightSummary, activitySummary,
+  weightSummary, activitySummary, scoreToFactor, effectiveActivityFactor,
+  profileScore, ACTIVITY_SCORE,
 } from './body.js'
-import { computeTargets } from './nutrition.js'
+import { computeTargets, ACTIVITY } from './nutrition.js'
 
 const PROFILE = { sex: 'male', age: 30, height: 180, weight: 80, activity: 'light', goal: 'maintain' }
 const day = (extra = {}) => ({ meals: [], mealSections: [], mood: null, wellbeing: [], note: '', ...extra })
@@ -137,6 +138,94 @@ test('targetsForDay — разовый расчёт без ручного инд
   assert.equal(t.calories, computeTargets({ ...PROFILE, weight: 70, activity: 'high' }).calories)
 })
 
+// ── Балл активности → множитель ────────────────────────────────────────────────
+
+test('scoreToFactor непрерывен: каждый шаг ползунка меняет множитель', () => {
+  // Главное свойство: внутри одной «ступени» (0–24 → sedentary) балл всё равно
+  // влияет. Раньше 0 и 24 давали одинаковую цель, и ползунок был бесполезен.
+  assert.ok(scoreToFactor(24) > scoreToFactor(0), 'внутри ступени множитель растёт')
+  assert.ok(scoreToFactor(49) > scoreToFactor(25))
+  let prev = scoreToFactor(0)
+  for (let i = 1; i <= 100; i++) {
+    const cur = scoreToFactor(i)
+    assert.ok(cur > prev, `балл ${i} должен быть активнее ${i - 1}`)
+    prev = cur
+  }
+})
+
+test('scoreToFactor совпадает с ACTIVITY на баллах уровней', () => {
+  // День без ручной отметки обязан давать ровно ту же цель, что и анкета.
+  for (const key of ['sedentary', 'light', 'moderate', 'high']) {
+    assert.equal(scoreToFactor(ACTIVITY_SCORE[key]), ACTIVITY[key].factor, key)
+  }
+})
+
+test('шаг ползунка одинаков по всей шкале — без рывка у краёв', () => {
+  // Кусочные наклоны давали у конца шкалы шаг в 2.5 раза крупнее: последние
+  // 13 баллов двигали цель сильнее, чем предыдущие 30. Прямая это исключает.
+  const step = (a, b) => (scoreToFactor(b) - scoreToFactor(a)) / (b - a)
+  const ref = step(0, 1)
+  for (const [a, b] of [[10, 11], [36, 37], [61, 62], [86, 87], [98, 99], [99, 100]]) {
+    assert.ok(Math.abs(step(a, b) - ref) < 1e-6, `шаг ${a}→${b} должен совпадать с базовым`)
+  }
+})
+
+test('profileScore — балл, который показывает ползунок без ручной отметки', () => {
+  assert.equal(profileScore({ activity: 'sedentary' }), ACTIVITY_SCORE.sedentary)
+  assert.equal(profileScore({ activity: 'high' }), ACTIVITY_SCORE.high)
+  assert.equal(profileScore({}), ACTIVITY_SCORE.light)
+  assert.equal(profileScore(null), ACTIVITY_SCORE.light)
+  assert.equal(profileScore({ activity: 'чушь' }), ACTIVITY_SCORE.light)
+})
+
+test('scoreToFactor: края и мусор в разумных пределах', () => {
+  assert.ok(scoreToFactor(0) >= 1.05 && scoreToFactor(0) < ACTIVITY.sedentary.factor, 'постельный режим')
+  assert.ok(scoreToFactor(100) > ACTIVITY.high.factor && scoreToFactor(100) <= 2.0, 'предельная нагрузка')
+  assert.equal(scoreToFactor(-50), scoreToFactor(0)) // зажим
+  assert.equal(scoreToFactor(500), scoreToFactor(100))
+  assert.equal(scoreToFactor('чушь'), ACTIVITY.light.factor)
+  assert.equal(scoreToFactor(undefined), ACTIVITY.light.factor)
+})
+
+test('effectiveActivityFactor: балл важнее ключа, ключ важнее анкеты', () => {
+  assert.equal(effectiveActivityFactor(day({ activityScore: 100 }), PROFILE), scoreToFactor(100))
+  assert.equal(effectiveActivityFactor(day({ activity: 'high' }), PROFILE), ACTIVITY.high.factor)
+  assert.equal(effectiveActivityFactor(day(), PROFILE), ACTIVITY.light.factor)
+  assert.equal(effectiveActivityFactor(day(), {}), ACTIVITY.light.factor)
+})
+
+test('каждый шаг ползунка двигает цель по калориям', () => {
+  const targets = (score) => targetsForDay({ '2026-03-01': day({ activityScore: score }) }, '2026-03-01', PROFILE)
+  // Внутри прежней ступени «sedentary» цель раньше не менялась вовсе.
+  assert.ok(targets(24).calories > targets(0).calories, 'ползунок внутри ступени влияет на цель')
+  assert.ok(targets(100).calories > targets(87).calories, 'выше «высокой» активности цель ещё растёт')
+  assert.ok(targets(0).calories < targets(12).calories, 'ниже «мало движения» цель падает')
+  // БЖУ тоже подстраиваются, а не остаются от анкеты.
+  const lazy = targets(0)
+  const hard = targets(100)
+  assert.ok(hard.carbs > lazy.carbs, 'углеводы растут с активностью')
+  assert.ok(hard.fat > lazy.fat, 'жиры растут с активностью')
+  assert.ok(hard.protein > lazy.protein, 'белок растёт с активностью')
+})
+
+test('день без ручного балла даёт ровно цель анкеты', () => {
+  for (const activity of ['sedentary', 'light', 'moderate', 'high']) {
+    const profile = { ...PROFILE, activity }
+    const t = targetsForDay({ '2026-03-01': day() }, '2026-03-01', profile)
+    assert.equal(t.calories, computeTargets(profile).calories, activity)
+    assert.equal(t.protein, computeTargets(profile).protein, activity)
+  }
+})
+
+test('baselineTargetsForDay игнорирует балл дня, но держит вес дня', () => {
+  const days = { '2026-03-01': day({ weight: 90, activityScore: 100 }) }
+  const base = baselineTargetsForDay(days, '2026-03-01', PROFILE)
+  const actual = targetsForDay(days, '2026-03-01', PROFILE)
+  // Вес тот же (90), активность — из анкеты.
+  assert.equal(base.calories, computeTargets({ ...PROFILE, weight: 90 }).calories)
+  assert.ok(actual.calories > base.calories, 'балл 100 поднимает цель над анкетной')
+})
+
 // ── История веса ──────────────────────────────────────────────────────────────
 
 test('weightSeries отдаёт только дни со взвешиванием, по возрастанию', () => {
@@ -263,6 +352,17 @@ test('activitySummary считает только явно отмеченные 
   assert.equal(a.mostCommon, 'high')
   assert.ok(a.avgFactor > a.profileFactor, 'реально активнее, чем записано в профиле')
   assert.ok(a.vsProfile > 0)
+})
+
+test('activitySummary не падает на дне, отмеченном только баллом ползунка', () => {
+  // day.activity у такого дня нет вовсе — обращение к ACTIVITY[undefined].factor
+  // роняло весь расчёт статистики.
+  const days = { '2026-02-01': day({ activityScore: 80 }) }
+  const a = activitySummary(days, ['2026-02-01'], PROFILE)
+  assert.equal(a.markedDays, 1)
+  assert.equal(a.counts.high, 1)
+  assert.equal(a.avgFactor, scoreToFactor(80))
+  assert.ok(Number.isFinite(a.vsProfile))
 })
 
 test('activitySummary без отметок отдаёт null вместо выдуманного среднего', () => {

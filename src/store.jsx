@@ -897,6 +897,7 @@ export function StoreProvider({ children }) {
     // тело и режим дня
     setDayWeight,
     setDayActivity,
+    setDayActivityScore,
     setWeightGoal,
     // учёт дня в статистике
     setDayStatsExcluded,

@@ -75,7 +75,7 @@ function MealReactSheet({ meal, mealDate, friend, myId, onClose }) {
       onClick={onClose}
     >
       <div
-        style={{ background: 'var(--surface)', borderRadius: '20px 20px 0 0', padding: '20px 20px 32px', maxHeight: '80vh', overflowY: 'auto' }}
+        style={{ background: 'var(--surface-solid)', borderRadius: '20px 20px 0 0', padding: '20px 20px 32px', maxHeight: '80vh', overflowY: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Meal preview card */}

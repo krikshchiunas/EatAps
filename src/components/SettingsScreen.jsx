@@ -20,6 +20,8 @@ import {
   AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel, PromoPanel,
 } from './SettingsPanels.jsx'
 import AITonePanel from './AITonePanel.jsx'
+import BodyPanel from './BodyPanel.jsx'
+import { profileTargets } from '../lib/body.js'
 import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiPrompt.js'
 import { planByTier } from '../lib/subscription.js'
 
@@ -29,7 +31,7 @@ const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const CoachScreen = lazyWithReload(() => import('./CoachScreen.jsx'))
 
 export default function SettingsScreen({ onClose, onOpenFriends }) {
-  const { user, supabaseEnabled, theme, prefs, subscription } = useStore()
+  const { user, supabaseEnabled, theme, prefs, subscription, profile } = useStore()
   const [panel, setPanel] = useState(null) // 'account' | 'privacy' | ...
   const [authOpen, setAuthOpen] = useState(false)
   const close = () => setPanel(null)
@@ -39,6 +41,8 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
     ? `${planByTier(subscription.tier)?.name || subscription.tier} активен`
     : null
   const themeLabel = theme === 'light' ? 'Светлая' : theme === 'dark' ? 'Тёмная' : 'Как в системе'
+  const liveTargets = profileTargets(profile)
+  const bodyValue = liveTargets?.calories ? `${liveTargets.calories} ккал` : null
   const accountValue = supabaseEnabled
     ? (user ? (user.email || user.phone || 'Вход выполнен') : 'Не выполнен')
     : 'Только на устройстве'
@@ -52,6 +56,10 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
 
       <Group title="Аккаунт">
         <Row label="Аккаунт" value={accountValue} onClick={() => setPanel('account')} />
+      </Group>
+
+      <Group title="Норма">
+        <Row label="Мои данные и норма" value={bodyValue} onClick={() => setPanel('body')} />
       </Group>
 
       <Group title="Приватность">
@@ -86,6 +94,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       </p>
 
       {panel === 'account' && <AccountPanel onClose={close} onOpenAuth={() => setAuthOpen(true)} />}
+      {panel === 'body' && <BodyPanel onClose={close} />}
       {panel === 'privacy' && <PrivacyPanel onClose={close} onOpenFriends={onOpenFriends} />}
       {panel === 'notifications' && <NotificationsPanel onClose={close} />}
       {panel === 'aiTone' && <AITonePanel onClose={close} />}

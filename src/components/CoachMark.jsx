@@ -49,9 +49,11 @@ export default function CoachMark({ facts, paused }) {
         position: 'fixed', left: 12, right: 12,
         bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
         zIndex: 550,
-        background: 'var(--surface)',
+        // Непрозрачная поверхность, а не стекло: подсказка всплывает поверх
+        // списка, и сквозь неё читался бы текст, который она объясняет.
+        background: 'var(--surface-solid)',
         border: '1.5px solid var(--primary)',
-        borderRadius: 18,
+        borderRadius: 22,
         padding: '14px 16px',
         boxShadow: 'var(--shadow-float)',
         display: 'flex', gap: 12, alignItems: 'flex-start',

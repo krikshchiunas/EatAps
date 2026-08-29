@@ -155,7 +155,7 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
             {unreadEvents > 0 && (
               <span style={{
                 minWidth: 20, height: 20, borderRadius: 999,
-                background: 'var(--danger)', color: '#fff', fontSize: 11.5, fontWeight: 700,
+                background: 'var(--danger)', color: 'var(--on-danger)', fontSize: 11.5, fontWeight: 700,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px',
               }}>
                 {unreadEvents > 99 ? '99+' : unreadEvents}

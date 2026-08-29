@@ -7,7 +7,6 @@ import { startScheduler, notifyIncomingMessage, setNotificationPrefs } from './l
 import { typeOfMealId } from './lib/meals.js'
 import Onboarding from './components/Onboarding.jsx'
 import BootScreen from './components/BootScreen.jsx'
-import SyncIndicator from './components/SyncIndicator.jsx'
 import AuthNotice from './components/AuthNotice.jsx'
 import DayScreen from './components/DayScreen.jsx'
 import HistoryScreen from './components/HistoryScreen.jsx'
@@ -203,7 +202,6 @@ export default function App() {
           onAdd={(food) => addFood(date, food)}
         />
       )}
-      <SyncIndicator />
       <AuthNotice />
     </div>
   )

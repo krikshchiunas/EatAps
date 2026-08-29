@@ -52,7 +52,7 @@ export function dayWeight(day) {
   return isValidWeight(n) ? n : null
 }
 
-// Числовой балл (0–100) → ключ активности для расчёта TDEE.
+// Числовой балл (0–100) → ключ активности (для подписей и сводок по уровням).
 export function scoreToActivityKey(score) {
   const n = Number(score)
   if (!Number.isFinite(n)) return 'light'
@@ -60,6 +60,41 @@ export function scoreToActivityKey(score) {
   if (n < 50) return 'light'
   if (n < 75) return 'moderate'
   return 'high'
+}
+
+// ── Балл активности → множитель к BMR ────────────────────────────────────────
+// Ключ активности (4 ступени) годится для анкеты, но НЕ для ползунка дня: через
+// ступени баллы 0 и 24 давали одну и ту же цель, и ползунок справедливо выглядел
+// «визуальной штукой». Поэтому балл переводится в множитель напрямую и линейно —
+// каждый шаг ползунка что-то меняет.
+//
+// Балл, соответствующий уровню из анкеты. Единственный источник этих чисел:
+// экран дня берёт их отсюда же (подпись ползунка), а прямая ниже проходит
+// ровно через них. Иначе день без ручной отметки давал бы цель, чуть-чуть
+// отличную от анкетной.
+export const ACTIVITY_SCORE = { sedentary: 12, light: 37, moderate: 62, high: 87 }
+
+// Наклон выводим из самих коэффициентов ACTIVITY, а не вписываем числом:
+// поменяется ACTIVITY — прямая поедет за ним и опоры останутся точными.
+const FACTOR_SLOPE =
+  (ACTIVITY.high.factor - ACTIVITY.sedentary.factor) /
+  (ACTIVITY_SCORE.high - ACTIVITY_SCORE.sedentary)
+
+// Балл ползунка (0–100) в множитель к BMR. Края выходят за четыре уровня:
+// 0 ≈ 1.12 (постельный режим), 100 ≈ 1.82 (нагрузка спортсмена).
+export function scoreToFactor(score) {
+  const n = Number(score)
+  if (!Number.isFinite(n)) return ACTIVITY.light.factor
+  const x = Math.min(100, Math.max(0, n))
+  const f = ACTIVITY.light.factor + (x - ACTIVITY_SCORE.light) * FACTOR_SLOPE
+  // Округление до 4 знаков: ключ кэша целей не должен плодиться из-за
+  // плавающей точки, на калориях это меньше 0.1 ккал.
+  return Math.round(f * 10000) / 10000
+}
+
+// Балл, который показывает ползунок, пока день не отмечен вручную.
+export function profileScore(profile) {
+  return ACTIVITY_SCORE[profile?.activity] ?? ACTIVITY_SCORE.light
 }
 
 // Активность дня: числовой балл → ключ → из профиля → 'light'.
@@ -70,6 +105,15 @@ export function effectiveActivity(day, profile) {
   if (isValidActivity(day?.activity)) return day.activity
   if (isValidActivity(profile?.activity)) return profile.activity
   return 'light'
+}
+
+// Множитель к BMR для этого дня: балл ползунка (непрерывно) → ключ дня →
+// ключ профиля. Именно он идёт в расчёт КБЖУ, в отличие от effectiveActivity,
+// который остаётся «ступенчатым» и нужен только для подписей и сводок.
+export function effectiveActivityFactor(day, profile) {
+  const score = day?.activityScore
+  if (score != null && Number.isFinite(Number(score))) return scoreToFactor(Number(score))
+  return ACTIVITY[effectiveActivity(day, profile)]?.factor ?? ACTIVITY.light.factor
 }
 
 // Активность задана вручную именно для этого дня.
@@ -128,7 +172,7 @@ export function createTargetResolver(days, profile) {
 
   return function targetsFor(dateKey, day) {
     const weight = weightAt(index, dateKey, fallbackWeight)
-    const activity = effectiveActivity(day, profile)
+    const activityFactor = effectiveActivityFactor(day, profile)
 
     // Профиль без роста/возраста/пола (частичный онбординг, битые данные) —
     // считать Mifflin-St Jeor не из чего. Отдаём цели профиля как есть.
@@ -136,19 +180,40 @@ export function createTargetResolver(days, profile) {
       return base
     }
 
-    const ck = `${weight}|${activity}`
+    const ck = `${weight}|${activityFactor}`
     let t = cache.get(ck)
     if (!t) {
-      t = computeTargets({ ...profile, weight, activity })
+      t = computeTargets({ ...profile, weight, activityFactor })
       cache.set(ck, t)
     }
     return t
   }
 }
 
+// Норма профиля «вообще» — без привязки к дню: анкетный вес и анкетная
+// активность. Считается заново, а не берётся из profile.targets: сохранённое
+// значение осталось от той версии формулы, при которой человек проходил
+// онбординг, и после любой правки расчёта начинает врать. Сохранённые targets
+// остаются фолбэком для профилей без роста/возраста.
+export function profileTargets(profile) {
+  if (!profile) return null
+  const w = Number(profile.weight)
+  if (!isValidWeight(w) || !Number.isFinite(Number(profile.height)) || !Number.isFinite(Number(profile.age))) {
+    return profile.targets || null
+  }
+  return computeTargets(profile)
+}
+
 // Разовый расчёт целей одного дня (для экрана дня — там дней три, индекс не нужен).
 export function targetsForDay(days, dateKey, profile) {
   return createTargetResolver(days, profile)(dateKey, days?.[dateKey])
+}
+
+// Цель того же дня, но БЕЗ ручной отметки активности — то есть по активности из
+// анкеты. Нужна экрану дня, чтобы показать, на сколько ползунок сдвинул цель.
+// Вес берётся тот же (актуальный на эту дату), меняется только активность.
+export function baselineTargetsForDay(days, dateKey, profile) {
+  return createTargetResolver(days, profile)(dateKey, null)
 }
 
 // ── История веса ──────────────────────────────────────────────────────────────
@@ -279,9 +344,11 @@ export function activitySummary(days, keys, profile) {
   for (const k of keys) {
     const day = src[k]
     if (!hasDayActivity(day)) continue
-    counts[day.activity] += 1
+    // День может быть отмечен только баллом (ползунок) — тогда day.activity нет,
+    // и обращаться к ACTIVITY[day.activity] напрямую нельзя.
+    counts[effectiveActivity(day, null)] += 1
     marked += 1
-    factorSum += ACTIVITY[day.activity].factor
+    factorSum += effectiveActivityFactor(day, null)
   }
 
   const profileFactor = ACTIVITY[effectiveActivity(null, profile)]?.factor ?? 1.375

@@ -70,7 +70,7 @@ export default function MealSectionSheet({
                 />
                 <div className="row wrap gap8">
                   {QUICK_MEAL_NAMES.map((n) => (
-                    <button key={n} className={`chip ${name === n ? 'on' : ''}`} onClick={() => setName(n)} style={name === n ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}>
+                    <button key={n} className={`chip ${name === n ? 'on' : ''}`} onClick={() => setName(n)}>
                       {n}
                     </button>
                   ))}

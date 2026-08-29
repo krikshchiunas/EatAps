@@ -25,8 +25,12 @@ import { autoStandardMealId } from '../lib/meals.js'
 
 const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
 
+// Приветствие — первое подтверждение, что тон переключился: человек меняет
+// голос в настройках и сразу видит разницу, не отправив ни одного сообщения.
 const GREETING = {
   calm: 'Привет, я Carrot 🥕. Сфотографируйте тарелку или спросите что угодно про еду и ваши цели.',
+  buddy: 'Здоров, я Carrot 🥕. Кидай фото тарелки или спрашивай — разберёмся, чё там у тебя с едой.',
+  doctor: 'Здравствуйте. Я Carrot 🥕, ваш ассистент по питанию. Пришлите фото приёма пищи или задайте вопрос.',
   coach: 'Я Carrot 🥕, на связи. Кидайте фото еды или спрашивайте — разберём, что сегодня доедаем.',
   strict: 'Carrot на месте. Фото тарелки или вопрос — считаю по вашему дневнику, без скидок.',
   savage: 'Carrot тут. Ну что, показывай, что там сожрал. Или спрашивай, раз ещё не поздно.',
@@ -89,9 +93,17 @@ export default function AIHomeScreen({ onUpgrade }) {
       ...m,
       {
         role: 'assistant',
-        text: data.ask || data.reply,
+        // reply и ask — РАЗНЫЕ вещи: первое отвечает на сказанное, второе
+        // уточняет недостающее. Раньше здесь стояло `data.ask || data.reply`,
+        // и ответ молча пропадал каждый раз, когда ассистент заодно задавал
+        // вопрос: на «добавь бутерброд» человек видел голое «С чем именно?»
+        // вместо «Бутерброды очень разные. С чем именно?».
+        text: [data.reply, data.ask].filter(Boolean).join(' ') || data.reply || data.ask,
         cards: data.cards?.length ? data.cards : undefined,
         asking: !!data.ask,
+        // Ответ упёрся в потолок — показываем это, а не выдаём обрывок за
+        // законченную мысль.
+        truncated: !!data.truncated,
       },
     ])
     // Долгую память копим только на AI+ — на других тарифах сервер её и не присылает.
@@ -263,6 +275,11 @@ function Bubble({ msg, onAdd }) {
     <div className={`ai-bubble ${mine ? 'ai-bubble--me' : 'ai-bubble--ai'}`}>
       {msg.photo && <img className="ai-bubble__photo" src={msg.photo} alt="" />}
       {msg.text && <p className="ai-bubble__text">{msg.text}</p>}
+      {msg.truncated && (
+        <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
+          Ответ оборвался на середине — переспросите короче.
+        </p>
+      )}
       {msg.cards?.map((card, i) => (
         <MealCard
           key={i}

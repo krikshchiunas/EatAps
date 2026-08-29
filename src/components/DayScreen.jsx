@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
-import { targetsForDay, ACTIVITY_ORDER, ACTIVITY_DAY, dayWeight, hasDayActivity, effectiveActivity } from '../lib/body.js'
+import { targetsForDay, baselineTargetsForDay, profileScore, dayWeight, hasDayActivity, effectiveActivity } from '../lib/body.js'
 import { isLowLogged } from '../lib/stats.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { getMealSections, foodsForMeal, resolvedTime, newCustomSection } from '../lib/meals.js'
@@ -12,13 +12,12 @@ import CoachMark from './CoachMark.jsx'
 import Ring from './Ring.jsx'
 import MacroBar from './MacroBar.jsx'
 
-const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
 const EASING = 'cubic-bezier(0.32, 0.72, 0, 1)'
 
 export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, onOpenStats, clipboard, setClipboard }) {
   const store = useStore()
   const {
-    profile, days, dayOf, removeFood, editFood, toggleWellbeing, addFood,
+    profile, days, dayOf, removeFood, editFood, addFood,
     upsertMealSection, deleteMealSection, moveMealSection,
     setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
     repeatDay, repeatMeal,
@@ -53,14 +52,28 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
   const dateRef = useRef(date)
   dateRef.current = date
 
+  // Ширина — ЛЕЙАУТНАЯ (offsetWidth), а не из getBoundingClientRect: на входе
+  // экрана .screen проигрывает scale(0.97), и getBoundingClientRect вернул бы
+  // ширину с этим масштабом. useLayoutEffect выполняется как раз в этот момент,
+  // и трек встал бы на 3% мимо — ровно тот «съехавший» день, который потом
+  // никто не мог объяснить.
   const vw = () => viewportRef.current?.offsetWidth || window.innerWidth
   const base = () => -vw() // сдвиг трека, чтобы показать центральную страницу
+
+  // Положение покоя задаём ПРОЦЕНТАМИ, а не пикселями. Пиксельное смещение
+  // верно ровно для той ширины, при которой его посчитали: поворот экрана,
+  // split view, изменение размера окна, появление полосы прокрутки — и
+  // центральная страница уезжает вбок, а экран дня выглядит поехавшим.
+  // Проценты браузер пересчитывает сам при любой смене ширины, поэтому такой
+  // рассинхрон невозможен в принципе. Пиксели остаются только внутри жеста и
+  // доводки, где они и нужны.
+  const REST = 'translate3d(-100%,0,0)'
 
   // Ставим трек в центр без анимации — на маунте и после каждой смены даты
   // (бесшовный recenter: новая центральная страница = та, что доехала).
   useLayoutEffect(() => {
     const tr = trackRef.current
-    if (tr) tr.style.transform = `translate3d(${base()}px,0,0)`
+    if (tr) tr.style.transform = REST
   }, [date])
 
   const cancelAnim = () => { try { animRef.current?.cancel() } catch {} animRef.current = null }
@@ -70,7 +83,9 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     if (!tr) { onDone?.(); return }
     cancelAnim()
     const dist = Math.abs(to - from)
-    if (dist < 0.5) { tr.style.transform = `translate3d(${to}px,0,0)`; onDone?.(); return }
+    // Доехали — возвращаемся к процентному положению покоя, если это центр.
+    const land = () => { tr.style.transform = Math.abs(to - base()) < 0.5 ? REST : `translate3d(${to}px,0,0)` }
+    if (dist < 0.5) { land(); onDone?.(); return }
     const speed = Math.min(4, Math.max(0.9, Math.abs(vel)))
     const dur = Math.max(190, Math.min(430, dist / speed))
     animRef.current = tr.animate(
@@ -78,7 +93,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
       { duration: dur, easing: EASING, fill: 'forwards' },
     )
     animRef.current.onfinish = () => {
-      tr.style.transform = `translate3d(${to}px,0,0)`
+      land()
       cancelAnim()
       onDone?.()
     }
@@ -112,8 +127,10 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 
     const onStart = (e) => {
       if (animating.current) return
-      // Свайп строки приёма пищи имеет приоритет — не перехватываем.
-      if (e.target.closest?.('[data-swipeable]')) return
+      // Свайп строки приёма пищи и собственные горизонтальные жесты (ползунок
+      // активности) имеют приоритет — пейджер туда не лезет. Без исключения
+      // палец, ведущий ползунок влево/вправо, листал день вместо перетаскивания.
+      if (e.target.closest?.('[data-swipeable],[data-no-pager]')) return
       const t = e.touches[0]
       cancelAnim()
       gesture.current = {
@@ -201,7 +218,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
   }
 
   const bodyProps = {
-    profile, days, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
+    profile, days, dayOf, removeFood, addFood, moveMealSection,
     clipboard, setClipboard, onOpenAdd, onEditFood: setEditingFood, onEditSection: openEditSection,
     onCreateSection: openCreateSection, today,
     setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
@@ -213,24 +230,28 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     : false
 
   return (
-    <div className="screen">
-      {/* Шапка с датой — статична, не свайпается. Grid 1fr/auto/1fr держит дату
-          по центру независимо от ширины боковых групп (справа стрелка + статистика). */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', marginBottom: 20 }}>
-        <div style={{ justifySelf: 'start' }}>
+    <div className="screen day-screen">
+      {/* Шапка с датой — статична, не свайпается: лежит поверх пейджера
+          (position: absolute), поэтому при листании дней она остаётся на месте,
+          а градиентная плита с кольцом уезжает под ней. Место под шапку
+          зарезервировано верхним отступом самой плиты (см. index.css). */}
+      <div className="day-topbar">
+        {/* Листалка дня — одной группой: ‹ дата ›. Раньше стрелки стояли по
+            краям строки, и дата зажималась между ними и кнопками справа. */}
+        <div className="day-topbar__nav">
           <button className="iconbtn" onClick={() => go(-1)} aria-label="Предыдущий день">‹</button>
-        </div>
-        <button onClick={onOpenCalendar} aria-label="Открыть календарь" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-          <span className="row gap8" style={{ alignItems: 'center' }}>
-            <span style={{ fontSize: 18, fontWeight: 650, letterSpacing: '-0.3px' }}>{humanDay(date, today)}</span>
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-3)' }}>
-              <rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9h17M8 3v3M16 3v3" />
-            </svg>
-          </span>
-          <span style={{ fontSize: 12, color: 'var(--ink-3)', textTransform: 'capitalize' }}>{humanDow(date)}</span>
-        </button>
-        <div className="row gap8" style={{ justifySelf: 'end' }}>
+          <button className="day-topbar__date" onClick={onOpenCalendar} aria-label="Открыть календарь">
+            <span className="row gap8" style={{ alignItems: 'center' }}>
+              <span className="day-topbar__day">{humanDay(date, today)}</span>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="day-topbar__cal">
+                <rect x="3.5" y="4.5" width="17" height="16" rx="3" /><path d="M3.5 9h17M8 3v3M16 3v3" />
+              </svg>
+            </span>
+            <span className="day-topbar__dow">{humanDow(date)}</span>
+          </button>
           <button className="iconbtn" onClick={() => go(1)} aria-label="Следующий день" style={{ opacity: canNext ? 1 : 0.4 }} disabled={!canNext}>›</button>
+        </div>
+        <div className="row gap8">
           <button className="iconbtn" onClick={onOpenStats} aria-label="Статистика питания">
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 20V10M10 20V4M16 20v-7M4 20h16" />
@@ -304,7 +325,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 
 // ── Контент одного дня (переиспользуется тремя страницами пейджера) ────────────
 function DayBody({
-  date, interactive, profile, days, dayOf, removeFood, toggleWellbeing, addFood, moveMealSection,
+  date, interactive, profile, days, dayOf, removeFood, addFood, moveMealSection,
   clipboard, setClipboard, onOpenAdd, onEditFood, onEditSection, onCreateSection, today,
   setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
   repeatMeal, prevDate, onToast,
@@ -317,6 +338,9 @@ function DayBody({
   // этого дня. День на диване и день с тренировкой — разные цели по калориям
   // (см. lib/body.js). Без записей вес и активность берутся из профиля, как раньше.
   const t = useMemo(() => targetsForDay(days, date, profile) || profile?.targets || {}, [days, date, profile])
+  // Та же дата и тот же вес, но активность из анкеты — база для подписи
+  // «ползунок добавил/убрал N ккал».
+  const baseT = useMemo(() => baselineTargetsForDay(days, date, profile) || profile?.targets || {}, [days, date, profile])
   const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0)
   const calGoal = num(t.calories)
   const proteinGoal = num(t.protein)
@@ -336,19 +360,27 @@ function DayBody({
 
   return (
     <div className="day-body" style={interactive ? undefined : { pointerEvents: 'none' }}>
-      <div className="card" style={{ textAlign: 'center' }}>
-        <Ring value={totals.kcal} max={calGoal} size={196} stroke={16}>
+      {/* Кольцо и итоги дня лежат ВНУТРИ градиентной плиты и едут вместе с
+          пейджером: свайп перелистывает плиту целиком, а не только карточки под
+          ней. Раньше кольцо жило в белой карточке, наезжавшей на шапку снизу —
+          получалось два слоя вместо одного, и цифры дня оставались на месте. */}
+      <div className="day-hero">
+        <Ring
+          value={totals.kcal} max={calGoal} size={184} stroke={15}
+          trackColor="var(--hero-line)" progressColor="var(--ring-hero)"
+        >
           <div>
-            <div className="tabular" style={{ fontSize: 44, fontWeight: 700, lineHeight: 1 }}>{hasCalGoal ? Math.abs(remaining) : totals.kcal}</div>
-            <div className="muted" style={{ fontSize: 14, marginTop: 4 }}>{hasCalGoal ? (remaining >= 0 ? 'ккал осталось' : 'ккал перебор') : 'ккал съедено'}</div>
+            <div className="display day-hero__num">{Math.round(hasCalGoal ? Math.abs(remaining) : totals.kcal)}</div>
+            <div className="day-hero__cap">{hasCalGoal ? (remaining >= 0 ? 'ккал осталось' : 'ккал перебор') : 'ккал съедено'}</div>
           </div>
         </Ring>
-        <div className="row" style={{ justifyContent: 'center', gap: 20, marginTop: 18 }}>
-          <ChipStat label="Съедено" value={`${totals.kcal}`} />
-          <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch' }} />
-          <ChipStat label="Цель" value={hasCalGoal ? `${calGoal}` : '—'} />
-          <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch' }} />
-          <ChipStat label={remaining >= 0 ? 'Недобор' : 'Перебор'} value={hasCalGoal ? `${remaining >= 0 ? '' : '+'}${Math.abs(remaining)}` : '—'} accent={hasCalGoal && remaining < 0 ? 'var(--warn)' : 'var(--primary)'} />
+        {/* sumDay складывает дробные КБЖУ продуктов, и сумма приходит сырым
+            float'ом (116.69999999999999). В плитке на первом экране нужны целые
+            граммы — точность до десятых остаётся в карточках приёмов пищи. */}
+        <div className="day-hero__stats">
+          <HeroStat label="Белки" value={`${Math.round(totals.protein)}${proteinGoal > 0 ? `/${proteinGoal}` : ''}`} />
+          <HeroStat label="Углеводы" value={`${Math.round(totals.carbs)}${carbGoal > 0 ? `/${carbGoal}` : ''}`} />
+          <HeroStat label="Жиры" value={`${Math.round(totals.fat)}${fatGoal > 0 ? `/${fatGoal}` : ''}`} />
         </div>
       </div>
 
@@ -365,6 +397,8 @@ function DayBody({
         date={date}
         day={day}
         profile={profile}
+        targets={t}
+        baseTargets={baseT}
         calGoal={calGoal}
         setDayWeight={setDayWeight}
         setDayActivityScore={setDayActivityScore}
@@ -407,51 +441,40 @@ function DayBody({
 
       <div className="card" style={{ marginTop: 14 }}>
         <div className="row gap10" style={{ alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <MacroBar label="Белки" value={totals.protein} max={proteinGoal} />
-            <SubMetricRow
-              label="Белок выс. качества"
-              valueText={`${Math.round(advanced.qualityProtein)} г${advanced.qualityProteinShare != null ? ` · ${Math.round(advanced.qualityProteinShare * 100)}%` : ''}`}
-              sub={advanced.qualityProteinConfidence === 'none' ? 'нет данных' : undefined}
-              explain="Ориентировочная оценка качества источника белка (полноценность и усвояемость) — от 1 до 10 по типу продукта. Показан белок из продуктов с оценкой 7+ и его доля от общего белка. Оценка приблизительная, зависит от источника продукта — это не медицинский диагноз и не абсолютная оценка рациона."
-            />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <MacroBar label="Углеводы" value={totals.carbs} max={carbGoal} color="var(--accent)" />
-            <SubMetricRow
-              label="Сложные углеводы"
-              valueText={`${advanced.complexCarbConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.complexCarb)} г${totals.carbs > 0 ? ` · ${Math.round((advanced.complexCarb / totals.carbs) * 100)}%` : ''}`}
-              sub={advanced.complexCarbConfidence === 'none' ? 'нет данных' : undefined}
-              explain="Доля углеводов из круп, картофеля, бобовых и цельнозерновых продуктов — продуктовая классификация по типу продукта, а не медицинский показатель «полезных» углеводов. Сахар, сладости, десерты и напитки в неё не входят."
-            />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <MacroBar label="Жиры" value={totals.fat} max={fatGoal} color="var(--warn)" />
-            <SubMetricRow
-              label="Насыщ. жиры"
-              valueText={`${advanced.satFatConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.satFat)}${satFatMax > 0 ? `/${satFatMax}` : ''} г`}
-              sub={
-                advanced.satFatConfidence === 'none' ? 'нет данных' :
-                advanced.satFatConfidence === 'partial' ? 'неполные данные' :
-                satFatMax > 0 ? (advanced.satFat > satFatMax ? 'превышен ориентир' : 'в пределах ориентира') : undefined
-              }
-              tone={satFatMax > 0 && advanced.satFat > satFatMax ? 'var(--warn)' : undefined}
-              explain="Насыщенные жиры берутся из реальных данных продукта, если они указаны, иначе оцениваются по типу продукта (мясо, молочное, кондитерка и т.п.) — без точности до грамма. Дневной ориентир — не более 10% калорий (рекомендация ВОЗ), считается отдельно от общей нормы жиров."
-            />
-          </div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Белки" value={totals.protein} max={proteinGoal} /></div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Углеводы" value={totals.carbs} max={carbGoal} color="var(--accent)" /></div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Жиры" value={totals.fat} max={fatGoal} color="var(--warn)" /></div>
         </div>
+
+        {/* Подробности качества — отдельными строками во всю ширину, а не третью
+            колонки: в колонке 91 px «Сложные углеводы» и «Усвояемый белок» не
+            помещались никогда и всегда стояли с многоточием. */}
+        <div className="divider" />
+        <SubMetricRow
+          label="Усвояемый белок"
+          valueText={`${Math.round(advanced.qualityProtein)} г${advanced.qualityProteinShare != null ? ` · ${Math.round(advanced.qualityProteinShare * 100)}%` : ''}`}
+          sub={advanced.qualityProteinConfidence === 'none' ? 'нет данных' : advanced.qualityProteinConfidence === 'partial' ? 'часть продуктов не опознана' : undefined}
+          explain="Сколько съеденного белка организм действительно может пустить на строительство мышц и тканей. Считается по DIAAS — международному показателю качества белка (FAO): у яиц, молочного, мяса и рыбы засчитывается почти всё, у круп и бобовых — половина-две трети, у коллагена и желатина — ничего, в них нет триптофана. Значения справочные, по типу продукта, а не измерение конкретной пачки — это ориентир, а не медицинский диагноз."
+        />
+        <SubMetricRow
+          label="Сложные углеводы"
+          valueText={`${advanced.complexCarbConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.complexCarb)} г${totals.carbs > 0 ? ` · ${Math.round((advanced.complexCarb / totals.carbs) * 100)}%` : ''}`}
+          sub={advanced.complexCarbConfidence === 'none' ? 'нет данных' : undefined}
+          explain="Доля углеводов из круп, картофеля, бобовых и цельнозерновых продуктов — продуктовая классификация по типу продукта, а не медицинский показатель «полезных» углеводов. Сахар, сладости, десерты и напитки в неё не входят."
+        />
+        <SubMetricRow
+          label="Насыщенные жиры"
+          valueText={`${advanced.satFatConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.satFat)}${satFatMax > 0 ? `/${satFatMax}` : ''} г`}
+          sub={
+            advanced.satFatConfidence === 'none' ? 'нет данных' :
+            advanced.satFatConfidence === 'partial' ? 'неполные данные' :
+            satFatMax > 0 ? (advanced.satFat > satFatMax ? 'превышен ориентир' : 'в пределах ориентира') : undefined
+          }
+          tone={satFatMax > 0 && advanced.satFat > satFatMax ? 'var(--warn)' : undefined}
+          explain="Насыщенные жиры берутся из реальных данных продукта, если они указаны, иначе оцениваются по типу продукта (мясо, молочное, кондитерка и т.п.) — без точности до грамма. Дневной ориентир — не более 10% калорий (рекомендация ВОЗ), считается отдельно от общей нормы жиров."
+        />
       </div>
 
-      <div className="card" style={{ marginTop: 14 }}>
-        <div className="h2" style={{ fontSize: 17, marginBottom: 14 }}>Самочувствие</div>
-        <div className="row wrap gap8">
-          {WELLBEING.map((w) => (
-            <button key={w} className={`chip ${day.wellbeing.includes(w) ? 'on' : ''}`} onClick={() => toggleWellbeing(date, w)} style={day.wellbeing.includes(w) ? { background: 'var(--primary-weak)', color: 'var(--primary-strong)', borderColor: 'var(--primary)' } : undefined}>
-              {w}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
@@ -478,7 +501,7 @@ function MealSectionCard({
             </div>
             {foods.length > 0 && (
               <div className="tabular" style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 1 }}>
-                {totals.kcal} ккал · Б{totals.protein} Ж{totals.fat} У{totals.carbs}
+                {Math.round(totals.kcal)} ккал · Б{totals.protein} Ж{totals.fat} У{totals.carbs}
               </div>
             )}
           </div>
@@ -534,21 +557,33 @@ function MealSectionCard({
 function SubMetricRow({ label, valueText, sub, tone, explain }) {
   const [open, setOpen] = useState(false)
   return (
-    <div style={{ marginTop: 10, minWidth: 0 }}>
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', textAlign: 'left' }}>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
-        <div className="tabular" style={{ fontSize: 11.5, color: tone || 'var(--ink-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{valueText}</div>
-        {sub && <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
+    <div style={{ minWidth: 0 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 0' }}
+      >
+        <span style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, minWidth: 0, flex: 1 }}>
+          {label}
+          <span aria-hidden="true" style={{ color: 'var(--ink-3)', marginLeft: 5, fontSize: 11 }}>{open ? '▴' : '▾'}</span>
+        </span>
+        <span style={{ flex: '0 0 auto', textAlign: 'right' }}>
+          <span className="tabular" style={{ fontSize: 13.5, color: tone || 'var(--ink)', fontWeight: 600 }}>{valueText}</span>
+          {sub && <span style={{ display: 'block', fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{sub}</span>}
+        </span>
       </button>
-      {open && <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6, lineHeight: 1.4 }}>{explain}</p>}
+      {open && <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px', lineHeight: 1.45 }}>{explain}</p>}
     </div>
   )
 }
 
+// Подписи короткие намеренно: карточка уже называется «Качество углеводов», и
+// полные формулировки («Углеводы можно улучшить») вместе с заголовком не
+// помещались в 375 px — бейдж вылезал за край карточки вместе со стрелкой.
 const GRADE = {
-  good: { color: 'var(--good)', bg: 'var(--primary-weak)', emoji: '🟢', title: 'Качественные углеводы' },
-  ok: { color: 'var(--warn)', bg: 'var(--accent-weak)', emoji: '🟡', title: 'Углеводы можно улучшить' },
-  bad: { color: 'var(--danger)', bg: 'rgba(192,104,78,0.12)', emoji: '🔴', title: 'Много быстрых сахаров' },
+  good: { color: 'var(--good)', bg: 'var(--primary-weak)', emoji: '🟢', title: 'Хорошо' },
+  ok: { color: 'var(--warn)', bg: 'var(--accent-weak)', emoji: '🟡', title: 'Можно лучше' },
+  bad: { color: 'var(--danger)', bg: 'rgba(192,104,78,0.12)', emoji: '🔴', title: 'Много сахара' },
 }
 
 function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal }) {
@@ -566,12 +601,19 @@ function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal
 
   return (
     <div className="card" style={{ marginTop: 14 }}>
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, textAlign: 'left' }}>
-        <span className="h2" style={{ fontSize: 17 }}>Качество углеводов</span>
-        <span className="row gap8" style={{ alignItems: 'center', flex: '0 0 auto' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: g.color, background: g.bg, padding: '4px 12px', borderRadius: 999, whiteSpace: 'nowrap' }}>{g.emoji} {g.title}</span>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}><polyline points="6 9 12 15 18 9" /></svg>
+      {/* Заголовок и оценка лежат в ОДНОЙ переносимой группе, а стрелка всегда
+          прижата к правому краю. Помещаются — строка одна; не помещаются (длинная
+          оценка, крупный системный шрифт, узкий экран) — пилюля спокойно уезжает
+          на вторую строку. Обрезать заголовок многоточием тут нечестно: это
+          единственное, что объясняет, о чём карточка. */}
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}>
+        <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
+          <span className="h2" style={{ fontSize: 17 }}>Качество углеводов</span>
+          {/* Смысл несёт сам текст пилюли — цвет остаётся усилением, а не
+              единственным носителем информации. */}
+          <span style={{ fontSize: 13, fontWeight: 600, color: g.color, background: g.bg, padding: '4px 12px', borderRadius: 999, whiteSpace: 'nowrap' }}>{g.title}</span>
         </span>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}><polyline points="6 9 12 15 18 9" /></svg>
       </button>
 
       {open && (
@@ -633,44 +675,29 @@ function QualityBar({ label, value, max, invert, hint }) {
 // лежит на кровати, другой много ходит — и норма у этих дней разная. Здесь он
 // отмечает то и другое за пару касаний, а кольцо калорий выше сразу
 // пересчитывается (см. targetsForDay в lib/body.js).
-const ACTIVITY_HINT = (score) => {
-  const n = Math.round(score)
-  if (n <= 0)  return 'Постельный режим — весь день лёжа, почти не вставал'
-  if (n <= 12) return 'Минимум движения — диван, кресло, почти без ходьбы'
-  if (n <= 24) return 'Малоподвижно — работа за столом, редкие выходы'
-  if (n <= 36) return 'Немного — обычный день, выход до магазина'
-  if (n <= 48) return 'Умеренно — нормальный день, лёгкие дела по дому'
-  if (n <= 60) return 'Активный день — хорошая прогулка или лёгкая тренировка'
-  if (n <= 72) return 'Заметная нагрузка — спортзал, бег или длительная ходьба'
-  if (n <= 84) return 'Интенсивно — серьёзная тренировка или весь день на ногах'
-  if (n <= 92) return 'Очень активно — тяжёлые нагрузки или физический труд'
-  if (n <= 97) return 'Сверхактивно — несколько тренировок или ударный день'
-  return 'Максимум — профессиональный уровень нагрузки'
+// Пять уровней вместо непрерывного ползунка: балл — это якорь для TDEE
+// (scoreToActivityKey в body.js), а не то, что человек выбирает напрямую.
+const ACTIVITY_LEVELS = [
+  { score: 5,  emoji: '🛌', label: 'Постельный режим', desc: 'Весь день лёжа, почти не вставал' },
+  { score: 20, emoji: '🛋️', label: 'Минимум движения', desc: 'Диван, кресло, почти без ходьбы' },
+  { score: 40, emoji: '🚶', label: 'Малоподвижно', desc: 'Обычный день, лёгкие дела по дому' },
+  { score: 65, emoji: '🏃', label: 'Активно', desc: 'Хорошая прогулка или тренировка средней тяжести' },
+  { score: 95, emoji: '🔥', label: 'Максимум', desc: 'Профессиональный уровень нагрузки' },
+]
+
+function closestActivityLevel(score) {
+  return ACTIVITY_LEVELS.reduce((best, lvl) => (
+    Math.abs(lvl.score - score) < Math.abs(best.score - score) ? lvl : best
+  ))
 }
 
-function scoreEmoji(score) {
-  const n = Math.round(score)
-  if (n <= 24) return '🛋️'
-  if (n <= 49) return '🚶'
-  if (n <= 74) return '🏃'
-  return '🔥'
-}
-
-function profileDefaultScore(profile) {
-  const key = profile?.activity
-  if (key === 'sedentary') return 12
-  if (key === 'moderate')  return 62
-  if (key === 'high')      return 87
-  return 37 // light
-}
-
-function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivityScore }) {
+function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWeight, setDayActivityScore }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const weight = dayWeight(day)
 
   const hasScore = day.activityScore != null && Number.isFinite(Number(day.activityScore))
-  const score = hasScore ? Number(day.activityScore) : profileDefaultScore(profile)
+  const score = hasScore ? Number(day.activityScore) : profileScore(profile)
   const isDefault = !hasScore
 
   useEffect(() => { setDraft(weight != null ? String(weight) : '') }, [date, weight])
@@ -683,10 +710,23 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivitySco
     setDayWeight(date, n)
   }
 
-  const pct = score
-  const trackStyle = {
-    background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${pct}%, var(--border) ${pct}%, var(--border) 100%)`,
-  }
+  const level = closestActivityLevel(score)
+
+  // Насколько балл сдвинул цель относительно активности из анкеты — это и есть
+  // ответ на «ползунок вообще на что-то влияет?».
+  const goal = useMemo(() => {
+    const n = (x) => (Number.isFinite(Number(x)) ? Math.round(Number(x)) : null)
+    const calories = n(targets?.calories)
+    if (!calories || calories <= 0) return null
+    const baseCal = n(baseTargets?.calories)
+    return {
+      calories,
+      protein: n(targets?.protein) ?? 0,
+      fat: n(targets?.fat) ?? 0,
+      carbs: n(targets?.carbs) ?? 0,
+      delta: baseCal ? calories - baseCal : 0,
+    }
+  }, [targets, baseTargets])
 
   return (
     <div className="card" style={{ marginTop: 14 }}>
@@ -700,7 +740,7 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivitySco
           <span className="tabular" style={{ fontSize: 13, color: weight != null ? 'var(--ink-2)' : 'var(--ink-3)' }}>
             {weight != null ? `${weight} кг` : 'вес не указан'}
           </span>
-          <span style={{ fontSize: 15 }}>{scoreEmoji(score)}</span>
+          <span style={{ fontSize: 15 }}>{level.emoji}</span>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}>
             <polyline points="6 9 12 15 18 9" />
           </svg>
@@ -729,30 +769,45 @@ function BodyCard({ date, day, profile, calGoal, setDayWeight, setDayActivitySco
             </p>
           </div>
 
-          <div>
-            <div className="row between" style={{ alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ fontSize: 14, fontWeight: 550 }}>Активность дня</div>
-              <span className="tabular" style={{ fontSize: 24, fontWeight: 700, color: 'var(--primary)', letterSpacing: '-0.5px', lineHeight: 1 }}>
-                {Math.round(score)}
-              </span>
+          <div className="activity-zone">
+            <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 12 }}>Активность дня</div>
+
+            <div className="row wrap gap8">
+              {ACTIVITY_LEVELS.map((lvl) => (
+                <button
+                  key={lvl.label}
+                  className={`chip ${level === lvl ? 'on' : ''}`}
+                  onClick={() => setDayActivityScore(date, lvl.score)}
+                >
+                  {lvl.emoji} {lvl.label}
+                </button>
+              ))}
             </div>
 
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              value={Math.round(score)}
-              onChange={(e) => setDayActivityScore(date, Number(e.target.value))}
-              className="activity-slider"
-              style={trackStyle}
-              aria-label="Уровень активности дня"
-            />
-
             <p style={{ fontSize: 12, color: isDefault ? 'var(--ink-3)' : 'var(--ink-2)', marginTop: 10, lineHeight: 1.5, minHeight: 32 }}>
-              {ACTIVITY_HINT(score)}
-              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — из анкеты, передвиньте для изменения</span>}
+              {level.desc}
+              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — из анкеты, нажмите, чтобы изменить</span>}
             </p>
+
+            {goal && (
+              <div className="activity-goal">
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Цель на этот день</div>
+                <div className="row" style={{ gap: 14, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                  <span className="tabular" style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.4px' }}>
+                    {goal.calories}
+                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-3)' }}> ккал</span>
+                  </span>
+                  <span className="tabular" style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+                    Б {goal.protein} · Ж {goal.fat} · У {goal.carbs} г
+                  </span>
+                </div>
+                <div className="activity-goal__delta" style={{ color: goal.delta === 0 ? 'var(--ink-3)' : 'var(--primary)' }}>
+                  {goal.delta === 0
+                    ? 'Столько же, сколько по активности из анкеты'
+                    : `${goal.delta > 0 ? '+' : '−'}${Math.abs(goal.delta)} ккал к цели по анкете — активность дня пересчитала КБЖУ`}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -809,11 +864,13 @@ function StatsFlagBanner({ date, day, profile, calGoal, setDayStatsExcluded, con
   return null
 }
 
-function ChipStat({ label, value, accent }) {
+// Ячейка итогов внутри градиентной плиты. Цвета не задаются здесь: текст
+// наследует --on-hero от плиты, разделители рисует .day-hero__stats.
+function HeroStat({ label, value }) {
   return (
-    <div style={{ textAlign: 'center' }}>
-      <div className="tabular" style={{ fontSize: 18, fontWeight: 680, color: accent || 'var(--ink)' }}>{value}</div>
-      <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{label}</div>
+    <div>
+      <div className="display day-hero__val">{value}</div>
+      <div className="day-hero__lab">{label}</div>
     </div>
   )
 }
@@ -896,19 +953,19 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit }) {
   return (
     <div style={{ position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <button style={{ color: '#fff', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { onEdit(m); reset() }}>
+        <button style={{ color: 'var(--on-primary)', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { onEdit(m); reset() }}>
           <span style={{ fontSize: 20 }}>✏️</span><span style={{ fontSize: 12, fontWeight: 600 }}>Изменить</span>
         </button>
       </div>
       <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <button style={{ color: '#fff', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { removeFood(date, m.id); reset() }}>
+        <button style={{ color: 'var(--on-danger)', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { removeFood(date, m.id); reset() }}>
           <span style={{ fontSize: 20 }}>🗑️</span><span style={{ fontSize: 12, fontWeight: 600 }}>Удалить</span>
         </button>
       </div>
       <div
         ref={contentRef}
         data-swipeable="true"
-        style={{ transform: `translateX(${offsetX}px)`, transition: dragging ? 'none' : 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)', touchAction: 'pan-y', userSelect: 'none', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
+        style={{ transform: `translateX(${offsetX}px)`, transition: dragging ? 'none' : 'transform 0.25s cubic-bezier(0.25,0.46,0.45,0.94)', touchAction: 'pan-y', userSelect: 'none', background: 'var(--surface-solid)', borderBottom: '1px solid var(--border)' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
