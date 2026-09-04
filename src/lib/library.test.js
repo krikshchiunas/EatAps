@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  foodSnapshot, favoriteKey, isFavorite, toggleFavorite, MAX_FAVORITES,
+  foodSnapshot, favoriteKey, toggleFavorite, MAX_FAVORITES,
   makeTemplate, templateTotals, templateToEntries,
   makeRecipe, recipeTotals, recipePerServing, recipeToFood,
   toPer100, PORTION_MIN_USES,
@@ -39,8 +39,10 @@ test('toggleFavorite закрепляет и открепляет', () => {
   let favs = []
   favs = toggleFavorite(favs, food('Овсянка'))
   assert.equal(favs.length, 1)
-  assert.equal(isFavorite(favs, food('Овсянка')), true)
-  assert.equal(isFavorite(favs, food('овсянка')), true, 'регистр не должен влиять')
+  // Проверяем через ключ — так же, как это делает экран добавления (Set ключей).
+  const has = (list, f) => list.some((x) => favoriteKey(x) === favoriteKey(f))
+  assert.equal(has(favs, food('Овсянка')), true)
+  assert.equal(has(favs, food('овсянка')), true, 'регистр не должен влиять')
 
   favs = toggleFavorite(favs, food('Овсянка'))
   assert.equal(favs.length, 0)
