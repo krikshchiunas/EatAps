@@ -5,3 +5,18 @@
 export function normalizeName(s) {
   return (s || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim()
 }
+
+
+// Русское склонение по числу: plural(2, 'продукт', 'продукта', 'продуктов').
+//
+// Жила тремя одинаковыми копиями в DayScreen, AddMealSheet и StatsScreen. Три
+// копии одного правила — это три места, где его однажды поправят по-разному;
+// а поправить захочется, потому что правило неочевидное (11 — «продуктов», а
+// 21 — «продукт»). Дробные числа сюда не приходят: их форму знает amountLabel.
+export function plural(n, one, few, many) {
+  const m10 = n % 10
+  const m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few
+  return many
+}

@@ -1,3 +1,5 @@
+import { macroLabel, amountLabel } from '../lib/foods.js'
+import { plural } from '../lib/text.js'
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
@@ -6,7 +8,13 @@ import { isLowLogged } from '../lib/stats.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { getMealSections, foodsForMeal, resolvedTime, newCustomSection } from '../lib/meals.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import SupplementsCard from './SupplementsCard.jsx'
+import SupplementSheet from './SupplementSheet.jsx'
+import MicroGoalSheet from './MicroGoalSheet.jsx'
+import { buildMicroSummary } from '../lib/microSummary.js'
+import { stackMicroKeys } from '../lib/suppStack.js'
 import MealSectionSheet from './MealSectionSheet.jsx'
+import SaveTemplateSheet from './SaveTemplateSheet.jsx'
 import ShareCardSheet from './ShareCardSheet.jsx'
 import CoachMark from './CoachMark.jsx'
 import Ring from './Ring.jsx'
@@ -20,15 +28,35 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     profile, days, dayOf, removeFood, editFood, addFood,
     upsertMealSection, deleteMealSection, moveMealSection,
     setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
-    repeatDay, repeatMeal,
+    repeatDay, repeatMeal, templates, saveTemplate,
+    supplements, microGoals, addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, setMicroGoal,
   } = store
   const [editingFood, setEditingFood] = useState(null)
   const [sectionSheet, setSectionSheet] = useState(null) // null | { mode, section }
   const [dayMenuOpen, setDayMenuOpen] = useState(false)
+  const [saveTpl, setSaveTpl] = useState(null) // null | { section, foods }
+  const openSaveTemplate = (section, foods) => setSaveTpl({ section, foods })
   const [toast, setToast] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const [suppOpen, setSuppOpen] = useState(false)
+  const [goalKey, setGoalKey] = useState(null)
   const today = keyOf()
   const day = dayOf(date)
+
+  // Свод для листа добавок считаем здесь, а не внутри листа: лист открывается
+  // поверх дня и обязан знать, сколько чего УЖЕ набрано, — без этого прикидка
+  // «станет за сегодня» показывала бы приём в пустоту.
+  //
+  // Но только пока лист открыт. Свод стоит около миллисекунды на насыщенном
+  // дне, и считать его на каждый рендер экрана дня (а он перерисовывается от
+  // любого касания) ради шторки, которая почти всегда закрыта, незачем.
+  const microSummary = useMemo(() => (suppOpen ? buildMicroSummary({
+    meals: day.meals,
+    supps: day.supps,
+    profile,
+    goals: microGoals,
+    stackKeys: stackMicroKeys(supplements),
+  }) : null), [suppOpen, day.meals, day.supps, profile, microGoals, supplements])
 
   const prevDate = addDays(date, -1)
   const nextDate = addDays(date, 1)
@@ -222,7 +250,9 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     clipboard, setClipboard, onOpenAdd, onEditFood: setEditingFood, onEditSection: openEditSection,
     onCreateSection: openCreateSection, today,
     setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
-    repeatMeal, prevDate, onToast: setToast,
+    repeatMeal, prevDate, onToast: setToast, onSaveTemplate: openSaveTemplate,
+    supplements, microGoals, addSupp, removeSupp, editSupp, saveStackItem, removeStackItem,
+    onOpenSupp: () => setSuppOpen(true), onOpenGoal: setGoalKey,
   }
 
   const sheetHasFoods = sectionSheet?.section
@@ -240,7 +270,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
             краям строки, и дата зажималась между ними и кнопками справа. */}
         <div className="day-topbar__nav">
           <button className="iconbtn" onClick={() => go(-1)} aria-label="Предыдущий день">‹</button>
-          <button className="day-topbar__date" onClick={onOpenCalendar} aria-label="Открыть календарь">
+          <button className="day-topbar__date tap44" onClick={onOpenCalendar} aria-label="Открыть календарь">
             <span className="row gap8" style={{ alignItems: 'center' }}>
               <span className="day-topbar__day">{humanDay(date, today)}</span>
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="day-topbar__cal">
@@ -292,6 +322,33 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
         </div>
       </div>
 
+      {suppOpen && (
+        <SupplementSheet
+          summary={microSummary}
+          onAdd={(entry) => { addSupp(date, entry); setToast(`${entry.name} записана`) }}
+          // Ответ стека важнее подтверждения записи и поэтому перекрывает его:
+          // «записана» человек и так видит в списке, а вот молчаливый отказ
+          // добавить в стек (список полон) не виден ниоткуда. Раньше результат
+          // здесь просто выбрасывался, и добавка тихо не попадала в стек.
+          onPin={(item) => {
+            if (!item) return
+            const saved = saveStackItem(item)
+            setToast(saved ? `«${item.name}» в вашем стеке` : 'В стеке уже 40 добавок — уберите лишние')
+          }}
+          onClose={() => setSuppOpen(false)}
+        />
+      )}
+
+      {goalKey && (
+        <MicroGoalSheet
+          microKey={goalKey}
+          profile={profile}
+          current={microGoals?.[goalKey] ?? null}
+          onSave={(key, value) => setMicroGoal(key, value)}
+          onClose={() => setGoalKey(null)}
+        />
+      )}
+
       {editingFood && (
         <EditFoodSheet
           food={editingFood}
@@ -304,7 +361,23 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 
       {shareOpen && <ShareCardSheet date={date} onClose={() => setShareOpen(false)} />}
 
-      <CoachMark facts={tourFacts} paused={Boolean(shareOpen || sectionSheet || editingFood || dayMenuOpen)} />
+      {/* Листы подсказка распознаёт сама (useOverlayOpen), перечислять их тут
+          не нужно. Остаётся только то, что листом не является: выпадающее меню
+          дня. Совет, перекрывающий действие, — это помеха. */}
+      <CoachMark facts={tourFacts} paused={dayMenuOpen} />
+
+      {saveTpl && (
+        <SaveTemplateSheet
+          section={saveTpl.section}
+          foods={saveTpl.foods}
+          existing={templates}
+          onSave={(tpl, updated) => {
+            saveTemplate(tpl)
+            setToast(updated ? `«${tpl.name}» обновлено` : `«${tpl.name}» сохранено в блюда`)
+          }}
+          onClose={() => setSaveTpl(null)}
+        />
+      )}
 
       {sectionSheet && (
         <MealSectionSheet
@@ -328,7 +401,8 @@ function DayBody({
   date, interactive, profile, days, dayOf, removeFood, addFood, moveMealSection,
   clipboard, setClipboard, onOpenAdd, onEditFood, onEditSection, onCreateSection, today,
   setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
-  repeatMeal, prevDate, onToast,
+  repeatMeal, prevDate, onToast, onSaveTemplate,
+  supplements, microGoals, addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, onOpenSupp, onOpenGoal,
 }) {
   const day = dayOf(date)
   const prevDay = dayOf(prevDate)
@@ -432,6 +506,7 @@ function DayBody({
           prevDate={prevDate}
           prevCount={foodsForMeal(prevDay, section.id).length}
           onToast={onToast}
+          onSaveTemplate={onSaveTemplate}
         />
       ))}
 
@@ -475,6 +550,25 @@ function DayBody({
         />
       </div>
 
+      {/* Добавки и микронутриенты — самым низом дня. Выше них ничего не
+          двигаем: экран дня остаётся про еду, а витамины человек смотрит
+          отдельным заходом и по своему поводу. */}
+      <SupplementsCard
+        date={date}
+        day={day}
+        profile={profile}
+        supplements={supplements}
+        microGoals={microGoals}
+        addSupp={addSupp}
+        removeSupp={removeSupp}
+        editSupp={editSupp}
+        saveStackItem={saveStackItem}
+        removeStackItem={removeStackItem}
+        onOpenAdd={onOpenSupp}
+        onOpenGoal={onOpenGoal}
+        onToast={onToast}
+      />
+
     </div>
   )
 }
@@ -483,7 +577,7 @@ function DayBody({
 function MealSectionCard({
   date, section, foods, clipboard, setClipboard, addFood, removeFood, moveMealSection,
   onOpenAdd, onEditFood, onEditSection, canMoveUp, canMoveDown,
-  repeatMeal, prevDate, prevCount, onToast,
+  repeatMeal, prevDate, prevCount, onToast, onSaveTemplate,
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const totals = sumDay(foods)
@@ -507,7 +601,7 @@ function MealSectionCard({
           </div>
         </div>
         <div style={{ position: 'relative', flex: '0 0 auto' }}>
-          <button className="iconbtn" style={{ width: 32, height: 32 }} onClick={() => setMenuOpen((o) => !o)} aria-label="Действия с приёмом">⋯</button>
+          <button className="iconbtn tap44" style={{ width: 32, height: 32 }} onClick={() => setMenuOpen((o) => !o)} aria-label="Действия с приёмом">⋯</button>
           {menuOpen && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 19 }} onClick={() => setMenuOpen(false)} />
@@ -522,6 +616,11 @@ function MealSectionCard({
                     onToast?.(`${section.label} повторён: ${n} ${plural(n, 'продукт', 'продукта', 'продуктов')}`)
                   }}>
                     ♻️ Повторить вчерашний
+                  </button>
+                )}
+                {foods.length > 0 && (
+                  <button onClick={() => { onSaveTemplate(section, foods); setMenuOpen(false) }}>
+                    💾 Сохранить как блюдо
                   </button>
                 )}
                 {canMoveUp && <button onClick={() => { moveMealSection(date, section.id, -1); setMenuOpen(false) }}>⬆️ Выше</button>}
@@ -975,7 +1074,7 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit }) {
           <span className="meal-emoji">{m.emoji || '🍽️'}</span>
           <div style={{ flex: 1 }}>
             <div className="meal-name">{m.name}</div>
-            <div className="meal-meta">{m.grams ? `${m.grams} ${m.unit || 'г'} · ` : ''}Б{m.protein} У{m.carbs} Ж{m.fat}</div>
+            <div className="meal-meta">{m.grams ? `${amountLabel(m.grams, m.unit || 'г')} · ` : ''}{macroLabel(m)}</div>
           </div>
           <div className="tabular" style={{ fontWeight: 650 }}>{m.kcal}</div>
         </div>
@@ -1025,13 +1124,6 @@ function EditFoodSheet({ food, onSave, onClose }) {
 }
 
 // Русские окончания для счётных подписей («1 продукт / 2 продукта / 5 продуктов»).
-function plural(n, one, few, many) {
-  const m10 = n % 10
-  const m100 = n % 100
-  if (m10 === 1 && m100 !== 11) return one
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few
-  return many
-}
 
 // Короткое подтверждение действия. Нужно именно потому, что «повторить день»
 // добавляет продукты ВНИЗ списка, за пределами экрана: без ответа кажется,

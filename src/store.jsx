@@ -13,9 +13,13 @@ import { newId } from './lib/uuid.js'
 import {
   emptyMeta, blankDay, pickSyncable, normalizeState, mergeState, sameSyncable, clearedState,
   addTombstone, setDayFieldTs, setPrefTs,
-  tombMeal, tombSection, tombCustomFood, tombCustomIngredient,
+  tombMeal, tombSection, tombCustomFood, tombCustomIngredient, tombFavorite,
+  tombTemplate, tombRecipe, tombSupp, tombSupplement, recentKey,
 } from './lib/syncModel.js'
 import { createSyncEngine, SYNC } from './lib/syncEngine.js'
+import { buildFoodMemory, favoriteKey, foodSnapshot, MAX_FAVORITES } from './lib/library.js'
+import { sanitizeMicroGoal } from './lib/micronutrients.js'
+import { MAX_STACK, findStackSlot, normalizeSuppEntry, normalizeStackItem } from './lib/suppStack.js'
 import { PHASE, authReducer, initialAuthState, isBooting, isSignedIn, canSync } from './lib/authState.js'
 import { GUEST, clearCache, clockStorage, migrateLegacyCache, readCache, writeCache } from './lib/localCache.js'
 import { normalizeError } from './lib/authErrors.js'
@@ -37,6 +41,10 @@ const empty = {
   days: {},
   customFoods: [],
   customIngredients: [],
+  favorites: [],
+  templates: [],
+  recipes: [],
+  supplements: [],
   recents: [],
   prefs: {},
   meta: emptyMeta(),
@@ -498,6 +506,8 @@ export function StoreProvider({ children }) {
     })
   }, [])
 
+  // Возвращает id созданной записи: по нему «Отменить» убирает ровно то, что
+  // только что добавили, а не последнюю запись дня (её мог создать кто-то ещё).
   const addFood = useCallback((date, food) => {
     const ts = clock.tick()
     const id = newId()
@@ -516,11 +526,16 @@ export function StoreProvider({ children }) {
         carbs: food.carbs,
         fat: food.fat,
       }
-      const prev = (s.recents || []).find((r) => r.name === food.name)
-      const rest = (s.recents || []).filter((r) => r.name !== food.name)
+      // Ключ — имя И единица, как в syncModel.recentKey. Раньше сравнивали по
+      // точному имени: «Банан» и «банан» становились двумя строками, а при
+      // нормализации перед отправкой одна из них молча исчезала вместе со счётчиком.
+      const key = recentKey(snap)
+      const prev = (s.recents || []).find((r) => recentKey(r) === key)
+      const rest = (s.recents || []).filter((r) => recentKey(r) !== key)
       const recents = [{ ...snap, count: (prev?.count || 0) + 1, ts: Date.now() }, ...rest].slice(0, 40)
       return { ...s, days, recents }
     })
+    return id
   }, [])
 
   // Пакетное добавление продуктов. Одним setState и одной меткой времени:
@@ -548,8 +563,9 @@ export function StoreProvider({ children }) {
           carbs: food.carbs,
           fat: food.fat,
         }
-        const prev = recents.find((r) => r.name === food.name)
-        recents = [{ ...snap, count: (prev?.count || 0) + 1, ts: Date.now() }, ...recents.filter((r) => r.name !== food.name)]
+        const key = recentKey(snap)
+        const prev = recents.find((r) => recentKey(r) === key)
+        recents = [{ ...snap, count: (prev?.count || 0) + 1, ts: Date.now() }, ...recents.filter((r) => recentKey(r) !== key)]
       }
       return { ...s, days, recents: recents.slice(0, 40) }
     })
@@ -750,6 +766,206 @@ export function StoreProvider({ children }) {
     }))
   }, [])
 
+  // ── Избранное ───────────────────────────────────────────────────────────────
+  // Явный выбор человека, в отличие от вычисляемых «частого» и «недавнего».
+  // Сущность с id и меткой — сливается между устройствами теми же правилами,
+  // что свои продукты, и удаление оставляет тумбстоун (иначе снятая на телефоне
+  // звёздочка вернулась бы с ноутбука).
+  // Решение «добавляем или убираем» принимается ДО setState, по актуальному
+  // состоянию из stateRef, а сам обновляющий колбэк остаётся чистым. Писать
+  // результат из колбэка нельзя: React вправе вызвать его повторно (в StrictMode
+  // делает это всегда), и наружу уехал бы ответ от лишнего прогона.
+  const toggleFavorite = useCallback((food) => {
+    const snap = foodSnapshot(food)
+    if (!snap) return false
+    const key = favoriteKey(snap)
+    const existing = (stateRef.current.favorites || []).find((f) => favoriteKey(f) === key)
+    const ts = clock.tick()
+
+    if (existing) {
+      setState((s) => ({
+        ...s,
+        favorites: (s.favorites || []).filter((f) => favoriteKey(f) !== key),
+        meta: addTombstone(s.meta, tombFavorite(existing.id), ts),
+      }))
+      return 'removed'
+    }
+
+    // Список полон — не добавляем ВООБЩЕ ничего и говорим об этом.
+    //
+    // Раньше здесь стоял .slice(0, MAX_FAVORITES): самое старое избранное молча
+    // исчезало. Это плохо вдвойне. Во-первых, человек закреплял продукт руками,
+    // и терять такое без единого слова нельзя. Во-вторых, вытеснение проходило
+    // БЕЗ тумбстоуна — на другом устройстве запись оставалась живой и при
+    // ближайшей синхронизации возвращалась обратно. То есть предел работал
+    // только до следующего слияния, а потом список молча его превышал.
+    if ((stateRef.current.favorites || []).length >= MAX_FAVORITES) return 'full'
+
+    // Закреплять «сколько съел» не нужно — избранное хранит продукт, а не
+    // порцию: привычное количество приходит из памяти по журналу приёмов.
+    const { grams, ...product } = snap
+    const entry = { id: newId(), ...product, pinnedAt: Date.now(), updatedAt: ts }
+    setState((s) => {
+      const list = s.favorites || []
+      // Повторная вставка того же продукта невозможна даже при двойном вызове.
+      if (list.some((f) => favoriteKey(f) === key)) return s
+      if (list.length >= MAX_FAVORITES) return s
+      return { ...s, favorites: [entry, ...list] }
+    })
+    return 'added'
+  }, [])
+
+  // ── Шаблоны приёмов и рецепты ───────────────────────────────────────────────
+  // Обе сущности живут по правилам customFoods: id, метка времени, удаление
+  // через тумбстоун. Разница смысловая, и смешивать их нельзя:
+  //
+  //   • ШАБЛОН — это НЕСКОЛЬКО записей, которые добавляются в день как были.
+  //     «Мой завтрак» = овсянка + банан + кофе, три строки в дневнике.
+  //   • РЕЦЕПТ — это ОДНО блюдо, сваренное из ингредиентов и поделённое на
+  //     порции. Кастрюля борща на шесть тарелок — в дневник попадает одна
+  //     тарелка, одной строкой.
+  //
+  // Отсюда и разные экраны, и разные единицы: у шаблона их нет вовсе, у
+  // рецепта — «порция».
+
+  const saveTemplate = useCallback((tpl) => {
+    if (!tpl?.name || !tpl.items?.length) return null
+    const ts = clock.tick()
+    // Правка существующего сохраняет id: иначе на другом устройстве осталась бы
+    // старая копия, и человек увидел бы два «Моих завтрака».
+    const entry = { ...tpl, id: tpl.id || newId(), updatedAt: ts }
+    setState((s) => {
+      const list = s.templates || []
+      const i = list.findIndex((t) => t.id === entry.id)
+      return { ...s, templates: i >= 0 ? list.map((t, k) => (k === i ? entry : t)) : [entry, ...list] }
+    })
+    return entry
+  }, [])
+
+  const removeTemplate = useCallback((id) => {
+    const ts = clock.tick()
+    setState((s) => ({
+      ...s,
+      templates: (s.templates || []).filter((t) => t.id !== id),
+      meta: addTombstone(s.meta, tombTemplate(id), ts),
+    }))
+  }, [])
+
+  const saveRecipe = useCallback((recipe) => {
+    if (!recipe?.name) return null
+    const ts = clock.tick()
+    const entry = { ...recipe, id: recipe.id || newId(), updatedAt: ts }
+    setState((s) => {
+      const list = s.recipes || []
+      const i = list.findIndex((r) => r.id === entry.id)
+      return { ...s, recipes: i >= 0 ? list.map((r, k) => (k === i ? entry : r)) : [entry, ...list] }
+    })
+    return entry
+  }, [])
+
+  const removeRecipe = useCallback((id) => {
+    const ts = clock.tick()
+    setState((s) => ({
+      ...s,
+      recipes: (s.recipes || []).filter((r) => r.id !== id),
+      meta: addTombstone(s.meta, tombRecipe(id), ts),
+    }))
+  }, [])
+
+  // ── Добавки ─────────────────────────────────────────────────────────────────
+  // Приём добавки — запись дня, как и продукт: свой id, своё время, свой
+  // тумбстоун при удалении. Состав (`provides`) уезжает в запись СНИМКОМ,
+  // уже умноженным на дозу: если завтра мы уточним состав мультивитаминов в
+  // каталоге, вчерашний день человека не должен измениться задним числом.
+  // Ровно так же хранятся съеденные продукты.
+  const addSupp = useCallback((date, supp) => {
+    const clean = normalizeSuppEntry(supp)
+    if (!clean) return null
+    const ts = clock.tick()
+    const id = newId()
+    const takenAt = new Date().toISOString()
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      const entry = { id, takenAt, ...clean, updatedAt: ts }
+      return { ...s, days: { ...s.days, [date]: { ...day, supps: [...(day.supps || []), entry] } } }
+    })
+    return id
+  }, [])
+
+  const removeSupp = useCallback((date, id) => {
+    const ts = clock.tick()
+    setState((s) => {
+      const day = s.days[date] || blankDay()
+      const days = { ...s.days, [date]: { ...day, supps: (day.supps || []).filter((x) => x.id !== id) } }
+      return { ...s, days, meta: addTombstone(s.meta, tombSupp(date, id), ts) }
+    })
+  }, [])
+
+  const editSupp = useCallback((date, updated) => {
+    const clean = normalizeSuppEntry(updated)
+    if (!clean || !updated?.id) return
+    editDay(date, (d, ts) => ({
+      ...d,
+      supps: (d.supps || []).map((x) => (x.id === updated.id ? { ...x, ...clean, id: updated.id, updatedAt: ts } : x)),
+    }))
+  }, [editDay])
+
+  // Стек — то, что человек принимает регулярно. Список собран руками, поэтому
+  // это сущность с id и меткой (как избранное), а не поле настроек: правка на
+  // телефоне не должна затирать правку на ноутбуке целиком.
+  // Решение принимается ДО setState, по актуальному состоянию из stateRef, а
+  // обновляющий колбэк остаётся чистым — ровно как в toggleFavorite, и по той
+  // же причине. Раньше ответ «не влезло» записывался ПЕРЕМЕННОЙ ИЗ КОЛБЭКА:
+  // React вызывает его не в момент вызова setState, а позже (и в StrictMode
+  // дважды), поэтому наружу уезжало «сохранено» даже когда ничего не
+  // сохранилось. Проявлялось это ровно там, где перед этим уже был setState, —
+  // в «Записать и добавить в мой стек».
+  const saveStackItem = useCallback((item) => {
+    const clean = normalizeStackItem(item)
+    if (!clean) return null
+    // Одна и та же добавка не заводится дважды, а полный список не вытесняет
+    // молча самое старое (вытеснение без тумбстоуна всё равно отменилось бы
+    // синхронизацией). Оба правила — в findStackSlot, там они под тестом.
+    const { existing, full } = findStackSlot(stateRef.current.supplements, clean, item.id)
+    if (full) return null
+
+    const ts = clock.tick()
+    const entry = { ...clean, id: existing?.id || newId(), updatedAt: ts }
+    setState((s) => {
+      const cur = s.supplements || []
+      const i = cur.findIndex((x) => x.id === entry.id)
+      if (i >= 0) return { ...s, supplements: cur.map((x, k) => (k === i ? entry : x)) }
+      if (cur.length >= MAX_STACK) return s
+      return { ...s, supplements: [...cur, entry] }
+    })
+    return entry
+  }, [])
+
+  const removeStackItem = useCallback((id) => {
+    const ts = clock.tick()
+    setState((s) => ({
+      ...s,
+      supplements: (s.supplements || []).filter((x) => x.id !== id),
+      meta: addTombstone(s.meta, tombSupplement(id), ts),
+    }))
+  }, [])
+
+  // Личная норма по веществу. Решение человека сильнее справочной нормы:
+  // «мне нужно 500 витамина C» — это его дело, наше — честно показать, где он
+  // относительно этой цифры и где верхний предел.
+  // null (пустое поле) стирает личную цель и возвращает справочную норму.
+  const setMicroGoal = useCallback((key, value) => {
+    const clean = sanitizeMicroGoal(key, value)
+    const ts = clock.tick()
+    setState((s) => {
+      const prev = (s.prefs && typeof s.prefs.microGoals === 'object' && s.prefs.microGoals) || {}
+      const next = { ...prev }
+      if (clean == null) delete next[key]
+      else next[key] = clean
+      return { ...s, prefs: { ...s.prefs, microGoals: next }, meta: setPrefTs(s.meta, 'microGoals', ts) }
+    })
+  }, [])
+
   const addCustomIngredient = useCallback((ing) => {
     const ts = clock.tick()
     const entry = { id: newId(), ...ing, updatedAt: ts }
@@ -871,12 +1087,23 @@ export function StoreProvider({ children }) {
 
   const dismissAuthError = useCallback(() => dispatch({ type: 'DISMISS_ERROR' }), [])
 
+  // Память о продуктах — производная от журнала приёмов, не отдельное хранилище.
+  // Пересчитывается только при изменении дней: обход всей истории стоит порядка
+  // миллисекунды, но делать его на каждый рендер листа добавления незачем.
+  const foodMemory = useMemo(() => buildFoodMemory(state.days), [state.days])
+
   const value = useMemo(() => ({
     ...state,
     theme: state.theme,
     resolvedTheme: effectiveTheme(state.theme),
     customFoods: state.customFoods || [],
     customIngredients: state.customIngredients || [],
+    favorites: state.favorites || [],
+    templates: state.templates || [],
+    recipes: state.recipes || [],
+    supplements: state.supplements || [],
+    microGoals: (state.prefs && typeof state.prefs.microGoals === 'object' && state.prefs.microGoals) || {},
+    foodMemory,
     recents: state.recents || [],
     prefs: state.prefs || {},
     subscription: state.subscription || defaultSubscription(),
@@ -905,6 +1132,18 @@ export function StoreProvider({ children }) {
     addCustomFood,
     removeCustomFood,
     addCustomIngredient,
+    toggleFavorite,
+    saveTemplate,
+    removeTemplate,
+    saveRecipe,
+    removeRecipe,
+    // добавки
+    addSupp,
+    removeSupp,
+    editSupp,
+    saveStackItem,
+    removeStackItem,
+    setMicroGoal,
     setPref,
     purchaseSubscription,
     openSubscriptionPortal,
@@ -936,9 +1175,11 @@ export function StoreProvider({ children }) {
     dismissAuthError,
     deviceId: clock.deviceId,
   }), [
-    state, auth, phase, recovering, syncStatus,
+    state, auth, phase, recovering, syncStatus, foodMemory,
     setProfile, setTheme, addFood, addFoods, repeatDay, repeatMeal, removeFood, editFood, upsertMealSection, deleteMealSection,
-    moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient,
+    moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient, toggleFavorite,
+    saveTemplate, removeTemplate, saveRecipe, removeRecipe,
+    addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, setMicroGoal,
     setDayWeight, setDayActivity, setDayActivityScore, setWeightGoal, setDayStatsExcluded, confirmDayStats,
     setPref, purchaseSubscription, openSubscriptionPortal, refreshSubscription, applyPromo,
     resetAll, signOut, stopSync, beginSignIn, endSignIn, completeRecovery, cancelRecovery,

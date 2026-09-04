@@ -22,12 +22,13 @@
 // а данные не теряются. Ничего переписывать в базе заранее не нужно.
 // ─────────────────────────────────────────────────────────────────────────────
 import { ZERO_TS, compareTs, isTs, maxTs, tsMillis } from './hlc.js'
+import { normalizeName } from './text.js'
 
 export const STATE_VERSION = 2
 
 // Ключи, которые уезжают в облако. subscription сюда НЕ входит: её источник
 // истины — таблица subscriptions, которую пишет только вебхук Stripe.
-export const SYNC_KEYS = ['profile', 'theme', 'days', 'customFoods', 'customIngredients', 'recents', 'prefs', 'meta']
+export const SYNC_KEYS = ['profile', 'theme', 'days', 'customFoods', 'customIngredients', 'favorites', 'templates', 'recipes', 'supplements', 'recents', 'prefs', 'meta']
 
 // Тумбстоуны старше этого срока выбрасываем: иначе meta растёт бесконечно.
 // Устройство, пролежавшее офлайн дольше, может «воскресить» удалённую запись —
@@ -39,7 +40,10 @@ export function emptyMeta() {
 }
 
 export function blankDay() {
-  return { meals: [], mealSections: [], mood: null, wellbeing: [], note: '' }
+  // supps — принятые за день добавки. Отдельный список, а не строки в meals:
+  // у них нет калорий и они не относятся ни к какому приёму пищи, а попав в
+  // meals, они сломали бы и суммы дня, и статистику, и карточку «поделиться».
+  return { meals: [], mealSections: [], supps: [], mood: null, wellbeing: [], note: '' }
 }
 
 // Скаляры дня — поля, которые версионируются каждое своим временем в
@@ -50,13 +54,24 @@ export function blankDay() {
 // на каждый день из них (см. lib/body.js).
 // statsExcluded / statsConfirmed — решение человека, учитывать ли день в
 // статистике (см. lib/stats.js).
-export const DAY_SCALARS = ['mood', 'wellbeing', 'note', 'weight', 'activity', 'statsExcluded', 'statsConfirmed']
+// activityScore — непрерывный балл ползунка активности 0..100. Он ЗДЕСЬ
+// обязателен: стор его пишет (setDayActivityScore), body.js считает по нему
+// множитель к расходу, то есть от него зависит цель по калориям на этот день.
+// Пока его тут не было, поле выживало только на честном слове спреда в
+// mergeDay: метка времени для него терялась при первом же слиянии, а день, где
+// человек ТОЛЬКО двинул ползунок, считался пустым и удалялся вместе с целью.
+export const DAY_SCALARS = ['mood', 'wellbeing', 'note', 'weight', 'activity', 'activityScore', 'statsExcluded', 'statsConfirmed']
 
 // ── Ключи тумбстоунов ────────────────────────────────────────────────────────
 export const tombMeal = (date, id) => `d:${date}:m:${id}`
 export const tombSection = (date, id) => `d:${date}:s:${id}`
 export const tombCustomFood = (id) => `cf:${id}`
 export const tombCustomIngredient = (id) => `ci:${id}`
+export const tombFavorite = (id) => `fav:${id}`
+export const tombTemplate = (id) => `tpl:${id}`
+export const tombRecipe = (id) => `rcp:${id}`
+export const tombSupp = (date, id) => `d:${date}:p:${id}`
+export const tombSupplement = (id) => `sup:${id}`
 
 // ── Нормализация ─────────────────────────────────────────────────────────────
 // Приводит любой вход (пустой, легаси, повреждённый, чужой) к рабочей форме.
@@ -108,34 +123,68 @@ function normActivity(v) {
   return ACTIVITY_KEYS.includes(v) ? v : null
 }
 
+// Балл ползунка: только целое 0..100. Всё остальное — мусор, а мусор здесь
+// означает неверный множитель к расходу и, значит, неверную цель по калориям.
+function normActivityScore(v) {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.round(Math.min(100, Math.max(0, n))) : null
+}
+
 function normalizeDay(raw) {
   const d = isObj(raw) ? raw : {}
   return {
     ...d,
     meals: normalizeEntities(d.meals),
     mealSections: normalizeEntities(d.mealSections),
+    supps: normalizeEntities(d.supps),
     mood: d.mood ?? null,
     wellbeing: arr(d.wellbeing).filter((t) => typeof t === 'string'),
     note: str(d.note),
     weight: normWeight(d.weight),
     activity: normActivity(d.activity),
+    activityScore: normActivityScore(d.activityScore),
     // Флаги учёта в статистике: строго булевы, чтобы не было «то ли есть, то ли нет».
     statsExcluded: d.statsExcluded === true,
     statsConfirmed: d.statsConfirmed === true,
   }
 }
 
+// Ключ недавнего продукта — имя И единица. По одному имени «Молоко, 250 мл» и
+// «Молоко, 200 г» схлопывались в одну запись, и одна из них молча пропадала.
+// normalizeName приводит регистр, ё и лишние пробелы: раньше стор искал по
+// точному имени, а нормализация — по lowercase, поэтому «Банан» и «банан»
+// жили в списке двумя строками и при первом же слиянии одна из них исчезала.
+export function recentKey(r) {
+  return `${normalizeName(r?.name)}|${r?.unit || 'г'}`
+}
+
+const recentCount = (r) => {
+  const n = Number(r?.count)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 1
+}
+
 function normalizeRecents(list) {
   const out = []
-  const byName = new Map()
+  const byKey = new Map()
   for (const r of arr(list)) {
     if (!isObj(r) || typeof r.name !== 'string') continue
-    const key = r.name.toLowerCase()
+    const key = recentKey(r)
     const ts = Number.isFinite(r.ts) ? r.ts : 0
-    const prev = byName.get(key)
-    if (prev && prev.ts >= ts) continue
-    const entry = { ...r, ts }
-    byName.set(key, entry)
+    const prev = byKey.get(key)
+    // Дубли одного продукта складываем по счётчику, а не теряем: счётчик —
+    // это «сколько раз ел», и выбрасывать его вместе с записью нельзя.
+    const count = Math.max(recentCount(r), prev ? recentCount(prev) : 0)
+    if (prev && prev.ts >= ts) {
+      if (count !== recentCount(prev)) {
+        const merged = { ...prev, count }
+        byKey.set(key, merged)
+        out[out.indexOf(prev)] = merged
+      }
+      continue
+    }
+    const entry = { ...r, ts, count }
+    byKey.set(key, entry)
     if (prev) out[out.indexOf(prev)] = entry
     else out.push(entry)
   }
@@ -168,6 +217,15 @@ export function normalizeState(raw) {
     days,
     customFoods: normalizeEntities(s.customFoods),
     customIngredients: normalizeEntities(s.customIngredients),
+    favorites: normalizeEntities(s.favorites),
+    // Шаблоны приёмов и рецепты — обычные сущности с id и меткой времени,
+    // сливаются тем же правилом, что избранное и свои продукты.
+    templates: normalizeEntities(s.templates),
+    recipes: normalizeEntities(s.recipes),
+    // Стек добавок — то, что человек принимает регулярно. Сущность с id и
+    // меткой, как избранное: список собран руками, и терять его при слиянии
+    // двух устройств нельзя.
+    supplements: normalizeEntities(s.supplements),
     recents: normalizeRecents(s.recents),
     prefs: isObj(s.prefs) ? { ...s.prefs } : {},
     meta: {
@@ -246,6 +304,7 @@ function mergeDay(base, inc, date, baseFieldTs, incFieldTs, tombstones) {
     ...i,
     meals: mergeEntities(b.meals, i.meals, tombstones, (id) => tombMeal(date, id)),
     mealSections: mergeEntities(b.mealSections, i.mealSections, tombstones, (id) => tombSection(date, id)),
+    supps: mergeEntities(b.supps, i.supps, tombstones, (id) => tombSupp(date, id)),
   }
 
   const fieldTs = {}
@@ -260,6 +319,7 @@ function mergeDay(base, inc, date, baseFieldTs, incFieldTs, tombstones) {
   day.mood = day.mood ?? null
   day.weight = normWeight(day.weight)
   day.activity = normActivity(day.activity)
+  day.activityScore = normActivityScore(day.activityScore)
   day.statsExcluded = day.statsExcluded === true
   day.statsConfirmed = day.statsConfirmed === true
 
@@ -288,14 +348,22 @@ function mergePrefs(base, inc) {
   return { prefs: value, prefsTs: ts }
 }
 
+// Слияние недавних. Свежесть берём у более новой записи, а СЧЁТЧИК — максимум
+// из двух: раньше побеждала запись целиком, и «съел 17 раз» на телефоне
+// затиралось значением «съел 3 раза» с ноутбука — история частоты обнулялась
+// при каждой синхронизации. Максимум, а не сумма: оба устройства ведут счёт по
+// одному и тому же журналу приёмов, сложение посчитало бы одно и то же дважды.
 function mergeRecents(a, b) {
-  const byName = new Map()
+  const byKey = new Map()
   for (const r of [...a, ...b]) {
-    const key = r.name.toLowerCase()
-    const prev = byName.get(key)
-    if (!prev || r.ts > prev.ts) byName.set(key, r)
+    const key = recentKey(r)
+    const prev = byKey.get(key)
+    if (!prev) { byKey.set(key, r); continue }
+    const winner = r.ts > prev.ts ? r : prev
+    const count = Math.max(recentCount(r), recentCount(prev))
+    byKey.set(key, count === recentCount(winner) ? winner : { ...winner, count })
   }
-  return [...byName.values()].sort((x, y) => y.ts - x.ts).slice(0, 40)
+  return [...byKey.values()].sort((x, y) => y.ts - x.ts).slice(0, 40)
 }
 
 // Слияние двух состояний. Операция детерминирована: любые два устройства из
@@ -334,6 +402,10 @@ export function mergeState(baseRaw, incomingRaw) {
     days,
     customFoods: mergeEntities(base.customFoods, inc.customFoods, tombstones, tombCustomFood),
     customIngredients: mergeEntities(base.customIngredients, inc.customIngredients, tombstones, tombCustomIngredient),
+    favorites: mergeEntities(base.favorites, inc.favorites, tombstones, tombFavorite),
+    templates: mergeEntities(base.templates, inc.templates, tombstones, tombTemplate),
+    recipes: mergeEntities(base.recipes, inc.recipes, tombstones, tombRecipe),
+    supplements: mergeEntities(base.supplements, inc.supplements, tombstones, tombSupplement),
     recents: mergeRecents(base.recents, inc.recents),
     prefs,
     meta: { v: STATE_VERSION, profileTs, themeTs: themeR.ts, prefsTs, dayFieldTs, tombstones },
@@ -350,11 +422,15 @@ export function isDayEmpty(day) {
   return (
     !(d.meals || []).length &&
     !(d.mealSections || []).length &&
+    // Добавки удерживают день так же, как еда: «сегодня ничего не ел, но выпил
+    // витамины» — это заполненный день, и стирать его при слиянии нельзя.
+    !(d.supps || []).length &&
     d.mood == null &&
     !(d.wellbeing || []).length &&
     !str(d.note).trim() &&
     d.weight == null &&
     d.activity == null &&
+    d.activityScore == null &&
     d.statsExcluded !== true
   )
 }
@@ -400,9 +476,14 @@ export function clearedState(state, ts) {
   for (const date in s.days) {
     for (const m of s.days[date].meals) tombstones[tombMeal(date, m.id)] = ts
     for (const sec of s.days[date].mealSections) tombstones[tombSection(date, sec.id)] = ts
+    for (const su of s.days[date].supps) tombstones[tombSupp(date, su.id)] = ts
   }
   for (const f of s.customFoods) tombstones[tombCustomFood(f.id)] = ts
   for (const i of s.customIngredients) tombstones[tombCustomIngredient(i.id)] = ts
+  for (const f of s.favorites) tombstones[tombFavorite(f.id)] = ts
+  for (const t of s.templates) tombstones[tombTemplate(t.id)] = ts
+  for (const r of s.recipes) tombstones[tombRecipe(r.id)] = ts
+  for (const su of s.supplements) tombstones[tombSupplement(su.id)] = ts
 
   // Настройки не удаляются, а обнуляются с новой меткой: удаление ключа merge
   // бы не заметил (он объединяет ключи), а null перебьёт старое значение.
@@ -416,6 +497,10 @@ export function clearedState(state, ts) {
     days: {},
     customFoods: [],
     customIngredients: [],
+    favorites: [],
+    templates: [],
+    recipes: [],
+    supplements: [],
     recents: [],
     prefs,
     meta: { v: STATE_VERSION, profileTs: ts, themeTs: s.meta.themeTs, prefsTs, dayFieldTs: {}, tombstones },

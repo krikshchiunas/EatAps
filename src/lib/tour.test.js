@@ -1,5 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const readFile = (rel) => readFileSync(join(ROOT, rel), 'utf8')
 import { TIPS, TOUR_PREF, tipById, isTipSeen, nextTip, markSeen, resetTips, seenCount } from './tour.js'
 
 const FULL = { loggedDays: 10, mealsToday: 10 }
@@ -68,4 +74,20 @@ test('у каждой подсказки есть всё нужное для о�
   }
   assert.equal(tipById(TIPS[0].id).title, TIPS[0].title)
   assert.equal(tipById('нет такой'), null)
+})
+
+// Подсказка не должна перекрывать открытый лист. Раньше список «пауз»
+// перечислялся руками в DayScreen и отставал: сначала забыли лист добавления
+// продукта, потом лист сохранения блюда. Теперь источник один — счётчик
+// блокировок прокрутки, который поднимает КАЖДЫЙ лист.
+test('подсказка знает про открытые листы через общий счётчик, а не через список', () => {
+  const coach = readFile('src/components/CoachMark.jsx')
+  assert.ok(/useOverlayOpen/.test(coach), 'CoachMark обязан спрашивать общий сигнал')
+  assert.ok(/if \(!tip \|\| paused \|\| overlay\) return null/.test(coach), 'и не рисоваться поверх листа')
+
+  const day = readFile('src/components/DayScreen.jsx')
+  const m = /<CoachMark[^>]*paused=\{([^}]*)\}/.exec(day)
+  assert.ok(m, 'CoachMark должен рендериться на экране дня')
+  assert.ok(!/Sheet|editingFood|saveTpl|overlayOpen/.test(m[1]),
+    `в paused снова появился ручной перечень листов: ${m[1]}`)
 })

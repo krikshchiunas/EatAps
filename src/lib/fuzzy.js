@@ -112,15 +112,31 @@ export function phoneticKey(word) {
 // чем по синониму, иначе синонимы вытаскивают наверх случайные продукты.
 function scoreTerm(text, name, term, allowFuzzy) {
   if (name === term) return 1000
+
+  const nameWords = splitWords(name)
+  // Совпадение с ЦЕЛЫМ первым словом сильнее совпадения с его началом.
+  //
+  // Без этой ступени запрос «лук» находил сначала «Луковый суп», а не «Лук
+  // репчатый»: обе записи начинаются на «лук», балл выходил одинаковым, и
+  // тай-брейк по длине поднимал суп — он на символ короче. Для человека,
+  // который собирает рецепт, это не мелочь: он кладёт в кастрюлю суп вместо
+  // луковицы. «Лук» — это ровно первое слово названия, а «луковый» — нет.
+  if (nameWords[0] === term) return 700
   if (name.startsWith(term)) return 600
   if (text.startsWith(term)) return 500
 
-  const nameWords = splitWords(name)
+  if (nameWords.some((w) => w === term)) return 400
   if (nameWords.some((w) => w.startsWith(term))) return 350
 
   const textWords = splitWords(text)
   if (textWords.some((w) => w.startsWith(term))) return 300
-  if (text.includes(term)) return 150
+  // Подстрока ВНУТРИ слова считается совпадением только для длинных запросов.
+  //
+  // На двух-трёх буквах это чистый шум: «щи» находились в «Плов тёщин», «ин» —
+  // в «свинина». Пока вокруг есть сильные совпадения, шум незаметен, но в
+  // коротком списке (свои блюда и рецепты) он всплывает на первое место, и
+  // человек видит первым заведомо не то. Начала слов ловятся ступенями выше.
+  if (term.length >= 4 && text.includes(term)) return 150
 
   if (!allowFuzzy) return -1
 
@@ -152,14 +168,29 @@ function scoreTerm(text, name, term, allowFuzzy) {
   return best
 }
 
+// Совпадение по синониму слабее совпадения по самому запросу.
+//
+// Без этого поиск «плов тёщин» показывал первым «Плов»: синоним «плов» давал
+// ему точное совпадение (1000 баллов), запись «Плов тёщин» получала за тот же
+// запрос ровно столько же, и тай-брейк по длине ставил короткое имя выше. То
+// есть точное совпадение со ВСЕМ запросом проигрывало совпадению с его частью.
+// Коэффициент опускает синонимы на отдельную полку: любое попадание по самому
+// запросу теперь сильнее любого попадания по синониму.
+export const SYNONYM_FACTOR = 0.75
+
 // Итоговый балл записи по набору терминов (запрос + его синонимы).
 // Берём ЛУЧШИЙ термин, а не сумму: иначе продукт, случайно совпавший с двумя
 // слабыми синонимами, обгонял бы точное попадание в название.
-export function scoreEntry(text, name, terms, allowFuzzy = true) {
+// primaryCount — сколько первых терминов являются самим запросом (сам запрос и
+// его кириллическая запись), остальные считаются синонимами.
+export function scoreEntry(text, name, terms, allowFuzzy = true, primaryCount = 1) {
   let best = -1
-  for (const t of terms) {
+  for (let i = 0; i < terms.length; i++) {
+    const t = terms[i]
     if (!t) continue
-    const s = scoreTerm(text, name, t, allowFuzzy)
+    const raw = scoreTerm(text, name, t, allowFuzzy)
+    if (raw < 0) continue
+    const s = i < primaryCount ? raw : raw * SYNONYM_FACTOR
     if (s > best) best = s
   }
   if (best < 0) return -1
@@ -168,28 +199,46 @@ export function scoreEntry(text, name, terms, allowFuzzy = true) {
   return best - Math.min(name.length, 60) * 0.1
 }
 
+// ── Персонализация ───────────────────────────────────────────────────────────
+// Личная история должна поднимать продукт ВНУТРИ его тира релевантности и
+// никогда — между тирами. Иначе поиск ломается ровно так, как ломаться не
+// должен: человек часто ест греческий йогурт, набирает «банан» — и первым ему
+// показывают йогурт.
+//
+// Поэтому потолок надбавки (9) меньше самого узкого разрыва между тирами (10),
+// а сами тиры отстоят друг от друга на 50 и больше. Надбавка живёт в том же
+// поддиапазоне, что и тай-брейк по длине названия (до 6), и физически не может
+// перевести запись через границу тира. Продукт, не совпавший с запросом вовсе,
+// не получает надбавки — его в выдаче просто нет.
+export const MEMORY_BOOST_MAX = 9
+
 // Отсортированный по релевантности поиск.
-// items: массив; toText(item) → строка для поиска; toName(item) → название.
+// items: массив; toText(item) → строка для поиска; toName(item) → название;
+// boost(item) → 0..1, доля личной надбавки (частота/свежесть/избранное).
 // Двухпроходный: сначала быстрый строгий проход, и только если он дал мало
 // результатов — дорогой нечёткий. Так набор текста не тормозит на каждой букве.
-export function rankedSearch(items, terms, { toText, toName, minResults = 3 } = {}) {
+export function rankedSearch(items, terms, { toText, toName, minResults = 3, boost, primaryCount = 1 } = {}) {
   const prepared = items.map((item) => ({ item, text: toText(item), name: toName(item) }))
+  const bonus = boost
+    ? (item) => Math.max(0, Math.min(1, boost(item) || 0)) * MEMORY_BOOST_MAX
+    : () => 0
 
-  const strict = []
-  for (const p of prepared) {
-    const s = scoreEntry(p.text, p.name, terms, false)
-    if (s > 0) strict.push({ item: p.item, s })
+  const collect = (allowFuzzy) => {
+    const out = []
+    for (const p of prepared) {
+      const s = scoreEntry(p.text, p.name, terms, allowFuzzy, primaryCount)
+      if (s > 0) out.push({ item: p.item, s: s + bonus(p.item) })
+    }
+    return out
   }
+
+  const strict = collect(false)
   if (strict.length >= minResults) {
     strict.sort((a, b) => b.s - a.s)
     return strict.map((x) => x.item)
   }
 
-  const loose = []
-  for (const p of prepared) {
-    const s = scoreEntry(p.text, p.name, terms, true)
-    if (s > 0) loose.push({ item: p.item, s })
-  }
+  const loose = collect(true)
   loose.sort((a, b) => b.s - a.s)
   return loose.map((x) => x.item)
 }

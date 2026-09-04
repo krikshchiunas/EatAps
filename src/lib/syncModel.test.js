@@ -6,7 +6,8 @@ import { createClock, ZERO_TS } from './hlc.js'
 import {
   mergeState, normalizeState, pickSyncable, sameSyncable, clearedState,
   addTombstone, setDayFieldTs, setPrefTs, emptyMeta, blankDay,
-  tombMeal, tombSection, tombCustomFood,
+  tombMeal, tombSection, tombCustomFood, tombTemplate, tombRecipe,
+  tombSupp, tombSupplement, isDayEmpty,
 } from './syncModel.js'
 
 // Два независимых устройства с собственными часами.
@@ -244,4 +245,194 @@ test('сброс данных переживает слияние с серве�
   assert.equal(merged.profile, null)
   assert.ok(merged.meta.tombstones[tombMeal(DATE, 'm1')])
   assert.ok(merged.meta.tombstones[tombCustomFood('cf1')])
+})
+
+// ── Шаблоны приёмов и рецепты ────────────────────────────────────────────────
+
+test('шаблон, созданный на телефоне, доезжает до ноутбука', () => {
+  const t = phone.tick()
+  const a = stateWith({}, { templates: [{ id: 't1', name: 'Мой завтрак', items: [food('i1', 'Овсянка', t)], updatedAt: t }] })
+  const merged = mergeState(stateWith(), a)
+  assert.equal(merged.templates.length, 1)
+  assert.equal(merged.templates[0].name, 'Мой завтрак')
+})
+
+test('удалённый шаблон не воскресает со второго устройства', () => {
+  // Тот самый случай, ради которого нужны тумбстоуны: на ноутбуке шаблон ещё
+  // жив, и без записи об удалении слияние вернуло бы его обратно.
+  const t0 = phone.tick()
+  const tpl = { id: 't1', name: 'Мой завтрак', items: [food('i1', 'Овсянка', t0)], updatedAt: t0 }
+  const laptopState = stateWith({}, { templates: [tpl] })
+
+  const tDel = phone.tick()
+  const phoneState = normalizeState({
+    ...stateWith({}, { templates: [] }),
+    meta: addTombstone(emptyMeta(), tombTemplate('t1'), tDel),
+  })
+
+  assert.equal(mergeState(phoneState, laptopState).templates.length, 0)
+  assert.equal(mergeState(laptopState, phoneState).templates.length, 0, 'порядок слияния не важен')
+})
+
+test('правка шаблона сохраняет id, а не плодит копии', () => {
+  const t0 = phone.tick()
+  const base = stateWith({}, { templates: [{ id: 't1', name: 'Завтрак', items: [food('i1', 'Овсянка', t0)], updatedAt: t0 }] })
+  const t1 = laptop.tick()
+  const edited = stateWith({}, { templates: [{ id: 't1', name: 'Завтрак выходного дня', items: [food('i1', 'Овсянка', t0)], updatedAt: t1 }] })
+  const merged = mergeState(base, edited)
+  assert.equal(merged.templates.length, 1, 'два «Завтрака» — недопустимо')
+  assert.equal(merged.templates[0].name, 'Завтрак выходного дня', 'выигрывает более поздняя правка')
+})
+
+test('рецепты сливаются и удаляются по тем же правилам', () => {
+  const t = phone.tick()
+  const rcp = { id: 'r1', name: 'Борщ', servings: 6, items: [food('i1', 'Свёкла', t)], updatedAt: t }
+  const withRecipe = stateWith({}, { recipes: [rcp] })
+  assert.equal(mergeState(stateWith(), withRecipe).recipes.length, 1)
+
+  const tDel = phone.tick()
+  const deleted = normalizeState({ ...stateWith(), meta: addTombstone(emptyMeta(), tombRecipe('r1'), tDel) })
+  assert.equal(mergeState(deleted, withRecipe).recipes.length, 0)
+})
+
+test('шаблоны и рецепты уходят в облако и стираются при очистке', () => {
+  const t = phone.tick()
+  const s = stateWith({}, {
+    templates: [{ id: 't1', name: 'Завтрак', items: [food('i1', 'Овсянка', t)], updatedAt: t }],
+    recipes: [{ id: 'r1', name: 'Борщ', servings: 6, items: [], updatedAt: t }],
+  })
+  const syncable = pickSyncable(s)
+  assert.ok('templates' in syncable && 'recipes' in syncable, 'иначе они не переживут переустановку')
+
+  const wiped = clearedState(s, phone.tick())
+  assert.deepEqual(wiped.templates, [])
+  assert.deepEqual(wiped.recipes, [])
+  assert.ok(wiped.meta.tombstones[tombTemplate('t1')], 'без тумбстоуна вернётся с другого устройства')
+  assert.ok(wiped.meta.tombstones[tombRecipe('r1')])
+})
+
+// ── Добавки ──────────────────────────────────────────────────────────────────
+// Приёмы добавок живут в дне отдельным списком, а стек — отдельной сущностью
+// верхнего уровня. И то и другое человек ведёт руками, поэтому оба обязаны
+// сливаться как еда и избранное, а не «кто последний, тот прав».
+
+const supp = (id, name, ts, provides = { vitD: 50 }) =>
+  ({ id, suppId: null, name, unit: 'капсула', dose: 1, provides, updatedAt: ts })
+
+test('приёмы добавок с двух устройств объединяются, ни один не теряется', () => {
+  const server = stateWith({ [DATE]: { ...blankDay(), supps: [supp('p1', 'Витамин D', phone.tick())] } })
+  const addTo = (state, entry) => {
+    const day = state.days[DATE]
+    return { ...state, days: { ...state.days, [DATE]: { ...day, supps: [...day.supps, entry] } } }
+  }
+  const fromPhone = addTo(server, supp('p2', 'Магний', phone.tick()))
+  const fromLaptop = addTo(server, supp('p3', 'Омега-3', laptop.tick()))
+
+  const merged = mergeState(fromPhone, fromLaptop)
+  const names = merged.days[DATE].supps.map((x) => x.name).sort()
+  assert.deepEqual(names, ['Витамин D', 'Магний', 'Омега-3'])
+})
+
+test('снятая на телефоне галочка не возвращается с ноутбука', () => {
+  const t = phone.tick()
+  const withSupp = stateWith({ [DATE]: { ...blankDay(), supps: [supp('p1', 'Креатин', t)] } })
+  const tDel = phone.tick()
+  const deleted = normalizeState({
+    ...stateWith({ [DATE]: { ...blankDay(), meals: [food('m1', 'Овсянка', t)] } }),
+    meta: addTombstone(emptyMeta(), tombSupp(DATE, 'p1'), tDel),
+  })
+  const merged = mergeState(deleted, withSupp)
+  assert.deepEqual(merged.days[DATE].supps, [], 'приём воскрес из копии другого устройства')
+})
+
+test('день, где только выпиты витамины, не считается пустым', () => {
+  // Иначе слияние выбросило бы его целиком, и человек потерял бы отметку
+  // «сегодня креатин выпит» просто потому, что забыл записать еду.
+  const day = { ...blankDay(), supps: [supp('p1', 'Креатин', phone.tick())] }
+  assert.equal(isDayEmpty(day), false)
+  assert.equal(isDayEmpty(blankDay()), true)
+
+  const merged = mergeState(stateWith(), stateWith({ [DATE]: day }))
+  assert.equal(merged.days[DATE].supps.length, 1, 'день с одними добавками не должен исчезать')
+})
+
+test('стек добавок сливается и удаляется как избранное', () => {
+  const t = phone.tick()
+  const item = { id: 's1', suppId: 'creatine', name: 'Креатин', unit: 'г', dose: 5, provides: { creatine: 1 }, updatedAt: t }
+  const withStack = stateWith({}, { supplements: [item] })
+  assert.equal(mergeState(stateWith(), withStack).supplements.length, 1)
+
+  const tDel = phone.tick()
+  const deleted = normalizeState({ ...stateWith(), meta: addTombstone(emptyMeta(), tombSupplement('s1'), tDel) })
+  assert.equal(mergeState(deleted, withStack).supplements.length, 0)
+})
+
+test('правка дозы в стеке побеждает по времени, а не по устройству', () => {
+  const base = { id: 's1', suppId: 'creatine', name: 'Креатин', unit: 'г', provides: { creatine: 1 } }
+  const older = stateWith({}, { supplements: [{ ...base, dose: 3, updatedAt: phone.tick() }] })
+  ms.b = 5_000
+  const newer = stateWith({}, { supplements: [{ ...base, dose: 5, updatedAt: laptop.tick() }] })
+  assert.equal(mergeState(older, newer).supplements[0].dose, 5)
+  assert.equal(mergeState(newer, older).supplements[0].dose, 5, 'порядок аргументов не должен решать')
+})
+
+test('стек и приёмы уходят в облако и стираются при сбросе данных', () => {
+  const t = phone.tick()
+  const s = stateWith(
+    { [DATE]: { ...blankDay(), supps: [supp('p1', 'Витамин D', t)] } },
+    { supplements: [{ id: 's1', suppId: 'vitd-2000', name: 'Витамин D3', unit: 'капсула', dose: 1, provides: { vitD: 50 }, updatedAt: t }] },
+  )
+  const syncable = pickSyncable(s)
+  assert.ok('supplements' in syncable, 'стек не переживёт переустановку приложения')
+  assert.ok(syncable.days[DATE].supps.length === 1, 'приёмы не уедут в облако')
+
+  const wiped = clearedState(s, phone.tick())
+  assert.deepEqual(wiped.supplements, [])
+  assert.deepEqual(wiped.days, {})
+  assert.ok(wiped.meta.tombstones[tombSupp(DATE, 'p1')], 'без тумбстоуна приём вернётся с другого устройства')
+  assert.ok(wiped.meta.tombstones[tombSupplement('s1')])
+})
+
+test('состояние без добавок читается без потерь', () => {
+  // Данные, записанные предыдущей версией приложения, не содержат ни supps,
+  // ни supplements. Они обязаны открыться, а не упасть и не обнулиться.
+  const legacy = normalizeState({ days: { [DATE]: { meals: [food('m1', 'Овсянка', ZERO_TS)] } } })
+  assert.deepEqual(legacy.days[DATE].supps, [])
+  assert.deepEqual(legacy.supplements, [])
+  assert.equal(legacy.days[DATE].meals.length, 1)
+})
+
+// ── Балл активности дня ──────────────────────────────────────────────────────
+// Поле писалось стором и читалось расчётом калорий, но в DAY_SCALARS его не
+// было: метка времени терялась при слиянии, а день, где человек только двинул
+// ползунок, считался пустым и удалялся вместе со своей целью по калориям.
+
+test('балл активности версионируется своей меткой, а не спредом', () => {
+  const dayWith = (score, ts) => {
+    const meta = setDayFieldTs(emptyMeta(), DATE, 'activityScore', ts)
+    return normalizeState({ days: { [DATE]: { ...blankDay(), activityScore: score } }, meta })
+  }
+  const older = dayWith(30, phone.tick())
+  ms.b = 9_000
+  const newer = dayWith(85, laptop.tick())
+
+  assert.equal(mergeState(older, newer).days[DATE].activityScore, 85)
+  assert.equal(mergeState(newer, older).days[DATE].activityScore, 85,
+    'порядок аргументов решать не должен — иначе цель по калориям скачет между устройствами')
+})
+
+test('день, где двинули только ползунок активности, не считается пустым', () => {
+  const day = { ...blankDay(), activityScore: 70 }
+  assert.equal(isDayEmpty(day), false)
+  const merged = mergeState(stateWith(), stateWith({ [DATE]: day }))
+  assert.equal(merged.days[DATE]?.activityScore, 70, 'день с одной активностью исчезал вместе с целью')
+})
+
+test('мусорный балл активности не доезжает до расчёта калорий', () => {
+  const norm = (v) => normalizeState({ days: { [DATE]: { ...blankDay(), activityScore: v, note: 'x' } } }).days[DATE].activityScore
+  assert.equal(norm(150), 100, 'выше сотни ползунок не уезжает')
+  assert.equal(norm(-20), 0)
+  assert.equal(norm('высокая'), null)
+  assert.equal(norm(''), null)
+  assert.equal(norm(62.4), 62)
 })

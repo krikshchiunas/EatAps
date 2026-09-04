@@ -16,17 +16,28 @@ import FriendsScreen from './components/FriendsScreen.jsx'
 import FeedTab from './components/FeedTab.jsx'
 import BottomNav from './components/BottomNav.jsx'
 import AddMealSheet from './components/AddMealSheet.jsx'
+import Toast from './components/Toast.jsx'
+import { amountLabel } from './lib/foods.js'
 import ResetPasswordSheet from './components/ResetPasswordSheet.jsx'
 import PushScreen from './components/PushScreen.jsx'
 import AITab from './components/AITab.jsx'
 
 export default function App() {
   const store = useStore()
-  const { profile, days, dayOf, addFood, recovery, booting, user, prefs } = store
+  const { profile, days, dayOf, addFood, removeFood, recovery, booting, user, prefs } = store
   const [tab, setTab] = useState('day')
   const [slowBoot, setSlowBoot] = useState(false)
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(null) // null | { mealId, mealLabel }
+  // Отмена последнего добавления ПОСЛЕ закрытия листа.
+  //
+  // Тост живёт внутри AddMealSheet и умирает вместе с ним, поэтому у главного
+  // пути — выбрать продукт, указать порцию, «Добавить» — отмены не было вообще:
+  // лист закрывался, и единственным способом исправить промах оставалось
+  // свайп-удаление в дневнике. Запоминаем последнее добавление и показываем
+  // тост здесь, где он переживёт закрытие.
+  const lastAdd = useRef(null)
+  const [addUndo, setAddUndo] = useState(null)
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
   const [clipboard, setClipboard] = useState(null)
@@ -198,10 +209,41 @@ export default function App() {
           mealId={sheet.mealId}
           mealLabel={sheet.mealLabel}
           mealType={typeOfMealId(sheet.mealId)}
-          onClose={() => setSheet(null)}
-          onAdd={(food) => addFood(date, food)}
+          onClose={() => {
+            setSheet(null)
+            const a = lastAdd.current
+            lastAdd.current = null
+            if (!a?.ids.length) return
+            setAddUndo({
+              msg: a.label,
+              undo: () => {
+                for (const id of a.ids) removeFood(date, id)
+                setAddUndo({ msg: 'Отменено' })
+              },
+            })
+          }}
+          onAdd={(food) => {
+            const id = addFood(date, food)
+            const amount = food.grams > 0 ? amountLabel(food.grams, food.unit || 'г') : `${food.kcal} ккал`
+            if (id) lastAdd.current = { ids: [id], label: `${food.name} · ${amount}` }
+            return id
+          }}
+          // Добавление НЕСКОЛЬКИХ записей разом (блюдо из шаблона). Отмена
+          // обязана убирать их все: человек добавил одним касанием — и убрать
+          // должен одним, а не выкапывать три строки из дневника по одной.
+          onAddMany={(foods, label) => {
+            const ids = foods.map((f) => addFood(date, f)).filter(Boolean)
+            if (ids.length) lastAdd.current = { ids, label }
+            return ids
+          }}
+          onRemove={(id) => {
+            // Отменили внутри листа — отменять это же повторно уже нечего.
+            if (lastAdd.current?.ids.includes(id)) lastAdd.current = null
+            removeFood(date, id)
+          }}
         />
       )}
+      <Toast toast={addUndo} onDone={() => setAddUndo(null)} />
       <AuthNotice />
     </div>
   )

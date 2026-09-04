@@ -497,24 +497,263 @@ const dairyFoods = DAIRY.map((d) => ({
   kcal: dairyFat(d.protein, d.carbs, d.def),
 }))
 
-export const FOODS = [...BUILDERS, ...variantFoods, ...dairyFoods, ...plainFoods]
+// ── Иноязычные названия ──────────────────────────────────────────────────────
+// База продуктов русская. Транслитерация выше вытягивает только родственные
+// слова (banana → банан), а «chicken» и «oatmeal» так не переводятся — для них
+// нужна таблица. Она покрывает ходовые продукты на английском и немецком:
+// ровно то, что человек реально набирает, когда телефон в латинской раскладке
+// или он живёт не в русскоязычной стране.
+//
+// Это НЕ полноценный многоязычный поиск и им не притворяется: произвольный
+// иностранный запрос уходит в Open Food Facts, где база действительно
+// многоязычная. Здесь — быстрый локальный слой для частого случая.
+const FOREIGN = {
+  'Куриная грудка': 'chicken breast huhn hahnchen hühnchen haehnchen poulet',
+  'Куриное бедро': 'chicken thigh',
+  'Куриные крылья': 'chicken wings',
+  'Говядина': 'beef rind rindfleisch steak',
+  'Свинина': 'pork schwein schweinefleisch',
+  'Индейка грудка': 'turkey pute putenbrust',
+  'Баранина': 'lamb mutton lamm',
+  'Фарш говяжий': 'ground beef minced hackfleisch',
+  'Яйцо': 'egg eggs ei eier',
+  'Яичный белок': 'egg white eiweiss eiweiß',
+  'Овсянка': 'oatmeal oats porridge haferflocken hafer',
+  'Овсяные хлопья сухие': 'oats rolled oats haferflocken',
+  'Рис': 'rice reis',
+  'Гречка': 'buckwheat buchweizen',
+  'Картофель': 'potato potatoes kartoffel kartoffeln',
+  'Батат': 'sweet potato suesskartoffel süßkartoffel',
+  'Макароны варёные': 'pasta noodles nudeln spaghetti',
+  'Хлеб белый': 'white bread brot weissbrot',
+  'Хлеб ржаной': 'rye bread roggenbrot',
+  'Хлеб цельнозерновой': 'whole grain bread vollkornbrot wholemeal',
+  'Молоко': 'milk milch',
+  'Творог': 'cottage cheese quark curd',
+  'Сметана': 'sour cream schmand saure sahne',
+  'Сливки': 'cream sahne',
+  'Йогурт': 'yogurt yoghurt joghurt',
+  'Греческий йогурт': 'greek yogurt yoghurt griechischer joghurt skyr',
+  'Кефир': 'kefir',
+  'Сливочное масло': 'butter',
+  'Сыр российский': 'cheese kase käse',
+  'Моцарелла': 'mozzarella',
+  'Пармезан': 'parmesan parmigiano',
+  'Фета': 'feta',
+  'Рикотта': 'ricotta',
+  'Банан': 'banana banane',
+  'Яблоко': 'apple apfel',
+  'Груша': 'pear birne',
+  'Апельсин': 'orange',
+  'Мандарин': 'mandarin tangerine clementine',
+  'Грейпфрут': 'grapefruit',
+  'Виноград': 'grapes trauben weintrauben',
+  'Киви': 'kiwi',
+  'Ананас': 'pineapple ananas',
+  'Манго': 'mango',
+  'Персик': 'peach pfirsich',
+  'Слива': 'plum pflaume',
+  'Абрикос': 'apricot aprikose',
+  'Арбуз': 'watermelon wassermelone',
+  'Дыня': 'melon honigmelone',
+  'Гранат': 'pomegranate granatapfel',
+  'Лимон': 'lemon zitrone',
+  'Финики': 'dates datteln',
+  'Изюм': 'raisins rosinen',
+  'Клубника': 'strawberry strawberries erdbeeren',
+  'Черника': 'blueberry blueberries heidelbeeren',
+  'Малина': 'raspberry raspberries himbeeren',
+  'Ежевика': 'blackberry brombeeren',
+  'Вишня': 'cherry cherries kirschen',
+  'Смородина': 'currant johannisbeeren',
+  'Помидор': 'tomato tomatoes tomate tomaten',
+  'Огурец': 'cucumber gurke',
+  'Морковь': 'carrot carrots karotte moehren möhren',
+  'Свёкла': 'beetroot beet rote bete',
+  'Капуста белокочанная': 'cabbage weisskohl weißkohl kohl',
+  'Цветная капуста': 'cauliflower blumenkohl',
+  'Брюссельская капуста': 'brussels sprouts rosenkohl',
+  'Брокколи': 'broccoli brokkoli',
+  'Кабачок': 'zucchini courgette',
+  'Баклажан': 'eggplant aubergine',
+  'Перец болгарский': 'bell pepper paprika',
+  'Лук репчатый': 'onion zwiebel',
+  'Чеснок': 'garlic knoblauch',
+  'Шпинат': 'spinach spinat',
+  'Салат листовой': 'lettuce salat gruener salat',
+  'Руккола': 'arugula rocket rucola',
+  'Тыква': 'pumpkin kuerbis kürbis',
+  'Кукуруза': 'corn sweetcorn mais',
+  'Зелёный горошек': 'green peas erbsen',
+  'Стручковая фасоль': 'green beans bohnen',
+  'Авокадо': 'avocado',
+  'Шампиньоны': 'mushrooms champignons pilze',
+  'Редис': 'radish radieschen',
+  'Сельдерей': 'celery sellerie',
+  'Чечевица варёная': 'lentils linsen',
+  'Нут варёный': 'chickpeas kichererbsen',
+  'Фасоль красная варёная': 'kidney beans bohnen',
+  'Тофу': 'tofu',
+  'Эдамаме': 'edamame',
+  'Лосось': 'salmon lachs',
+  'Форель': 'trout forelle',
+  'Тунец свежий': 'tuna thunfisch',
+  'Тунец консерв. в соку': 'canned tuna thunfisch dose',
+  'Сельдь': 'herring hering',
+  'Скумбрия': 'mackerel makrele',
+  'Креветки': 'shrimp prawns garnelen',
+  'Кальмар': 'squid calamari tintenfisch',
+  'Мидии': 'mussels muscheln',
+  'Рыба (белая, филе)': 'fish white fish fisch filet',
+  'Миндаль': 'almonds mandeln',
+  'Грецкий орех': 'walnuts walnuesse walnüsse',
+  'Фундук': 'hazelnuts haselnuesse haselnüsse',
+  'Кешью': 'cashew cashews',
+  'Арахис': 'peanuts erdnuesse erdnüsse',
+  'Фисташки': 'pistachios pistazien',
+  'Семена чиа': 'chia seeds chiasamen',
+  'Семена льна': 'flax seeds linseed leinsamen',
+  'Кунжут': 'sesame sesam',
+  'Арахисовая паста': 'peanut butter erdnussbutter erdnussmus',
+  'Оливковое масло': 'olive oil olivenoel olivenöl',
+  'Подсолнечное масло': 'sunflower oil sonnenblumenoel',
+  'Кокосовое масло': 'coconut oil kokosoel',
+  'Майонез': 'mayonnaise mayo',
+  'Сахар': 'sugar zucker',
+  'Мёд': 'honey honig',
+  'Круассан': 'croissant',
+  'Бекон': 'bacon speck',
+  'Ветчина': 'ham schinken',
+  'Сосиски': 'sausages wuerstchen würstchen hot dog',
+  'Салями': 'salami',
+  'Киноа варёная': 'quinoa',
+  'Булгур варёный': 'bulgur',
+  'Кускус варёный': 'couscous',
+  'Пицца (своя)': 'pizza',
+  'Бургер (свой)': 'burger hamburger cheeseburger',
+  'Хот-дог (свой)': 'hot dog hotdog',
+  'Салат': 'salad salat bowl',
+  'Боул': 'bowl poke',
+  'Каша': 'porridge brei',
+  'Омлет (свой)': 'omelette omelett scrambled ruehrei',
+  'Смузи (своё)': 'smoothie',
+  'Протеиновый шейк': 'protein shake whey eiweissshake',
+  'Бутерброд': 'sandwich',
+  'Сэндвич': 'sandwich',
+  'Тост': 'toast',
+  'Паста (своя)': 'pasta noodles nudeln',
+  'Гарнир': 'side dish beilage',
+  'Растительное молоко': 'plant milk oat milk almond milk hafermilch mandelmilch',
+}
+
+// Иноязычные названия дописываем в поле alias — механизм поиска по синонимам в
+// базе уже есть (variantFoods его используют), второго заводить незачем.
+const withForeign = (list) =>
+  list.map((f) => {
+    const extra = FOREIGN[f.name]
+    if (!extra) return f
+    return { ...f, alias: f.alias ? `${f.alias} ${extra}` : extra }
+  })
+
+export const FOODS = withForeign([...BUILDERS, ...variantFoods, ...dairyFoods, ...plainFoods])
+
+// Масштабирует БЖУ на порцию. Неизвестное остаётся неизвестным: если база не
+// знает белок, порция от этого его не приобретает. Раньше null молча
+// превращался в NaN, а до того — в честный на вид ноль.
+const scaleMacro = (v, k) => (v == null || !Number.isFinite(+v) ? null : +(+v * k).toFixed(1))
 
 export function scale(food, grams) {
   const k = grams / 100
   const out = {
     kcal: Math.round(food.kcal * k),
-    protein: +(food.protein * k).toFixed(1),
-    carbs: +(food.carbs * k).toFixed(1),
-    fat: +(food.fat * k).toFixed(1),
+    protein: scaleMacro(food.protein, k),
+    carbs: scaleMacro(food.carbs, k),
+    fat: scaleMacro(food.fat, k),
   }
   // Реальные сахар/насыщенные жиры (если известны на 100 г/мл источника) — донести
   // до записи в приёме пищи, а не терять при масштабировании порции.
-  if (food.sugar != null) out.sugar = +(food.sugar * k).toFixed(1)
+  if (food.sugar != null) {
+    out.sugar = +(food.sugar * k).toFixed(1)
+    // Пометка «это измеренное значение» едет вместе с числом: иначе честный
+    // ноль у масла на другом конце опять примут за незаполненное поле и
+    // заменят оценкой из углеводов.
+    out.sugarSrc = food.sugarSrc || 'measured'
+  }
   if (food.satFat != null) out.satFat = +(food.satFat * k).toFixed(1)
   return out
 }
 
-const norm = (s) => s.toLowerCase().replace(/ё/g, 'е').trim()
+// ── Нормализация запроса ─────────────────────────────────────────────────────
+// Одно и то же намерение человек набирает по-разному: с лишними пробелами,
+// в другом регистре, с дефисом вместо пробела, с умлаутом. Всё это должно
+// приводить к одному запросу, иначе « Греческий  Йогурт » и «греческий йогурт»
+// становятся разными сценариями.
+//
+// Что делаем:
+//   • NFC — чтобы «й» из двух кодовых точек равнялась обычной «й»;
+//   • ё → е (в базе названия пишутся с «ё», люди набирают без);
+//   • снятие латинских диакритик: Müsli → musli, café → cafe;
+//   • пунктуация и дефисы → пробел, повторные пробелы схлопываются.
+// Цифры и «%» остаются: «молоко 3.2%» — осмысленный запрос.
+const DIACRITICS = /[̀-ͯ]/g
+
+export function normalizeQuery(s) {
+  return String(s ?? '')
+    .normalize('NFD')
+    .replace(DIACRITICS, '')
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^0-9a-zа-я%.\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Поле количества принимает только то, что действительно является числом.
+// Раньше «-50» оставалось в поле, а записывалось 50: минус молча выбрасывался
+// при разборе, и увиденное расходилось с сохранённым. Незаконченный ввод
+// («12.») пропускаем — иначе нельзя набрать дробное число.
+export function sanitizeAmount(raw) {
+  const s = String(raw ?? '').replace(/[^\d.,]/g, '').replace(/,/g, '.')
+  const dot = s.indexOf('.')
+  if (dot === -1) return s
+  // Вторая и последующие точки — уже не число: «1.2.3» превращается в «1.23».
+  return s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '')
+}
+
+const norm = normalizeQuery
+
+// ── Латиница → кириллица ─────────────────────────────────────────────────────
+// Мост для родственных слов: banana → банана (одна правка от «банан»),
+// tofu → тофу, salat → салат. Полноценным переводом это НЕ является и им не
+// притворяется: «chicken» так «курицей» не станет — для таких слов ниже есть
+// таблица синонимов, а произвольные иностранные запросы уходят в Open Food
+// Facts, где база действительно многоязычная.
+const TRANSLIT = [
+  ['sch', 'ш'], ['tsch', 'ч'], ['sh', 'ш'], ['ch', 'ч'], ['zh', 'ж'], ['kh', 'х'],
+  ['ts', 'ц'], ['ya', 'я'], ['yu', 'ю'], ['yo', 'йо'], ['ye', 'е'], ['ee', 'и'],
+  ['oo', 'у'], ['ck', 'к'], ['ph', 'ф'], ['th', 'т'], ['j', 'й'], ['x', 'кс'],
+  ['a', 'а'], ['b', 'б'], ['c', 'к'], ['d', 'д'], ['e', 'е'], ['f', 'ф'],
+  ['g', 'г'], ['h', 'х'], ['i', 'и'], ['k', 'к'], ['l', 'л'], ['m', 'м'],
+  ['n', 'н'], ['o', 'о'], ['p', 'п'], ['q', 'к'], ['r', 'р'], ['s', 'с'],
+  ['t', 'т'], ['u', 'у'], ['v', 'в'], ['w', 'в'], ['y', 'и'], ['z', 'з'],
+]
+
+const HAS_LATIN = /[a-z]/
+
+export function translit(word) {
+  let out = ''
+  let i = 0
+  while (i < word.length) {
+    let hit = null
+    for (const [lat, cyr] of TRANSLIT) {
+      if (word.startsWith(lat, i)) { hit = [lat, cyr]; break }
+    }
+    if (hit) { out += hit[1]; i += hit[0].length }
+    else { out += word[i]; i += 1 }
+  }
+  return out.replace(/ё/g, 'е')
+}
 
 const SYNONYMS = [
   ['курин', 'курица', 'кура', 'курочка', 'цыпленок', 'цып', 'куриц'],
@@ -618,26 +857,43 @@ const SYNONYMS = [
   ['протеин', 'протеинов', 'белков', 'whey', 'вей', 'изолят', 'гейнер'],
 ].map((g) => g.map(norm))
 
+// Возвращает { terms, primaryCount }. Первые primaryCount терминов — это сам
+// запрос (и его кириллическая запись), остальные — синонимы: они ищут шире, но
+// и весят меньше, иначе совпадение с частью запроса обгоняло бы совпадение
+// со всем запросом (см. SYNONYM_FACTOR в fuzzy.js).
 function expandQuery(q) {
   const terms = new Set([q])
+  // Латинский ввод: ищем и по самому запросу (по нему бьют иноязычные alias'ы),
+  // и по его кириллической записи — «banana» находит «Банан» без таблицы.
+  if (HAS_LATIN.test(q)) {
+    const t = norm(translit(q))
+    if (t && t !== q) terms.add(t)
+  }
+  const primaryCount = terms.size
   const words = q.split(/\s+/).filter((w) => w.length >= 3)
   for (const g of SYNONYMS) {
     const hit = g.some((w) => words.some((x) => x === w || x.startsWith(w) || w.startsWith(x)))
     if (hit) g.forEach((w) => terms.add(w))
   }
-  return [...terms]
+  return { terms: [...terms], primaryCount }
 }
 
 // Поиск по локальной базе: синонимы + опечатки + ранжирование по релевантности
 // (см. lib/fuzzy.js). Раньше поиск был бинарным: «гречнвая» или «малако» не
 // находили ничего, а найденное шло в порядке базы — длинное составное блюдо
 // могло стоять выше самого продукта. Пустой запрос — вся база, как и раньше.
-export function searchLocal(query) {
+// boost(food) → 0..1 — личная надбавка (см. MEMORY_BOOST_MAX в fuzzy.js).
+// Она поднимает продукт внутри тира релевантности и не может перевести его
+// через границу тира: релевантность остаётся фундаментом.
+export function searchLocal(query, { boost, items = FOODS } = {}) {
   const q = norm(query)
-  if (!q) return FOODS
-  return rankedSearch(FOODS, expandQuery(q), {
+  if (!q) return items
+  const { terms, primaryCount } = expandQuery(q)
+  return rankedSearch(items, terms, {
     toText: (f) => norm(f.name + ' ' + (f.alias || '')),
     toName: (f) => norm(f.name),
+    boost,
+    primaryCount,
   })
 }
 
@@ -1000,12 +1256,35 @@ export function getPortions(food) {
   return out
 }
 
+// Поиск по названиям в произвольном списке (свои блюда, рецепты).
+//
+// Те же правила, что и для продуктов: нормализация запроса, синонимы, опечатки.
+// Своё человек ищет по имени ровно так же, как всё остальное, и заставлять его
+// помнить, что рецепты живут в отдельной вкладке, — значит не найти их вовсе.
+export function searchByName(list, query) {
+  const q = norm(query)
+  if (!q) return list || []
+  const { terms, primaryCount } = expandQuery(q)
+  // minResults: 1, а не 0. Ноль означал бы «строгого прохода всегда достаточно»,
+  // и нечёткий поиск не запускался бы НИКОГДА — свой «Борщ» не находился по
+  // запросу «борш». Опечатки в собственных названиях человек делает ровно так
+  // же, как в чужих.
+  return rankedSearch(list || [], terms, {
+    toText: (x) => norm(x.name),
+    toName: (x) => norm(x.name),
+    minResults: 1,
+    primaryCount,
+  })
+}
+
 export function searchIngredients(query) {
   const q = norm(query)
   if (!q) return CONSTRUCTOR_ING
-  return rankedSearch(CONSTRUCTOR_ING, expandQuery(q), {
+  const { terms, primaryCount } = expandQuery(q)
+  return rankedSearch(CONSTRUCTOR_ING, terms, {
     toText: (i) => norm(i.name),
     toName: (i) => norm(i.name),
+    primaryCount,
   })
 }
 
@@ -1035,6 +1314,55 @@ function per100(nutriments, key, servingQty) {
     return (+serving * 100) / servingQty
   }
   return null
+}
+
+const offMacro = (v) => (v == null || !Number.isFinite(+v) ? null : +(+v).toFixed(1))
+
+// Известны ли БЖУ. Ни одного из трёх — значит показывать «Б0 У0 Ж0» нельзя.
+export function hasMacros(f) {
+  return f?.protein != null || f?.carbs != null || f?.fat != null
+}
+
+// Единая подпись количества: «150 г», «2 шт», «1,5 порции».
+//
+// Две вещи, на которых легко опозориться и которые нельзя чинить в каждом
+// месте по-своему:
+//   • десятичный разделитель. По-русски это запятая, а Number печатает точку;
+//   • склонение. «1 порция», «2 порции», «5 порций», а любое дробное — всегда
+//     «порции» (1,5 порции; 0,5 порции). Раньше дневник печатал «1.5 порция».
+// Граммы, миллилитры и штуки не склоняются, поэтому таблица нужна только для
+// порций — но проходить через эту функцию должны все, иначе разделитель снова
+// разъедется.
+const UNIT_FORMS = { 'порция': ['порция', 'порции', 'порций'] }
+
+export function formatAmount(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ''
+  return (Math.round(n * 100) / 100).toString().replace('.', ',')
+}
+
+export function amountLabel(value, unit = 'г') {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ''
+  const forms = UNIT_FORMS[unit]
+  if (!forms) return `${formatAmount(n)} ${unit}`
+  // Дробное число — всегда родительный падеж единственного числа.
+  if (!Number.isInteger(n)) return `${formatAmount(n)} ${forms[1]}`
+  const mod10 = n % 10
+  const mod100 = n % 100
+  const form = mod10 === 1 && mod100 !== 11 ? forms[0]
+    : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20) ? forms[1]
+      : forms[2]
+  return `${n} ${form}`
+}
+
+// Единая подпись «Б… У… Ж…» для всего приложения.
+//
+// Неизвестное показываем прочерком, а не нулём и не пустотой. Пустота — это
+// как раз то, что получалось раньше: в дневнике висела буква «Ж» без числа.
+export function macroLabel(m) {
+  const v = (x) => (x == null || !Number.isFinite(+x) ? '—' : +(+x).toFixed(1))
+  return `Б${v(m?.protein)} У${v(m?.carbs)} Ж${v(m?.fat)}`
 }
 
 const posNum = (v, max) => {
@@ -1099,9 +1427,10 @@ export async function lookupBarcode(code, signal) {
     emoji: drink ? '🥤' : '🛒',
     unit,
     kcal: Math.round(kcal),
-    protein: +(+(per100(n, 'proteins', serving) || 0)).toFixed(1),
-    carbs: +(+(per100(n, 'carbohydrates', serving) || 0)).toFixed(1),
-    fat: +(+(per100(n, 'fat', serving) || 0)).toFixed(1),
+    // null, а не ноль: см. пояснение в searchOpenFoodFacts ниже.
+    protein: offMacro(per100(n, 'proteins', serving)),
+    carbs: offMacro(per100(n, 'carbohydrates', serving)),
+    fat: offMacro(per100(n, 'fat', serving)),
     source: 'off',
     barcode: code,
     portions,
@@ -1147,12 +1476,17 @@ export async function searchOpenFoodFacts(query, signal) {
       const key = label.toLowerCase()
       if (seen.has(key)) return null
       seen.add(key)
+      // База знает калорийность далеко не для всех записей полностью. Раньше
+      // отсутствующий белок записывался нулём, и строка «Б0 У0 Ж0» выглядела
+      // как измеренный факт: человек добавлял продукт и получал в дневнике
+      // честный на вид ноль белка. Не знаем — так и говорим.
+      const macro = (v) => (v == null || !Number.isFinite(+v) ? null : +(+v).toFixed(1))
       return {
         name: label,
         kcal: Math.round(kcal),
-        protein: +(+(n.proteins_100g || 0)).toFixed(1),
-        carbs: +(+(n.carbohydrates_100g || 0)).toFixed(1),
-        fat: +(+(n.fat_100g || 0)).toFixed(1),
+        protein: macro(n.proteins_100g),
+        carbs: macro(n.carbohydrates_100g),
+        fat: macro(n.fat_100g),
         emoji: '🛒',
         source: 'off',
       }

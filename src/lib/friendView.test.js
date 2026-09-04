@@ -28,7 +28,12 @@ const FULL = {
     createdAt: 1754400000000,
   },
   theme: 'dark',
-  days: { '2026-08-06': { meals: [{ id: 'm1', name: 'Овсянка', kcal: 300 }], mood: 'good', note: 'личная заметка' } },
+  days: { '2026-08-06': {
+    meals: [{ id: 'm1', name: 'Овсянка', kcal: 300 }],
+    mood: 'good',
+    note: 'личная заметка',
+    supps: [{ id: 'p1', name: 'Мелатонин 3 мг', dose: 1, unit: 'таблетка', provides: { melatonin: 3 } }],
+  } },
   customFoods: [
     { id: 'cf1', name: 'Мой борщ', kind: 'composite', recipe: [{ name: 'Свёкла' }] },
     { id: 'cf2', name: 'Творог 5%', kcal: 121 },
@@ -92,6 +97,11 @@ test('настроение, самочувствие и заметка дня д
   assert.equal(day.mood, undefined, 'настроение личнее списка продуктов')
   assert.equal(day.note, undefined, 'свободная заметка о самочувствии')
   assert.equal(day.wellbeing, undefined)
+  // Принятые добавки — тем более: что человек пьёт, это здоровье, а не рацион.
+  // Мелатонин, 5-HTP или витамины для беременных в чужом дневнике рассказывают
+  // о нём больше, чем заметка, которую мы уже договорились не отдавать.
+  assert.equal(day.supps, undefined, 'приём добавок другу не показывают')
+  assert.ok(!JSON.stringify(day).includes('Мелатонин'))
   assert.deepEqual(Object.keys(day), ['meals'], 'из дня видно ровно то, что на экране')
 })
 

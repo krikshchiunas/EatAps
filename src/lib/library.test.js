@@ -4,7 +4,7 @@ import {
   foodSnapshot, favoriteKey, isFavorite, toggleFavorite, MAX_FAVORITES,
   makeTemplate, templateTotals, templateToEntries,
   makeRecipe, recipeTotals, recipePerServing, recipeToFood,
-  buildPortionMemory, suggestPortion, PORTION_MIN_USES,
+  toPer100, PORTION_MIN_USES,
 } from './library.js'
 import { computeStreak, longestStreak, dayLogged, computeAchievements, achievementFacts, newlyEarned, FREEZE_ALLOWANCE } from './streaks.js'
 
@@ -49,8 +49,17 @@ test('toggleFavorite закрепляет и открепляет', () => {
 test('избранное не растёт бесконечно', () => {
   let favs = []
   for (let i = 0; i < MAX_FAVORITES + 10; i++) favs = toggleFavorite(favs, food(`Продукт ${i}`))
-  assert.equal(favs.length, MAX_FAVORITES)
-  assert.equal(favs[0].name, `Продукт ${MAX_FAVORITES + 9}`, 'новое закрепление идёт первым')
+  assert.equal(favs.length, MAX_FAVORITES, 'предел соблюдён')
+  // Переполнение отбрасывает НОВОЕ, а не вытесняет старое: см. соседний тест
+  // «предел избранного не вытесняет молча» — там причина.
+  assert.equal(favs[0].name, `Продукт ${MAX_FAVORITES - 1}`, 'последнее влезшее — первое')
+  assert.equal(favs.some((f) => f.name === `Продукт ${MAX_FAVORITES + 9}`), false)
+})
+
+test('новое закрепление идёт первым, пока есть место', () => {
+  let favs = []
+  for (const n of ['Овсянка', 'Банан', 'Творог']) favs = toggleFavorite(favs, food(n))
+  assert.equal(favs[0].name, 'Творог')
 })
 
 test('toggleFavorite возвращает прежний массив на мусоре', () => {
@@ -103,12 +112,16 @@ test('рецепт делится на порции', () => {
 
   const eaten = recipeToFood(r, 1, 'std:dinner')
   assert.equal(eaten.kcal, 625)
-  assert.equal(eaten.grams, 225)
+  // grams при unit «порция» — это ЧИСЛО ПОРЦИЙ, а не вес: пара (grams, unit)
+  // печатается в дневнике как «1 порция». Вес порции — в portionGrams.
+  assert.equal(eaten.grams, 1)
+  assert.equal(eaten.unit, 'порция')
+  assert.equal(eaten.portionGrams, 225)
   assert.equal(eaten.mealId, 'std:dinner')
   assert.equal(eaten.recipeId, r.id)
 
   const half = recipeToFood(r, 0.5)
-  assert.equal(half.kcal, 313) // 625 * 0.5 = 312.5 → округление
+  assert.equal(half.kcal, 313) // 2500 / 4 * 0.5 = 312.5 → округление
 })
 
 test('сахар рецепта известен только если известен у ВСЕХ ингредиентов', () => {
@@ -128,32 +141,12 @@ test('рецепт нормализует число порций', () => {
 
 // ── Память порций ─────────────────────────────────────────────────────────────
 
-test('память порций берёт медиану и игнорирует разовый выброс', () => {
-  const days = {
-    '2026-01-01': day([food('Овсянка', { grams: 180 })]),
-    '2026-01-02': day([food('Овсянка', { grams: 200 })]),
-    '2026-01-03': day([food('Овсянка', { grams: 190 })]),
-    '2026-01-04': day([food('Овсянка', { grams: 900 })]), // разовый перебор
-  }
-  const mem = buildPortionMemory(days)
-  const s = suggestPortion(mem, { name: 'Овсянка', unit: 'г' })
-  assert.equal(s.uses, 4)
-  assert.equal(s.grams, 195, 'медиана 180/190/200/900 = 195, среднее было бы 367')
-})
-
-test('одно использование ещё не привычка', () => {
-  const mem = buildPortionMemory({ '2026-01-01': day([food('Экзотика', { grams: 123 })]) })
-  assert.equal(suggestPortion(mem, { name: 'Экзотика', unit: 'г' }), null)
+// Привычная порция теперь считается в buildFoodMemory (тесты — в
+// foodSearch.test.js): медиана, устойчивость к выбросам, «одно использование
+// ещё не привычка» и битые записи проверяются там же, по единственной
+// оставшейся реализации.
+test('порог «привычки» остаётся осмысленным', () => {
   assert.ok(PORTION_MIN_USES >= 2)
-})
-
-test('память порций не ломается на записях без веса', () => {
-  const mem = buildPortionMemory({
-    '2026-01-01': day([food('Суп', { grams: null }), food('Суп', { grams: 0 }), { name: 'Без всего' }]),
-  })
-  assert.deepEqual(mem, {})
-  assert.equal(suggestPortion(null, { name: 'A' }), null)
-  assert.equal(suggestPortion({}, null), null)
 })
 
 // ── Стрик ─────────────────────────────────────────────────────────────────────
@@ -282,4 +275,70 @@ test('newlyEarned отдаёт только те, что ещё не отмеч�
   const fresh = newlyEarned(list, { 'first-log': '2026-01-01' })
   assert.ok(fresh.includes('days-7'))
   assert.ok(!fresh.includes('first-log'))
+})
+
+test('предел избранного не вытесняет молча', () => {
+  // Чистая функция ведёт себя так же, как стор: полный список не принимает
+  // новое, а не выбрасывает самое старое. Вытеснение здесь было бы вдвойне
+  // неверным — закреплённое человеком терялось бы без слова, и без тумбстоуна
+  // оно всё равно вернулось бы с другого устройства при синхронизации.
+  const full = Array.from({ length: MAX_FAVORITES }, (_, i) => food('Продукт ' + i))
+  const after = toggleFavorite(full, food('Ещё один'))
+  assert.equal(after.length, MAX_FAVORITES)
+  assert.equal(after.some((f) => f.name === 'Ещё один'), false, 'новое не влезло')
+  assert.equal(after[MAX_FAVORITES - 1].name, 'Продукт ' + (MAX_FAVORITES - 1), 'старое на месте')
+})
+
+// ── Рецепт → запись в дневнике ───────────────────────────────────────────────
+
+test('в дневник рецепт попадает порциями, а не граммами', () => {
+  // Пара (grams, unit) во всём приложении читается как «сколько и в чём».
+  // Вес в grams при unit «порция» давал в дневнике строку «260 порция».
+  const r = makeRecipe({
+    name: 'Борщ',
+    servings: 4,
+    items: [food('Говядина', { grams: 600, kcal: 1122, protein: 111, carbs: 0, fat: 72 })],
+  })
+  const entry = recipeToFood(r, 1.5)
+  assert.equal(entry.unit, 'порция')
+  assert.equal(entry.grams, 1.5, 'в grams — число порций')
+  assert.equal(entry.servings, 1.5)
+  assert.ok(entry.portionGrams > 0, 'вес не теряется, он в portionGrams')
+  // Округление ОДИН раз, от итога кастрюли: 1122 / 4 * 1.5 = 420.75 → 421.
+  // Умножение уже округлённой порции (281 × 1.5) дало бы 422.
+  assert.equal(entry.kcal, 421)
+})
+
+test('дробная порция считается честно, а не округляется до целой', () => {
+  const r = makeRecipe({ name: 'Суп', servings: 2, items: [food('Курица', { grams: 200, kcal: 400, protein: 40, carbs: 0, fat: 26 })] })
+  assert.equal(recipeToFood(r, 0.5).kcal, 100)
+  assert.equal(recipeToFood(r, 1).kcal, 200)
+})
+
+// ── Неизвестное БЖУ переживает сохранение ────────────────────────────────────
+
+test('снимок продукта не выдумывает нули вместо неизвестного', () => {
+  // Глобальная база часто знает только калорийность. Снимок кладут в избранное,
+  // в своё блюдо и в рецепт — и раньше именно в этот момент «БЖУ не указаны»
+  // молча превращалось в «Б0 У0 Ж0». Поиск говорил одно, избранное — другое.
+  const snap = foodSnapshot({ name: 'Печенье', unit: 'г', grams: 150, kcal: 683, protein: null, carbs: null, fat: null })
+  assert.equal(snap.kcal, 683, 'калорийность известна')
+  assert.equal(snap.protein, null)
+  assert.equal(snap.carbs, null)
+  assert.equal(snap.fat, null)
+})
+
+test('измеренный ноль снимок сохраняет как ноль', () => {
+  // Обратная сторона: у масла углеводов действительно нет.
+  const snap = foodSnapshot({ name: 'Масло', unit: 'г', grams: 10, kcal: 90, protein: 0, carbs: 0, fat: 10 })
+  assert.equal(snap.protein, 0)
+  assert.equal(snap.carbs, 0)
+})
+
+test('пересчёт записи на 100 г не создаёт знания', () => {
+  const per = toPer100({ name: 'Печенье', unit: 'г', grams: 150, kcal: 683, protein: null, carbs: null, fat: null })
+  assert.equal(per.kcal, 455)
+  assert.equal(per.protein, null, 'делить «неизвестно» бессмысленно')
+  const known = toPer100({ name: 'Овсянка', unit: 'г', grams: 50, kcal: 100, protein: 5, carbs: 10, fat: 2 })
+  assert.equal(known.protein, 10, 'известное считается как считалось')
 })

@@ -1,7 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
-import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchIngredients, searchOpenFoodFacts, getPortions } from '../lib/foods.js'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { plural } from '../lib/text.js'
+import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel } from '../lib/foods.js'
+import {
+  memoryBoost, frequentFoods, recentFoods, memoryPortion,
+  repeatEntry, toPer100, favoriteKey, MAX_FAVORITES,
+  templateToEntries, templateTotals, recipeTotals, recipePerServing, recipeToFood,
+} from '../lib/library.js'
 import { BEER_BRANDS, SPIRIT_TYPES, COCKTAILS, alcKcal } from '../lib/alcohol.js'
 import { useStore } from '../store.jsx'
+import Toast from './Toast.jsx'
+import RecipeEditorSheet from './RecipeEditorSheet.jsx'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import BarcodeScanner from './BarcodeScanner.jsx'
 
@@ -9,6 +17,30 @@ const round1 = (n) => +n.toFixed(1)
 const num = (v) => {
   const n = Number(String(v ?? '').replace(',', '.').replace(/[^\d.]/g, ''))
   return Number.isFinite(n) ? n : 0
+}
+
+// Сколько строк списка показывать за раз.
+const PAGE = 40
+// Сколько строк показывать в каждой секции памяти.
+const MEMORY_ROWS = 6
+// Своих блюд и рецептов у человека немного, но каждая строка «весит» больше
+// (это не продукт, а целый набор), поэтому показываем меньше — иначе они
+// вытеснят с экрана поиск и память.
+const TPL_ROWS = 3
+
+// Порция, после которой стоит переспросить: обычно это лишний ноль (1500 вместо
+// 150). Не запрещаем — человек мог сварить кастрюлю, — но и молчать не должны.
+const HUGE_PORTION = 3000
+
+// Необязательное поле состава. Пустое поле — это «не знаю», а не «ноль»:
+// записанный ноль означал бы измеренное значение и в будущем стал бы
+// неотличим от настоящего нуля (у масла сахара и правда нет).
+// Возвращает null, если человек ничего не ввёл.
+const optionalNum = (raw, scale = 1) => {
+  const s = String(raw ?? '').trim()
+  if (!s) return null
+  const v = num(s) * scale
+  return Number.isFinite(v) ? round1(v) : null
 }
 
 const SUGAR_TSP = { grams: 4, kcal: 16, carbs: 4 }
@@ -40,19 +72,28 @@ const SECTIONS = [
   { key: 'fastfood', label: 'Фастфуд' },
 ]
 
-const norm = (s) => s.toLowerCase().replace(/ё/g, 'е').trim()
+const norm = normalizeQuery
 
 // mealId — обязателен: продукт всегда добавляется в конкретный приём пищи
 // (секцию), выбранный на дневном экране. mealType — 'breakfast'/'lunch'/... для
 // стандартных секций (undefined для пользовательских) — сохраняется в записи
 // продукта как легаси-совместимое поле type, источник истины — mealId.
-export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealType }) {
-  const { customFoods, customIngredients, recents, prefs, addCustomFood, removeCustomFood, addCustomIngredient, setPref } = useStore()
+export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, mealId, mealLabel, mealType }) {
+  const {
+    customFoods, customIngredients, recents, favorites, foodMemory, prefs,
+    addCustomFood, removeCustomFood, addCustomIngredient, toggleFavorite, setPref,
+    templates, recipes, removeTemplate, saveRecipe, removeRecipe,
+  } = useStore()
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
   const type = mealType
   const emit = (payload) => onAdd({ mealId, ...payload })
   const [selected, setSelected] = useState(null)
+  // Экраны своих блюд и рецептов. Держим отдельно от selected: у продукта из
+  // базы, набора строк и кастрюли на шесть порций — разные экраны и разный смысл.
+  const [openTpl, setOpenTpl] = useState(null)
+  const [openRcp, setOpenRcp] = useState(null)
+  const [editRcp, setEditRcp] = useState(null) // null | recipe | 'new'
   const [method, setMethod] = useState(null)
   const [grams, setGrams] = useState('150')
   const [sugar, setSugar] = useState(0)
@@ -66,15 +107,25 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
   const [scanning, setScanning] = useState(false)
   const [toast, setToast] = useState(null)
 
-  const showToast = (msg) => {
-    setToast(msg)
-    setTimeout(() => setToast(null), 1500)
-  }
+  // Тост может нести действие «Отменить», поэтому это не строка, а объект.
+  // Временем жизни и разметкой заведует сам Toast.
+  const showToast = (msg, undo) => setToast({ msg, undo, at: Date.now() })
 
   const [remote, setRemote] = useState([])
   const [remoteState, setRemoteState] = useState('idle')
   const [section, setSection] = useState(null)
-  const abortRef = useRef(null)
+  // Счётчик «повторить запрос»: меняется по кнопке и перезапускает эффект поиска.
+  const [retryTick, setRetryTick] = useState(0)
+  // Сколько строк списка показано. Раньше выдача жёстко обрезалась сороковой
+  // записью и до остального нельзя было добраться вообще никак.
+  const [limit, setLimit] = useState(PAGE)
+  // Прокрутка листа. Человек уходит вглубь списка, открывает продукт, решает,
+  // что не тот, и возвращается — он обязан вернуться на то же место, а не в
+  // начало трёхтысячепиксельного списка. Экран продукта всегда открывается
+  // сверху: иначе имя и кнопка «выбрать другой» оказывались за краем.
+  // Элемент листа берём у useSheetDrag — второй ref на тот же узел не нужен.
+  const sheetEl = () => sheetProps.ref?.current || null
+  const listScroll = useRef(0)
 
   // Alcohol sub-state
   const [alcSubTab, setAlcSubTab] = useState('beer')
@@ -91,22 +142,73 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
   }, [section])
 
   const q = norm(query)
-  const custom = q
-    ? customFoods.filter((f) => norm(f.name).includes(q))
-    : section === 'mine'
-    ? customFoods.filter((f) => f.source === 'custom')
-    : section
-    ? customFoods.filter((f) => f.cat === section)
-    : customFoods
 
-  const baseList = q
-    ? searchLocal(query)
-    : section === 'mine' || section === 'alcohol'
-    ? []
-    : section
-    ? FOODS.filter((f) => f.cat === section && !f.builder)
-    : FOODS
-  const local = [...custom, ...baseList]
+  // Личная надбавка к релевантности: частота, свежесть, избранное. Ограничена
+  // сверху (см. MEMORY_BOOST_MAX) — поднимает продукт внутри тира совпадения и
+  // не может вытащить наверх нерелевантный.
+  const boost = useMemo(() => memoryBoost(foodMemory, favorites), [foodMemory, favorites])
+  const favKeys = useMemo(() => new Set(favorites.map((f) => favoriteKey(f))), [favorites])
+
+  // Свои продукты ищутся вместе с базой, а не отдельным списком с примитивным
+  // «включает подстроку»: иначе «мой борщь» с опечаткой не находился, а точное
+  // совпадение из базы уезжало вниз под неточное своё.
+  const searchPool = useMemo(() => {
+    const seen = new Set()
+    const out = []
+    for (const f of [...customFoods, ...FOODS]) {
+      const k = favoriteKey(f)
+      if (seen.has(k)) continue // свой продукт перекрывает одноимённый из базы
+      seen.add(k)
+      out.push(f)
+    }
+    return out
+  }, [customFoods])
+
+  const local = useMemo(() => {
+    if (q) return searchLocal(query, { items: searchPool, boost })
+    if (section === 'alcohol') return []
+    if (section === 'mine') return customFoods.filter((f) => f.source === 'custom')
+    if (section) return searchPool.filter((f) => f.cat === section && !f.builder)
+    return searchPool
+  }, [q, query, section, searchPool, customFoods, boost])
+
+  // ── Память: избранное / часто / недавно ────────────────────────────────────
+  // Три РАЗНЫХ списка, не один «популярное». Избранное человек выбрал сам,
+  // «часто» посчитано по журналу приёмов, «недавно» — просто последние.
+  // Пересечения убираем, чтобы один и тот же продукт не занимал три строки.
+  // Избранного может быть до MAX_FAVORITES (60). Показывать все сразу нельзя:
+  // стена из шестидесяти строк вытолкнула бы «часто» и «недавнее» за экран, и
+  // главный ответ на вопрос «что человек сейчас ест» стал бы недоступен.
+  const [favLimit, setFavLimit] = useState(MEMORY_ROWS)
+  const [tplLimit, setTplLimit] = useState(TPL_ROWS)
+  // Своё нужно находить поиском, а не только листая секции: человек, который
+  // сварил борщ и назвал рецепт «Борщ», наберёт «борщ» — и обязан увидеть СВОЙ,
+  // а не одноимённый из общей базы.
+  const tplFound = useMemo(() => (q ? searchByName(templates, query) : []), [q, query, templates])
+  const rcpFound = useMemo(() => (q ? searchByName(recipes, query) : []), [q, query, recipes])
+  const [rcpLimit, setRcpLimit] = useState(TPL_ROWS)
+  const favoriteRows = useMemo(
+    () => favorites.map((f) => ({ food: f, key: favoriteKey(f), grams: memoryPortion(foodMemory, f) })),
+    [favorites, foodMemory],
+  )
+  const frequentRows = useMemo(
+    () => frequentFoods(foodMemory, { limit: MEMORY_ROWS }).filter((e) => !favKeys.has(e.key)),
+    [foodMemory, favKeys],
+  )
+  const recentRows = useMemo(() => {
+    const shown = new Set([...favKeys, ...frequentRows.map((e) => e.key)])
+    return recentFoods(foodMemory, { limit: MEMORY_ROWS, exclude: shown })
+  }, [foodMemory, favKeys, frequentRows])
+
+  const hasMemory = favoriteRows.length > 0 || frequentRows.length > 0 || recentRows.length > 0
+
+  // Новый запрос или другая категория — список начинается заново.
+  useEffect(() => { setLimit(PAGE) }, [q, section])
+
+  // Кэш ответов глобальной базы на время жизни листа. Человек стирает букву и
+  // возвращает её обратно — в сеть за тем же ответом лезть незачем. Кэш живёт
+  // вместе с листом и умирает вместе с ним: устаревших данных не накопит.
+  const remoteCache = useRef(new Map())
 
   useEffect(() => {
     const s = query.trim()
@@ -115,66 +217,168 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
       setRemoteState('idle')
       return
     }
-    setRemoteState('loading')
+    const key = norm(s)
+    const cached = remoteCache.current.get(key)
+    if (cached) {
+      setRemote(cached)
+      setRemoteState(cached.length ? 'done' : 'empty')
+      return
+    }
+    // Результаты ПРЕДЫДУЩЕГО запроса убираем сразу. Иначе, пока идёт новый
+    // запрос (а если он упадёт — то и после), под новым словом продолжали
+    // висеть чужие находки, подписанные как результат поиска. На их месте
+    // показываются скелеты: место занято, но данные не врут.
+    setRemote([])
+
+    // alive закрывает целый класс гонок: ответ на устаревший запрос (пришедший
+    // позже нового) больше не может перезаписать свежие результаты.
+    let alive = true
     const controller = new AbortController()
-    abortRef.current?.abort()
-    abortRef.current = controller
-    const timeout = setTimeout(() => controller.abort(), 8000)
+    // «Ищем…» показываем ПОСЛЕ паузы, а не на каждое нажатие клавиши: при
+    // быстром наборе надпись мигала на каждой букве и запрос уходил зря.
     const t = setTimeout(async () => {
+      if (!alive) return
+      setRemoteState('loading')
+      let timedOut = false
+      const timeout = setTimeout(() => { timedOut = true; controller.abort() }, 8000)
       try {
         const results = await searchOpenFoodFacts(s, controller.signal)
+        if (!alive) return
+        if (remoteCache.current.size > 40) remoteCache.current.clear()
+        remoteCache.current.set(key, results)
         setRemote(results)
         setRemoteState(results.length ? 'done' : 'empty')
-      } catch (e) {
-        if (e.name !== 'AbortError') setRemoteState('error')
+      } catch {
+        // Обрыв по таймауту раньше молча оставлял «Ищем…» навсегда: отмена
+        // приходила как AbortError, а его обработчик игнорировал. Теперь
+        // отличаем свой таймаут от отмены при новом запросе.
+        if (alive && (timedOut || !controller.signal.aborted)) {
+          setRemoteState(navigator.onLine === false ? 'offline' : 'error')
+        }
       } finally {
         clearTimeout(timeout)
       }
-    }, 450)
+    }, 350)
     return () => {
+      alive = false
       clearTimeout(t)
-      clearTimeout(timeout)
       controller.abort()
     }
-  }, [query, mode, selected])
+  }, [query, mode, selected, retryTick])
 
   const unit = selected?.unit || (selected?.cat === 'drink' ? 'мл' : 'г')
   const g = Math.max(0, num(grams))
-  const effective = selected && selected.hasVariants && method ? method : selected
+  const chosen = selected && selected.hasVariants && method ? method : selected
+  // Глобальная база знает калорийность заметно чаще, чем БЖУ. Раньше пробел
+  // заполнялся нулями и выглядел как факт. Теперь пробел виден, а человек может
+  // переписать три числа с этикетки — это его собственные данные, а не наша
+  // догадка. Пустое поле так и остаётся неизвестным.
+  const [fill, setFill] = useState({ protein: '', carbs: '', fat: '' })
+  const needFill = !!chosen && !chosen.builder && !hasMacros(chosen)
+  const effective = useMemo(() => {
+    if (!needFill) return chosen
+    const v = (raw) => { const n = num(raw); return String(raw).trim() === '' ? null : (Number.isFinite(n) && n >= 0 ? n : null) }
+    return { ...chosen, protein: v(fill.protein), carbs: v(fill.carbs), fat: v(fill.fat) }
+  }, [chosen, needFill, fill])
   const preview = effective && !selected?.builder ? scale(effective, g) : null
 
+  // ── Быстрое добавление ─────────────────────────────────────────────────────
+  // Повтор привычной порции одним касанием. Количество НЕ выдумывается: берётся
+  // привычная порция (медиана последних) или прошлое количество, и то и другое
+  // — настоящие числа из журнала. Если ни того ни другого нет, кнопки нет и
+  // человек попадает на обычный экран количества.
+  const lastQuick = useRef({ key: '', at: 0 })
+
+  const quickAdd = (payload, label) => {
+    if (!payload?.name) return
+    // Случайный двойной тап по одной и той же строке не должен записывать
+    // продукт дважды. Осознанный повтор через полсекунды — записывает.
+    const key = `${payload.name}|${payload.grams}`
+    const now = Date.now()
+    if (lastQuick.current.key === key && now - lastQuick.current.at < 600) return
+    lastQuick.current = { key, at: now }
+
+    const id = onAdd({ mealId, type, ...payload })
+    const amount = payload.grams > 0 ? `${payload.grams} ${payload.unit || 'г'}` : `${payload.kcal} ккал`
+    showToast(
+      `${label || payload.name} · ${amount}`,
+      id && onRemove ? () => { onRemove(id); showToast('Отменено') } : null,
+    )
+  }
+
+  // Быстрое добавление из строки памяти (частое/недавнее): повторяем снимок
+  // последнего приёма, пересчитанный на привычную порцию.
+  const quickAddMemory = (entry) => {
+    const payload = repeatEntry(entry)
+    if (payload) quickAdd(payload)
+  }
+
+  // Быстрое добавление из избранного: продукт хранится «на 100», порцию берём
+  // из памяти. Памяти нет — открываем экран количества, ничего не додумывая.
+  // Вызывается только когда привычная порция известна: кнопки быстрого
+  // добавления без количества у строки просто нет (см. MemoryRow).
+  const quickAddFavorite = (fav, grams) => {
+    quickAdd({ ...scale(fav, grams), name: fav.name, emoji: fav.emoji, unit: fav.unit || 'г', cat: fav.cat, grams })
+  }
+
+  // Закрепить/снять. В избранном продукт хранится «на 100 г/мл» — в том же
+  // виде, что и в базе, поэтому его можно и открыть, и пересчитать на порцию.
+  const toggleFav = (food, { fromLog = false } = {}) => {
+    const product = fromLog ? toPer100(food) : food
+    if (!product) return
+    const res = toggleFavorite(product)
+    if (res === 'full') {
+      showToast(`В избранном максимум ${MAX_FAVORITES} — открепите ненужное`)
+      return
+    }
+    showToast(res === 'added' ? 'В избранном' : 'Убрано из избранного')
+  }
+
+  // Добавить блюдо из шаблона — сразу всеми строками, как оно и было записано.
+  const addTemplate = (tpl) => {
+    const entries = templateToEntries(tpl, mealId).map((e) => ({ ...e, type }))
+    if (!entries.length) return
+    const n = entries.length
+    if (onAddMany) onAddMany(entries, `${tpl.name} · ${n} ${plural(n, 'продукт', 'продукта', 'продуктов')}`)
+    else entries.forEach((e) => onAdd(e))
+    onClose()
+  }
+
+  // Рецепт добавляется ОДНОЙ строкой: съеденное количество порций от кастрюли.
+  // Дробное допустимо — полтарелки это 0.5, а не «примерно половина».
+  const addRecipe = (recipe, servingsEaten) => {
+    const food = recipeToFood(recipe, servingsEaten, mealId)
+    if (!food) return
+    onAdd({ ...food, type })
+    onClose()
+  }
+
   const pickFood = (food) => {
+    listScroll.current = sheetEl()?.scrollTop || 0
     setSelected(food)
     setMethod(food.hasVariants ? food.methods[0] : null)
     setSugar(0)
     const u = food.unit || (food.cat === 'drink' ? 'мл' : 'г')
-    const last = recents.find((r) => r.name === food.name && r.unit === u && r.grams)
-    setGrams(last ? String(last.grams) : u === 'мл' ? '250' : '150')
+    // Привычная порция из памяти (медиана последних) — она устойчивее, чем
+    // «сколько было в последний раз»: одна разовая тарелка её не сдвигает.
+    // Памяти нет — прежний список недавних, затем нейтральное значение.
+    const remembered = memoryPortion(foodMemory, { name: food.name, unit: u })
+    const last = remembered || recents.find((r) => r.name === food.name && r.unit === u && r.grams)?.grams
+    setGrams(last ? String(last) : u === 'мл' ? '250' : '150')
   }
 
-  // Tap on recent → open detail screen (find in DB first, else reconstruct from per-100g)
-  const pickRecent = (r) => {
-    const allFoods = [...customFoods, ...FOODS]
-    const found = allFoods.find((f) => f.name === r.name)
-    if (found) {
-      pickFood(found)
-    } else if (r.grams && r.grams > 0) {
-      const f = 100 / r.grams
-      pickFood({
-        name: r.name,
-        emoji: r.emoji,
-        cat: r.unit === 'мл' ? 'drink' : 'dish',
-        unit: r.unit || 'г',
-        kcal: Math.round(r.kcal * f),
-        protein: round1(r.protein * f),
-        carbs: round1(r.carbs * f),
-        fat: round1(r.fat * f),
-      })
-    } else {
-      // No gram info — add directly
-      emit({ type, name: r.name, emoji: r.emoji, grams: r.grams, unit: r.unit, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat })
-      onClose()
-    }
+  // Тап по строке памяти → экран количества. Сначала ищем канонический продукт
+  // в базе: у него есть способы приготовления, подсказки порций и категория.
+  // Не нашли (например, продукт со способом приготовления в названии или из
+  // глобальной базы) — восстанавливаем «на 100» из снимка приёма.
+  const openMemory = (entry) => {
+    const found = searchPool.find((f) => favoriteKey(f) === entry.key)
+    if (found) { pickFood(found); return }
+    const per100 = toPer100(entry.snapshot)
+    if (per100) { pickFood(per100); return }
+    // Количество неизвестно (порция рецепта) — пересчитать не на что,
+    // повторяем запись как есть.
+    quickAddMemory(entry)
   }
 
   const startManual = () => {
@@ -216,6 +420,18 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
     setMethod(null)
     setSugar(0)
   }
+
+  // Открыли продукт — показываем его с начала; вернулись в список — возвращаем
+  // человека туда, где он был. Слой раскладки уже посчитан, поэтому позиция
+  // восстанавливается без видимого прыжка.
+  useLayoutEffect(() => {
+    const el = sheetEl()
+    if (!el) return
+    el.scrollTop = selected || alcItem ? 0 : listScroll.current
+  }, [selected, alcItem])
+
+  // Другой продукт — другие цифры с этикетки.
+  useEffect(() => { setFill({ protein: '', carbs: '', fat: '' }) }, [selected])
 
   const addPreset = () => {
     if (!effective || g <= 0) return
@@ -277,10 +493,13 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
         protein: round1(num(manual.protein) * scale),
         carbs: round1(num(manual.carbs) * scale),
         fat: round1(num(manual.fat) * scale),
-        sugar: round1(num(manual.sugar) * scale),
-        satFat: round1(num(manual.satFat) * scale),
         source: 'custom',
       }
+      const sugar = optionalNum(manual.sugar, scale)
+      // Ввели явно — помечаем. Ноль, введённый руками, это факт, а не пробел.
+      if (sugar != null) { entry.sugar = sugar; entry.sugarSrc = 'measured' }
+      const satFat = optionalNum(manual.satFat, scale)
+      if (satFat != null) entry.satFat = satFat
       addCustomFood(entry)
       setManual({ name: '', portion: '', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '' })
       showToast('Сохранено в «Моё»')
@@ -293,7 +512,7 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
         if (ml <= 0) return
         scale = 100 / ml
       }
-      addCustomFood({
+      const drink = {
         name: nm,
         emoji: '🥤',
         cat: 'drink',
@@ -302,11 +521,14 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
         protein: round1(num(manualDrink.protein) * scale),
         carbs: round1(num(manualDrink.carbs) * scale),
         fat: round1(num(manualDrink.fat) * scale),
-        sugar: round1(num(manualDrink.sugar) * scale),
-        satFat: round1(num(manualDrink.satFat) * scale),
-        caffeine: round1(num(manualDrink.caffeine) * scale),
         source: 'custom',
-      })
+      }
+      for (const [key, raw] of [['sugar', manualDrink.sugar], ['satFat', manualDrink.satFat], ['caffeine', manualDrink.caffeine]]) {
+        const v = optionalNum(raw, scale)
+        if (v != null) drink[key] = v
+      }
+      if (drink.sugar != null) drink.sugarSrc = 'measured'
+      addCustomFood(drink)
       setManualDrink({ name: '', ml: '250', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '', caffeine: '' })
       showToast('Сохранено в «Моё»')
     }
@@ -314,19 +536,16 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
 
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close}>
-      {toast && (
-        <div style={{
-          position: 'fixed', top: 'calc(env(safe-area-inset-top) + 16px)', left: '50%',
-          transform: 'translateX(-50%)', zIndex: 1000,
-          background: 'var(--primary)', color: 'var(--on-primary)',
-          padding: '10px 18px', borderRadius: 999,
-          fontSize: 14, fontWeight: 600, letterSpacing: -0.1,
-          boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
-          animation: 'toast-in 0.22s cubic-bezier(0.22,1,0.36,1) both',
-          pointerEvents: 'none',
-        }}>
-          {toast}
-        </div>
+      {/* Подтверждение добавления. Разметка — в общем Toast: этот же тост
+          показывает и главный экран, после того как лист закроется. */}
+      <Toast toast={toast} onDone={() => setToast(null)} />
+
+      {editRcp && (
+        <RecipeEditorSheet
+          recipe={editRcp}
+          onSave={(r, updated) => { saveRecipe(r); showToast(updated ? `«${r.name}» обновлён` : `«${r.name}» сохранён`) }}
+          onClose={() => setEditRcp(null)}
+        />
       )}
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
@@ -341,9 +560,22 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
           <button className="seg-scan" onClick={() => setScanning(true)} aria-label="Сканировать штрихкод" title="Сканировать штрихкод">📷</button>
         </div>
 
-        {mode === 'search' && !selected && !alcItem && (
+        {mode === 'search' && !selected && !alcItem && !openTpl && !openRcp && (
           <>
-            <input className="input" placeholder="Найдите продукт, напр. чечевица" value={query} onChange={(e) => setQuery(e.target.value)} style={{ marginBottom: 12 }} />
+            <input
+              className="input"
+              type="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              aria-label="Поиск продукта"
+              placeholder="Найдите продукт, напр. чечевица"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              // Enter на мобильной клавиатуре должен убирать её и показывать
+              // результаты, а не отправлять форму и перезагружать экран.
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
+              style={{ marginBottom: 12 }}
+            />
 
             {!query.trim() && (
               /* 2-row horizontal grid for categories */
@@ -373,65 +605,335 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
               />
             )}
 
-            {/* "Моё" empty state */}
-            {!query.trim() && section === 'mine' && customFoods.filter((f) => f.source === 'custom').length === 0 && (
-              <p className="muted" style={{ padding: '10px 0', fontSize: 14 }}>
-                Пока ничего. Добавьте еду вручную — она сохранится здесь.
-              </p>
+            {/* «Моё» — место, где человек управляет тем, что создал сам:
+                блюда, рецепты и свои продукты. Здесь же единственный вход в
+                создание рецепта, когда рецептов ещё нет: если показывать его
+                только внутри секции «Рецепты», первый рецепт завести неоткуда. */}
+            {!query.trim() && section === 'mine' && (
+              <div style={{ marginBottom: 6 }}>
+                <button
+                  className="btn soft"
+                  style={{ height: 44, marginBottom: 14 }}
+                  onClick={() => setEditRcp('new')}
+                >＋ Новый рецепт</button>
+
+                {templates.length > 0 && (
+                  <div style={{ marginBottom: 6 }}>
+                    <SectionLabel text="Мои блюда" count={templates.length} />
+                    {templates.map((t) => {
+                      const tot = templateTotals(t)
+                      return (
+                        <MemoryRow
+                          key={t.id}
+                          emoji={t.emoji || '🍽️'}
+                          name={t.name}
+                          meta={`${t.items.length} ${plural(t.items.length, 'продукт', 'продукта', 'продуктов')}`}
+                          quickLabel={`${tot.kcal} ккал`}
+                          onQuick={() => addTemplate(t)}
+                          onOpen={() => setOpenTpl(t)}
+                        />
+                      )
+                    })}
+                  </div>
+                )}
+
+                {recipes.length > 0 && (
+                  <div style={{ marginBottom: 6 }}>
+                    <SectionLabel text="Рецепты" count={recipes.length} />
+                    {recipes.map((r) => (
+                      <MemoryRow
+                        key={r.id}
+                        emoji={r.emoji || '🍲'}
+                        name={r.name}
+                        meta={`${recipePerServing(r).kcal} ккал / порция`}
+                        quickLabel="1 порция"
+                        onQuick={() => addRecipe(r, 1)}
+                        onOpen={() => setOpenRcp(r)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {customFoods.filter((f) => f.source === 'custom').length > 0 && (
+                  <SectionLabel text="Свои продукты" count={null} />
+                )}
+                {templates.length === 0 && recipes.length === 0 && customFoods.filter((f) => f.source === 'custom').length === 0 && (
+                  <p className="muted" style={{ padding: '10px 0', fontSize: 14, lineHeight: 1.5 }}>
+                    Пока пусто. Сохраните приём пищи как блюдо из меню «⋯», заведите рецепт кнопкой выше
+                    или добавьте продукт вручную — всё окажется здесь.
+                  </p>
+                )}
+              </div>
             )}
 
-            {!query.trim() && !section && recents.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                <SectionLabel text="Недавнее · тап = открыть" count={null} />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {recents.slice(0, 8).map((r) => (
-                    <button key={'rec-' + r.name} className="meal-item" style={{ textAlign: 'left', width: '100%' }} onClick={() => pickRecent(r)}>
-                      <span className="meal-emoji">{r.emoji}</span>
-                      <span style={{ flex: 1, minWidth: 0 }}>
-                        <span className="meal-name" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                        <span className="meal-meta">{r.grams ? `${r.grams} ${r.unit} · ` : ''}{r.kcal} ккал</span>
-                      </span>
-                      <span style={{ color: 'var(--primary)', fontSize: 20, flex: '0 0 auto' }}>›</span>
-                    </button>
-                  ))}
-                </div>
+            {q && (tplFound.length > 0 || rcpFound.length > 0) && (
+              <div style={{ marginBottom: 6 }}>
+                <SectionLabel text="Моё" count={tplFound.length + rcpFound.length} />
+                {tplFound.map((t) => {
+                  const tot = templateTotals(t)
+                  return (
+                    <MemoryRow
+                      key={'q-tpl-' + t.id}
+                      emoji={t.emoji || '🍽️'}
+                      name={t.name}
+                      meta={`блюдо · ${t.items.length} ${plural(t.items.length, 'продукт', 'продукта', 'продуктов')} · ${tot.kcal} ккал`}
+                      quickLabel={`${tot.kcal} ккал`}
+                      onQuick={() => addTemplate(t)}
+                      onOpen={() => setOpenTpl(t)}
+                    />
+                  )
+                })}
+                {rcpFound.map((r) => (
+                  <MemoryRow
+                    key={'q-rcp-' + r.id}
+                    emoji={r.emoji || '🍲'}
+                    name={r.name}
+                    meta={`рецепт · ${recipePerServing(r).kcal} ккал / порция`}
+                    quickLabel="1 порция"
+                    onQuick={() => addRecipe(r, 1)}
+                    onOpen={() => setOpenRcp(r)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Свои блюда и рецепты — то, что человек собрал сам. Стоят выше
+                памяти: блюдо экономит больше всего касаний (три продукта одним
+                нажатием), а рецепт — единственный способ записать «одну тарелку
+                из кастрюли», не пересчитывая ничего в уме. */}
+            {!query.trim() && !section && templates.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <SectionLabel text="Мои блюда" count={templates.length} />
+                {templates.slice(0, tplLimit).map((t) => {
+                  const tot = templateTotals(t)
+                  return (
+                    <MemoryRow
+                      key={t.id}
+                      emoji={t.emoji || '🍽️'}
+                      name={t.name}
+                      // Калории — только на кнопке. Раньше «391 ккал» стояло и
+                      // в подписи, и на кнопке: строка от этого переносилась
+                      // на две, а второе число ничего не добавляло.
+                      meta={`${t.items.length} ${plural(t.items.length, 'продукт', 'продукта', 'продуктов')}`}
+                      quickLabel={`${tot.kcal} ккал`}
+                      onQuick={() => addTemplate(t)}
+                      onOpen={() => setOpenTpl(t)}
+                    />
+                  )
+                })}
+                {templates.length > tplLimit && (
+                  <button
+                    onClick={() => setTplLimit((n) => n + TPL_ROWS)}
+                    style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, padding: '10px 0', minHeight: 44 }}
+                  >Ещё {templates.length - tplLimit}</button>
+                )}
+              </div>
+            )}
+
+            {!query.trim() && !section && recipes.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <SectionLabel text="Рецепты" count={recipes.length} />
+                {recipes.slice(0, rcpLimit).map((r) => {
+                  const per = recipePerServing(r)
+                  return (
+                    <MemoryRow
+                      key={r.id}
+                      emoji={r.emoji || '🍲'}
+                      name={r.name}
+                      meta={`${per.kcal} ккал / порция`}
+                      quickLabel="1 порция"
+                      onQuick={() => addRecipe(r, 1)}
+                      onOpen={() => setOpenRcp(r)}
+                    />
+                  )
+                })}
+                {recipes.length > rcpLimit && (
+                  <button
+                    onClick={() => setRcpLimit((n) => n + TPL_ROWS)}
+                    style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, padding: '10px 0', minHeight: 44 }}
+                  >Ещё {recipes.length - rcpLimit}</button>
+                )}
+                <button
+                  onClick={() => setEditRcp('new')}
+                  style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, padding: '10px 0', minHeight: 44 }}
+                >＋ Новый рецепт</button>
+              </div>
+            )}
+
+            {/* Память: три разных списка. Избранное человек закрепил сам,
+                «часто» посчитано по журналу приёмов, «недавнее» — последнее.
+                Смешивать их в одно «популярное» нельзя: это разные ответы на
+                разные вопросы. */}
+            {!query.trim() && !section && favoriteRows.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <SectionLabel text="Избранное" count={null} />
+                {favoriteRows.slice(0, favLimit).map(({ food, key, grams }) => (
+                  <MemoryRow
+                    key={'fav-' + key}
+                    emoji={food.emoji}
+                    name={food.name}
+                    meta={grams > 0 ? `${grams} ${food.unit || 'г'} · ${scale(food, grams).kcal} ккал` : `${food.kcal} ккал / 100 ${food.unit || 'г'}`}
+                    quickLabel={grams > 0 ? `${grams} ${food.unit || 'г'}` : null}
+                    onQuick={() => quickAddFavorite(food, grams)}
+                    onOpen={() => pickFood(food)}
+                    favorite
+                    onFav={() => toggleFav(food)}
+                  />
+                ))}
+                {favoriteRows.length > favLimit && (
+                  <button
+                    onClick={() => setFavLimit((n) => n + MEMORY_ROWS)}
+                    style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, padding: '10px 0', minHeight: 44 }}
+                  >Ещё {favoriteRows.length - favLimit} в избранном</button>
+                )}
+              </div>
+            )}
+
+            {!query.trim() && !section && frequentRows.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <SectionLabel text="Часто едите" count={null} />
+                {frequentRows.map((e) => (
+                  <MemoryRow
+                    key={'freq-' + e.key}
+                    emoji={e.emoji}
+                    name={e.name}
+                    meta={memoryMeta(e)}
+                    quickLabel={quickLabelFor(e)}
+                    onQuick={() => quickAddMemory(e)}
+                    onOpen={() => openMemory(e)}
+                    favorite={favKeys.has(e.key)}
+                    onFav={canFavorite(e) ? () => toggleFav(e.snapshot, { fromLog: true }) : null}
+                  />
+                ))}
+              </div>
+            )}
+
+            {!query.trim() && !section && recentRows.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <SectionLabel text="Недавнее" count={null} />
+                {recentRows.map((e) => (
+                  <MemoryRow
+                    key={'rec-' + e.key}
+                    emoji={e.emoji}
+                    name={e.name}
+                    meta={memoryMeta(e)}
+                    quickLabel={quickLabelFor(e)}
+                    onQuick={() => quickAddMemory(e)}
+                    onOpen={() => openMemory(e)}
+                    favorite={favKeys.has(e.key)}
+                    onFav={canFavorite(e) ? () => toggleFav(e.snapshot, { fromLog: true }) : null}
+                  />
+                ))}
               </div>
             )}
 
             {section !== 'alcohol' && local.length > 0 && (
               <>
-                <SectionLabel text={query.trim() ? 'Быстрая база' : section ? SECTIONS.find((s) => s.key === section)?.label : 'Популярное'} count={local.length} />
+                <SectionLabel
+                  text={query.trim() ? 'Найдено' : section ? SECTIONS.find((s) => s.key === section)?.label : 'Вся база'}
+                  count={local.length}
+                />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {local.slice(0, 40).map((f) => (
-                    <FoodRow key={'l-' + (f.id || f.name)} f={f} onClick={() => pickFood(f)} onDelete={f.source === 'custom' ? () => removeCustomFood(f.id) : null} />
-                  ))}
+                  {local.slice(0, limit).map((f) => {
+                    // Быстрое добавление даём только там, где количество известно
+                    // из личной истории, и только для простых продуктов: у блюда
+                    // с конструктором или способами приготовления «одним касанием»
+                    // не бывает — там сначала нужен выбор.
+                    const simple = !f.builder && !f.hasVariants && f.kind !== 'composite' && !f.dairy
+                    const g = simple ? memoryPortion(foodMemory, f) : null
+                    return (
+                      <FoodRow
+                        key={'l-' + (f.id || f.name)}
+                        f={f}
+                        onClick={() => pickFood(f)}
+                        onDelete={f.source === 'custom' ? () => removeCustomFood(f.id) : null}
+                        favorite={favKeys.has(favoriteKey(f))}
+                        onFav={simple ? () => toggleFav(f) : null}
+                        quickLabel={g > 0 ? `${g} ${f.unit || 'г'}` : null}
+                        onQuick={g > 0 ? () => quickAdd({ ...scale(f, g), name: f.name, emoji: f.emoji, unit: f.unit || 'г', cat: f.cat, grams: g }) : null}
+                      />
+                    )
+                  })}
                 </div>
+                {local.length > limit && (
+                  <button
+                    className="btn soft"
+                    style={{ marginTop: 12 }}
+                    onClick={() => setLimit((n) => n + PAGE)}
+                  >Показать ещё {Math.min(PAGE, local.length - limit)} из {local.length - limit}</button>
+                )}
               </>
             )}
 
             {query.trim().length >= 2 && (
               <div style={{ marginTop: 18 }}>
                 <SectionLabel text="Глобальная база" count={remote.length || null} />
-                {remoteState === 'loading' && <p className="muted" style={{ padding: '8px 0', fontSize: 14 }}>Ищем в базе Open Food Facts…</p>}
-                {remoteState === 'error' && <p className="muted" style={{ padding: '8px 0', fontSize: 14 }}>Нет связи с глобальной базой. Локальные результаты выше или добавьте вручную.</p>}
-                {remoteState === 'empty' && <p className="muted" style={{ padding: '8px 0', fontSize: 14 }}>В глобальной базе ничего не нашлось.</p>}
+                {remoteState === 'loading' && (
+                  <div style={{ display: 'flex', flexDirection: 'column' }} aria-live="polite">
+                    {[0, 1, 2].map((i) => <SkeletonRow key={i} />)}
+                  </div>
+                )}
+                {/* Понятная причина и понятное действие вместо технической ошибки. */}
+                {(remoteState === 'error' || remoteState === 'offline') && (
+                  <div style={{ padding: '8px 0' }}>
+                    <p className="muted" style={{ fontSize: 14, margin: '0 0 10px' }}>
+                      {remoteState === 'offline'
+                        ? 'Нет интернета. Своё и найденное выше доступны без сети.'
+                        : 'Глобальная база не ответила. Результаты выше — из вашей базы.'}
+                    </p>
+                    <button className="chip" onClick={() => setRetryTick((n) => n + 1)}>Повторить</button>
+                  </div>
+                )}
+                {remoteState === 'empty' && (
+                  <p className="muted" style={{ padding: '8px 0', fontSize: 14 }}>В глобальной базе ничего не нашлось.</p>
+                )}
                 {remote.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     {remote.map((f, i) => (
-                      <FoodRow key={'r-' + i} f={f} onClick={() => pickFood(f)} />
+                      <FoodRow
+                        key={'r-' + i}
+                        f={f}
+                        onClick={() => pickFood(f)}
+                        favorite={favKeys.has(favoriteKey(f))}
+                        onFav={() => toggleFav(f)}
+                      />
                     ))}
                   </div>
                 )}
               </div>
             )}
 
-            {local.length === 0 && !query.trim() && recents.length === 0 && section !== 'alcohol' && section !== 'mine' && (
+            {/* Ничего не нашлось — это рабочий сценарий, а не тупик.
+                Показываем, что можно сделать дальше, а не «нет результатов». */}
+            {query.trim().length >= 2 && local.length === 0 && remote.length === 0 && remoteState !== 'loading' && (
+              <div style={{ marginTop: 18 }}>
+                <p className="meal-name" style={{ margin: '0 0 6px' }}>Не нашли «{clip(query.trim())}»</p>
+                <p className="muted" style={{ fontSize: 14, margin: '0 0 12px' }}>
+                  {query.trim().split(/\s+/).length > 1
+                    ? 'Попробуйте короче — одно слово вместо нескольких, или без бренда.'
+                    : 'Проверьте написание или попробуйте более общее название.'}
+                </p>
+                <div className="row wrap gap8" style={{ marginBottom: 12 }}>
+                  {query.trim().split(/\s+/).length > 1 && (
+                    <button className="chip" onClick={() => setQuery(query.trim().split(/\s+/)[0])}>
+                      Искать «{clip(query.trim().split(/\s+/)[0], 16)}»
+                    </button>
+                  )}
+                  <button className="chip" onClick={() => { setQuery(''); setSection(null) }}>Показать категории</button>
+                  <button className="chip" onClick={() => setScanning(true)}>📷 Сканировать штрихкод</button>
+                </div>
+              </div>
+            )}
+
+            {local.length === 0 && !query.trim() && !hasMemory && section !== 'alcohol' && section !== 'mine' && (
               <p className="muted" style={{ padding: '10px 0' }}>Начните вводить название продукта.</p>
             )}
 
+            {/* Ручной ввод — всегда доступный выход, когда базы не хватило.
+                Название уже набрано: печатать его второй раз не нужно. */}
             {query.trim() && (
               <button className="btn soft" style={{ marginTop: 14 }} onClick={startManual}>
-                Нет в списке? Добавить «{query.trim().length > 22 ? query.trim().slice(0, 22) + '…' : query.trim()}» вручную
+                Нет в списке? Добавить «{clip(query.trim())}» вручную
               </button>
             )}
 
@@ -456,6 +958,25 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
           <CustomDrinkBuilder selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} addCustomFood={addCustomFood} type={type} />
         )}
 
+        {mode === 'search' && openTpl && (
+          <TemplateScreen
+            tpl={openTpl}
+            onBack={() => setOpenTpl(null)}
+            onAdd={() => addTemplate(openTpl)}
+            onDelete={() => { removeTemplate(openTpl.id); setOpenTpl(null); showToast('Блюдо удалено') }}
+          />
+        )}
+
+        {mode === 'search' && openRcp && (
+          <RecipeScreen
+            recipe={openRcp}
+            onBack={() => setOpenRcp(null)}
+            onAdd={(n) => addRecipe(openRcp, n)}
+            onEdit={() => { setEditRcp(openRcp); setOpenRcp(null) }}
+            onDelete={() => { removeRecipe(openRcp.id); setOpenRcp(null); showToast('Рецепт удалён') }}
+          />
+        )}
+
         {mode === 'search' && selected?.builder === 'constructor' && (
           <ConstructorBuilder selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} addCustomFood={addCustomFood} customIngredients={customIngredients} addCustomIngredient={addCustomIngredient} type={type} />
         )}
@@ -465,17 +986,33 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
         )}
 
         {mode === 'search' && selected?.dairy && !selected.builder && (
-          <DairyPortion selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} type={type} recents={recents} />
+          <DairyPortion
+            selected={selected}
+            onBack={clearFood}
+            onAdd={emit}
+            onClose={onClose}
+            type={type}
+            remembered={memoryPortion(foodMemory, { name: selected.name, unit: selected.unit || 'г' })}
+          />
         )}
 
         {mode === 'search' && selected && !selected.builder && selected.kind !== 'composite' && !selected.dairy && (
           <div>
             <div className="row gap12" style={{ marginBottom: 18 }}>
               <FoodThumb key={selected.photo || selected.name} food={selected} />
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="meal-name" style={{ fontSize: 18 }}>{selected.name}</div>
-                <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={clearFood}>← выбрать другой</button>
+                <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={clearFood}>← выбрать другой</button>
               </div>
+              <button
+                onClick={() => toggleFav(selected)}
+                aria-label={favKeys.has(favoriteKey(selected)) ? 'Убрать из избранного' : 'Добавить в избранное'}
+                aria-pressed={favKeys.has(favoriteKey(selected))}
+                style={{
+                  width: 44, height: 44, flex: '0 0 auto', fontSize: 20,
+                  color: favKeys.has(favoriteKey(selected)) ? 'var(--primary)' : 'var(--ink-3)',
+                }}
+              >{favKeys.has(favoriteKey(selected)) ? '★' : '☆'}</button>
             </div>
 
             {selected.hasVariants && (
@@ -500,15 +1037,33 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
             <div className="field">
               <label>{unit === 'мл' ? 'Объём, мл' : 'Порция, грамм'}</label>
               {(() => {
-                const ps = getPortions(selected)
+                const base = getPortions(selected)
+                // Привычная порция человека — первой и подписанной «как обычно»:
+                // это его собственное измеренное число, а не наша усреднённая
+                // «тарелка». Дубли по весу убираем, поле остаётся открытым для
+                // правки — подсказка не подменяет фактическое количество.
+                const mine = memoryPortion(foodMemory, { name: selected.name, unit })
+                const ps = mine > 0
+                  ? [{ label: 'как обычно', grams: mine }, ...base.filter((p) => p.grams !== mine)].slice(0, 6)
+                  : base
                 return (
                   <>
-                    {ps[0] && (
+                    {base[0] && (
                       <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 8px' }}>
-                        Не взвешивая: {ps[0].label} ≈ {ps[0].grams} {unit}
+                        Не взвешивая: {base[0].label} ≈ {base[0].grams} {unit}
                       </p>
                     )}
-                    <input className="input" type="text" inputMode="decimal" value={grams} onChange={(e) => setGrams(e.target.value)} style={{ marginBottom: 10 }} />
+                    <input
+                      className="input" type="text" inputMode="decimal" value={grams}
+                      onChange={(e) => setGrams(sanitizeAmount(e.target.value))}
+                      aria-label={unit === 'мл' ? 'Объём, мл' : 'Порция, грамм'}
+                      style={{ marginBottom: 10 }}
+                    />
+                    {g > HUGE_PORTION && (
+                      <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '0 0 10px' }}>
+                        {g} {unit} — это много. Проверьте, не лишний ли ноль.
+                      </p>
+                    )}
                     <div className="row wrap gap8">
                       {ps.map((p) => (
                         <button key={p.label} className={`chip ${g === p.grams ? 'on' : ''}`} onClick={() => setGrams(String(p.grams))}>
@@ -538,10 +1093,27 @@ export default function AddMealSheet({ onClose, onAdd, mealId, mealLabel, mealTy
               </div>
             )}
 
+            {needFill && (
+              <div className="card" style={{ padding: 14, marginBottom: 14, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
+                <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 2 }}>БЖУ нет в базе</div>
+                <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 10px' }}>
+                  Известна только калорийность. Впишите с этикетки, на 100 {unit} — или оставьте пустым, тогда останется «неизвестно».
+                </p>
+                <div className="row gap8">
+                  <input className="input" type="number" inputMode="decimal" placeholder="Белки" aria-label={`Белки на 100 ${unit}`}
+                    value={fill.protein} onChange={(e) => setFill({ ...fill, protein: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+                  <input className="input" type="number" inputMode="decimal" placeholder="Углеводы" aria-label={`Углеводы на 100 ${unit}`}
+                    value={fill.carbs} onChange={(e) => setFill({ ...fill, carbs: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+                  <input className="input" type="number" inputMode="decimal" placeholder="Жиры" aria-label={`Жиры на 100 ${unit}`}
+                    value={fill.fat} onChange={(e) => setFill({ ...fill, fat: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+                </div>
+              </div>
+            )}
+
             <div className="row gap8" style={{ marginBottom: 22 }}>
               <PreviewStat label="ккал" v={preview.kcal + sugar * SUGAR_TSP.kcal} />
               <PreviewStat label="белки" v={preview.protein} />
-              <PreviewStat label="угл." v={round1(preview.carbs + sugar * SUGAR_TSP.carbs)} />
+              <PreviewStat label="угл." v={preview.carbs == null ? null : round1(preview.carbs + sugar * SUGAR_TSP.carbs)} />
               <PreviewStat label="жиры" v={preview.fat} />
             </div>
             <button className="btn" onClick={addPreset} disabled={g <= 0}>Добавить {preview.kcal + sugar * SUGAR_TSP.kcal} ккал</button>
@@ -817,7 +1389,7 @@ function AlcoholBuilder({ item, onBack, onAdd, onClose, type }) {
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{item.emoji}</span>
         <div style={{ flex: 1 }}>
           <div className="meal-name" style={{ fontSize: 18 }}>{item.name}</div>
-          <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← назад</button>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← назад</button>
         </div>
       </div>
 
@@ -906,7 +1478,7 @@ function ProteinShakeBuilder({ selected, prefs, setPref, onBack, onAdd, onClose,
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
           <div className="meal-name" style={{ fontSize: 18 }}>Протеиновый шейк</div>
-          <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
         </div>
       </div>
 
@@ -1000,7 +1572,7 @@ function CustomDrinkBuilder({ selected, onBack, onAdd, onClose, addCustomFood, t
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
           <div className="meal-name" style={{ fontSize: 18 }}>Свой напиток</div>
-          <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
         </div>
       </div>
 
@@ -1153,7 +1725,7 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
           <div className="meal-name" style={{ fontSize: 18 }}>Собери {selected.name.toLowerCase()}</div>
-          <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другое</button>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другое</button>
         </div>
       </div>
 
@@ -1263,7 +1835,7 @@ function CompositePortion({ selected, onBack, onAdd, onClose, type }) {
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
           <div className="meal-name" style={{ fontSize: 18 }}>{selected.name}</div>
-          <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
         </div>
       </div>
       <div className="card" style={{ padding: 14, marginBottom: 18, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
@@ -1284,10 +1856,12 @@ function CompositePortion({ selected, onBack, onAdd, onClose, type }) {
   )
 }
 
-function DairyPortion({ selected, onBack, onAdd, onClose, type, recents = [] }) {
+// remembered — привычная порция из памяти по журналу приёмов. Раньше здесь был
+// свой поиск по списку недавних, да ещё и по началу строки: «Молоко» цепляло
+// «Молоко сгущённое», и в поле подставлялся вес другого продукта.
+function DairyPortion({ selected, onBack, onAdd, onClose, type, remembered }) {
   const [fat, setFat] = useState(String(selected.defFat))
-  const last = recents.find((r) => r.name.startsWith(selected.name) && r.unit === 'г' && r.grams)
-  const [grams, setGrams] = useState(last ? String(last.grams) : '200')
+  const [grams, setGrams] = useState(remembered > 0 ? String(remembered) : '200')
 
   const fatN = Math.max(0, num(fat))
   const g = Math.max(0, num(grams))
@@ -1312,7 +1886,7 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, recents = [] }) 
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
           <div className="meal-name" style={{ fontSize: 18 }}>{selected.name}</div>
-          <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
         </div>
       </div>
 
@@ -1354,6 +1928,85 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, recents = [] }) 
   )
 }
 
+// ── Строка памяти ────────────────────────────────────────────────────────────
+// Три зоны касания, каждая не меньше 44 px: звезда, тело строки (открыть) и
+// кнопка быстрого добавления. Кнопка быстрого добавления показывается только
+// когда количество реально известно — она подписана этим количеством, чтобы
+// человек видел, что именно запишется, ДО нажатия.
+function MemoryRow({ emoji, name, meta, quickLabel, onQuick, onOpen, favorite, onFav }) {
+  return (
+    <div className="meal-item" style={{ gap: 8 }}>
+      {onFav ? (
+        <button
+          onClick={onFav}
+          aria-label={favorite ? `Убрать «${name}» из избранного` : `Добавить «${name}» в избранное`}
+          aria-pressed={favorite}
+          style={{
+            width: 40, height: 44, flex: '0 0 auto', fontSize: 17, lineHeight: 1,
+            color: favorite ? 'var(--primary)' : 'var(--ink-3)',
+          }}
+        >{favorite ? '★' : '☆'}</button>
+      ) : (
+        <span style={{ width: 40, flex: '0 0 auto' }} />
+      )}
+      <button
+        onClick={onOpen}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', flex: 1, minWidth: 0, minHeight: 44 }}
+      >
+        <span className="meal-emoji">{emoji}</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="meal-name" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+          <span className="meal-meta">{meta}</span>
+        </span>
+      </button>
+      {quickLabel && (
+        <button
+          onClick={onQuick}
+          aria-label={`Записать «${name}», ${quickLabel}`}
+          className="chip"
+          style={{ flex: '0 0 auto', minHeight: 44, padding: '10px 12px', fontWeight: 600, color: 'var(--primary)' }}
+        >＋ {quickLabel}</button>
+      )}
+    </div>
+  )
+}
+
+// Подпись строки памяти. Показываем привычную порцию и её калорийность —
+// столько, чтобы узнать продукт, и не столько, чтобы читать таблицу.
+function memoryMeta(e) {
+  const repeat = repeatEntry(e)
+  if (repeat?.grams > 0) return `${repeat.grams} ${e.unit} · ${repeat.kcal} ккал`
+  if (repeat) return `${repeat.kcal} ккал`
+  return `${e.uses} ${plural(e.uses, 'раз', 'раза', 'раз')}`
+}
+
+// Подпись кнопки быстрого добавления — только если количество известно.
+function quickLabelFor(e) {
+  const g = e.typicalGrams ?? e.lastGrams
+  return g > 0 ? `${g} ${e.unit}` : null
+}
+
+// Закрепить можно то, что переводится «на 100»: без количества пересчитать
+// продукт не из чего, а выдумывать значения нельзя.
+const canFavorite = (e) => Number(e?.snapshot?.grams) > 0
+
+
+// Скелет строки вместо спиннера: место под результат занимается сразу, и
+// список не прыгает, когда ответ приходит.
+function SkeletonRow() {
+  return (
+    <div className="meal-item" style={{ gap: 12 }}>
+      <span className="meal-emoji" style={{ opacity: 0.4 }} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', height: 12, width: '58%', borderRadius: 6, background: 'var(--surface-2)', marginBottom: 7 }} />
+        <span style={{ display: 'block', height: 10, width: '34%', borderRadius: 5, background: 'var(--surface-2)' }} />
+      </span>
+    </div>
+  )
+}
+
+const clip = (s, n = 22) => (s.length > n ? s.slice(0, n) + '…' : s)
+
 function SectionLabel({ text, count }) {
   return (
     <div className="row between" style={{ margin: '2px 0 8px' }}>
@@ -1363,29 +2016,53 @@ function SectionLabel({ text, count }) {
   )
 }
 
-function FoodRow({ f, onClick, onDelete }) {
+// Подпись по БЖУ. Если база не знает ни одного из трёх — так и пишем, а не
+// рисуем нули: «Б0 У0 Ж0» человек читает как измеренный факт, а это отсутствие
+// данных. Известное частично показываем через общий macroLabel с прочерками.
+const macroText = (f) => (hasMacros(f) ? macroLabel(f) : 'БЖУ не указаны')
+
+function FoodRow({ f, onClick, onDelete, favorite, onFav, quickLabel, onQuick }) {
   let subtitle
   if (f.builder === 'constructor') subtitle = 'собрать из ингредиентов'
   else if (f.builder === 'protein') subtitle = 'рассчитать по ингредиентам'
   else if (f.builder === 'custom') subtitle = 'добавить и запомнить свой'
   else if (f.kind === 'composite') subtitle = `${f.kcal} ккал/порция · моё`
   else if (f.dairy) subtitle = 'укажите порцию и % жирности'
-  else if (f.source === 'custom') subtitle = `${f.kcal} ккал · Б${f.protein} / 100 мл · мой напиток`
+  // Свой продукт: единица берётся из самого продукта. Раньше здесь были жёстко
+  // зашиты «100 мл» и «мой напиток» — собственное БЛЮДО подписывалось как
+  // напиток и в чужих единицах.
+  else if (f.source === 'custom') subtitle = `${f.kcal} ккал · ${macroText(f)} / 100 ${f.unit || 'г'} · моё`
   else if (f.hasVariants) subtitle = `${f.methods.length} способов приготовления`
-  else subtitle = `${f.kcal} ккал · Б${f.protein} У${f.carbs} Ж${f.fat} / 100 ${f.unit || 'г'}`
+  else subtitle = `${f.kcal} ккал · ${macroText(f)} / 100 ${f.unit || 'г'}`
   const chevron = f.builder || f.hasVariants || f.kind === 'composite' || f.dairy ? '›' : '＋'
   return (
-    <div className="meal-item" style={{ gap: 10 }}>
-      <button style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', flex: 1, minWidth: 0 }} onClick={onClick}>
+    <div className="meal-item" style={{ gap: 8 }}>
+      {onFav && (
+        <button
+          onClick={onFav}
+          aria-label={favorite ? `Убрать «${f.name}» из избранного` : `Добавить «${f.name}» в избранное`}
+          aria-pressed={favorite}
+          style={{ width: 34, height: 44, flex: '0 0 auto', fontSize: 17, lineHeight: 1, color: favorite ? 'var(--primary)' : 'var(--ink-3)' }}
+        >{favorite ? '★' : '☆'}</button>
+      )}
+      <button style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', flex: 1, minWidth: 0, minHeight: 44 }} onClick={onClick}>
         <span className="meal-emoji">{f.emoji}</span>
         <span style={{ flex: 1, minWidth: 0 }}>
           <span className="meal-name" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
           <span className="meal-meta">{subtitle}</span>
         </span>
-        <span style={{ color: 'var(--primary)', fontSize: 22, flex: '0 0 auto' }}>{chevron}</span>
+        {!quickLabel && <span style={{ color: 'var(--primary)', fontSize: 22, flex: '0 0 auto' }}>{chevron}</span>}
       </button>
+      {quickLabel && (
+        <button
+          onClick={onQuick}
+          aria-label={`Записать «${f.name}», ${quickLabel}`}
+          className="chip"
+          style={{ flex: '0 0 auto', minHeight: 44, padding: '10px 12px', fontWeight: 600, color: 'var(--primary)' }}
+        >＋ {quickLabel}</button>
+      )}
       {onDelete && (
-        <button onClick={onDelete} aria-label="Удалить" style={{ color: 'var(--ink-3)', fontSize: 18, flex: '0 0 auto', padding: '0 4px' }}>✕</button>
+        <button onClick={onDelete} aria-label={`Удалить «${f.name}»`} style={{ color: 'var(--ink-3)', fontSize: 18, flex: '0 0 auto', width: 32, height: 44 }}>✕</button>
       )}
     </div>
   )
@@ -1421,11 +2098,170 @@ function FoodThumb({ food }) {
   )
 }
 
+// v === null означает «неизвестно» — это не ноль, и выглядеть нулём не должно.
 function PreviewStat({ label, v }) {
+  const unknown = v == null
   return (
     <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 13, padding: '12px 6px', textAlign: 'center' }}>
-      <div className="tabular" style={{ fontSize: 18, fontWeight: 650 }}>{v}</div>
+      <div className="tabular" style={{ fontSize: 18, fontWeight: 650, color: unknown ? 'var(--ink-3)' : undefined }}>{unknown ? '—' : v}</div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{label}</div>
+    </div>
+  )
+}
+
+// Экран своего блюда: что именно добавится и сколько это калорий.
+//
+// Блюдо кладёт в день СРАЗУ НЕСКОЛЬКО строк, поэтому показать состав до
+// нажатия обязательно: иначе человек добавляет вслепую и потом удаляет три
+// записи по одной.
+function TemplateScreen({ tpl, onBack, onAdd, onDelete }) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const tot = templateTotals(tpl)
+  const n = tpl.items.length
+
+  return (
+    <div>
+      <div className="row gap12" style={{ alignItems: 'center', marginBottom: 14 }}>
+        <span className="meal-emoji" style={{ width: 44, height: 44, fontSize: 20 }}>{tpl.emoji || '🍽️'}</span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 650, fontSize: 16 }}>{tpl.name}</div>
+          <button onClick={onBack} className="tap44" style={{ fontSize: 13.5, color: 'var(--primary)', fontWeight: 550, minHeight: 32 }}>← выбрать другое</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 14, marginBottom: 18, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
+        <div className="row between" style={{ marginBottom: 8 }}>
+          <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>Состав · {n}</span>
+          <span className="tabular" style={{ fontWeight: 680, fontSize: 18 }}>{tot.kcal} ккал</span>
+        </div>
+        {tpl.items.map((m, i) => (
+          <div key={m.id || i} className="row between" style={{ padding: '5px 0', gap: 10 }}>
+            <span style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.emoji} {m.name}</span>
+            <span className="tabular" style={{ fontSize: 13, color: 'var(--ink-3)', flex: '0 0 auto' }}>
+              {m.grams ? `${m.grams} ${m.unit || 'г'}` : `${m.kcal} ккал`}
+            </span>
+          </div>
+        ))}
+        <div className="tabular" style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 8 }}>{macroLabel(tot)}</div>
+      </div>
+
+      <button className="btn" onClick={onAdd}>
+        Добавить {n} {plural(n, 'продукт', 'продукта', 'продуктов')}
+      </button>
+
+      {/* Удаление — приглушённая ссылка, а не вторая большая кнопка. Рядом с
+          главным действием кнопка того же веса читается как равноправный
+          выбор, и по ней промахиваются. Подтверждение — на месте, чтобы
+          случайное касание ничего не стёрло. */}
+      {confirmDelete ? (
+        <div className="row gap12" style={{ marginTop: 16 }}>
+          <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDelete(false)}>Отмена</button>
+          <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={onDelete}>Удалить</button>
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', marginTop: 16 }}>
+          <button
+            onClick={() => setConfirmDelete(true)}
+            style={{ fontSize: 14, color: 'var(--ink-3)', minHeight: 44, padding: '0 12px' }}
+          >Удалить блюдо</button>
+        </div>
+      )}
+      <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '6px 0 0', lineHeight: 1.45, textAlign: 'center' }}>
+        Удаление блюда не трогает уже записанное в дневнике.
+      </p>
+    </div>
+  )
+}
+
+// Экран рецепта: сколько порций от кастрюли съедено.
+//
+// Рецепт — это ОДНА строка в дневнике, в отличие от блюда. Кастрюля делится на
+// порции один раз, при сохранении; здесь человек говорит только «сколько я
+// съел», и дробные значения обязаны работать: полтарелки — обычное дело.
+function RecipeScreen({ recipe, onBack, onAdd, onEdit, onDelete }) {
+  const [servings, setServings] = useState('1')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const n = Math.max(0, num(servings))
+  const per = recipePerServing(recipe)
+  const eaten = {
+    kcal: Math.round(per.kcal * n),
+    protein: per.protein == null ? null : round1(per.protein * n),
+    carbs: per.carbs == null ? null : round1(per.carbs * n),
+    fat: per.fat == null ? null : round1(per.fat * n),
+  }
+
+  return (
+    <div>
+      <div className="row gap12" style={{ alignItems: 'center', marginBottom: 14 }}>
+        <span className="meal-emoji" style={{ width: 44, height: 44, fontSize: 20 }}>{recipe.emoji || '🍲'}</span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 650, fontSize: 16 }}>{recipe.name}</div>
+          <button onClick={onBack} className="tap44" style={{ fontSize: 13.5, color: 'var(--primary)', fontWeight: 550, minHeight: 32 }}>← выбрать другой</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 14, marginBottom: 16, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
+        <div className="row between">
+          <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>
+            Вся кастрюля · {recipe.items.length} {plural(recipe.items.length, 'ингредиент', 'ингредиента', 'ингредиентов')}
+          </span>
+          <span className="tabular" style={{ fontWeight: 650 }}>{recipeTotals(recipe).kcal} ккал</span>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
+          {recipe.servings} {plural(recipe.servings, 'порция', 'порции', 'порций')} по {per.kcal} ккал
+          {per.grams > 0 ? ` · ≈${per.grams} г` : ''}
+        </div>
+      </div>
+
+      {recipe.notes && (
+        <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.5, margin: '0 0 16px', whiteSpace: 'pre-wrap' }}>{recipe.notes}</p>
+      )}
+
+      <div className="field">
+        <label>Сколько порций съели</label>
+        <input
+          className="input"
+          type="number"
+          inputMode="decimal"
+          value={servings}
+          onChange={(e) => setServings(sanitizeAmount(e.target.value))}
+        />
+        <div className="row wrap gap8" style={{ marginTop: 10 }}>
+          {['0.5', '1', '1.5', '2'].map((v) => (
+            <button key={v} className={`chip ${servings === v ? 'on' : ''}`} onClick={() => setServings(v)}>
+              {v.replace('.', ',')}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="row gap8" style={{ margin: '4px 0 22px' }}>
+        <PreviewStat label="ккал" v={eaten.kcal} />
+        <PreviewStat label="белки" v={eaten.protein} />
+        <PreviewStat label="угл." v={eaten.carbs} />
+        <PreviewStat label="жиры" v={eaten.fat} />
+      </div>
+
+      <button className="btn" onClick={() => onAdd(n)} disabled={!(n > 0)}>Добавить {eaten.kcal} ккал</button>
+
+      {/* Правка и удаление — второстепенные действия одной строкой. Три
+          одинаковые кнопки в столбик заставляют выбирать там, где выбор
+          очевиден: человек пришёл записать съеденное. */}
+      {confirmDelete ? (
+        <div className="row gap12" style={{ marginTop: 16 }}>
+          <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDelete(false)}>Отмена</button>
+          <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={onDelete}>Удалить</button>
+        </div>
+      ) : (
+        <div className="row between" style={{ marginTop: 14 }}>
+          <button onClick={onEdit} style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, minHeight: 44, padding: '0 4px' }}>
+            Изменить рецепт
+          </button>
+          <button onClick={() => setConfirmDelete(true)} style={{ fontSize: 14, color: 'var(--ink-3)', minHeight: 44, padding: '0 4px' }}>
+            Удалить
+          </button>
+        </div>
+      )}
     </div>
   )
 }

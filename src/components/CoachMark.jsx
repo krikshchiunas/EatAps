@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useOverlayOpen } from '../lib/useScrollLock.js'
 import { useStore } from '../store.jsx'
 import { nextTip, markSeen, TOUR_PREF } from '../lib/tour.js'
 
@@ -14,13 +15,16 @@ let shownThisSession = false
 
 export default function CoachMark({ facts, paused }) {
   const { prefs, setPref } = useStore()
+  // Любой открытый лист сам по себе означает паузу — перечислять их поимённо
+  // не нужно и вредно (список отставал от жизни). См. useOverlayOpen.
+  const overlay = useOverlayOpen()
   const [tip, setTip] = useState(null)
   const [leaving, setLeaving] = useState(false)
 
   useEffect(() => {
     // Пока открыта шторка или диалог, подсказку не показываем: она перекрыла
     // бы их кнопки. Совет, загораживающий действие, — это уже помеха.
-    if (paused || shownThisSession || tip) return
+    if (paused || overlay || shownThisSession || tip) return
     const candidate = nextTip(prefs, facts)
     if (!candidate) return
     // Небольшая пауза: подсказка, выпрыгнувшая одновременно с экраном,
@@ -30,9 +34,9 @@ export default function CoachMark({ facts, paused }) {
       setTip(candidate)
     }, 1200)
     return () => clearTimeout(t)
-  }, [prefs, facts, tip, paused])
+  }, [prefs, facts, tip, paused, overlay])
 
-  if (!tip || paused) return null
+  if (!tip || paused || overlay) return null
 
   const dismiss = () => {
     setLeaving(true)

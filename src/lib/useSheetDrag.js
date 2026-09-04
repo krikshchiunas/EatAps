@@ -70,12 +70,26 @@ export function useSheetDrag(onClose, { closeDist = 110, closeVel = 0.4, openMs 
     )
     if (b) bAnimRef.current = b.animate([{ opacity: bFrom }, { opacity: bTo }], { duration: dur, easing: EASING, fill: 'forwards' })
     posRef.current = target
-    animRef.current.onfinish = () => {
+    // Завершение — ровно один раз, по тому, что случится раньше: событие
+    // анимации или страховочный таймер.
+    //
+    // Страховка обязательна. onfinish приходит от Web Animations, а браузер
+    // вправе не проигрывать анимацию вовсе: свёрнутая вкладка, фоновое окно,
+    // переключение на другое приложение. Тогда событие не приходит НИКОГДА, и
+    // лист остаётся висеть на экране полузакрытым — вернувшись в приложение,
+    // человек упирается в намертво застрявшую шторку.
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(guard)
       s.style.transform = `translate3d(0,${target}px,0)`
       if (b) b.style.opacity = String(bTo)
       cancelAnims()
       onDone?.()
     }
+    const guard = setTimeout(finish, dur + 120)
+    animRef.current.onfinish = finish
   }
 
   const close = () => {
