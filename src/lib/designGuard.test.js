@@ -200,3 +200,30 @@ test('у каждого «поверх» есть пара в обеих тем�
       `${name} одинаков в обеих темах — значит, в одной из них контраст потерян`)
   }
 })
+
+test('нижняя панель закреплена и вынесена на отдельный слой', () => {
+  // Панель уезжала вместе с контентом на живом телефоне: у кнопок внутри стоит
+  // backdrop-filter, и на iOS/Android его пересчёт во время инерционной
+  // прокрутки успевал разъехаться с фиксированной позицией. Лечится
+  // собственным слоем композитинга. В десктопном Chrome не воспроизводится,
+  // поэтому проверяем сам факт наличия правил.
+  const block = /\.bottomnav\s*\{([\s\S]*?)\}/.exec(css)
+  assert.ok(block, 'блок .bottomnav пропал')
+  const rules = block[1]
+  assert.match(rules, /position:\s*fixed/, 'панель обязана быть прибита к экрану')
+  assert.match(rules, /transform:\s*translateZ\(0\)/, 'без своего слоя панель срывается при скролле')
+  assert.match(rules, /backface-visibility:\s*hidden/)
+})
+
+test('нижняя панель не лежит внутри листающегося трека дня', () => {
+  // Трек пейджера двигается через transform, а transform у предка превращает
+  // position: fixed в position: absolute относительно этого предка — панель
+  // начала бы ездить вместе с днями. В App она соседка пейджера; если её
+  // однажды перенесут внутрь экрана дня, тест это поймёт.
+  const app = readFileSync(join(SRC, 'App.jsx'), 'utf8')
+  const navLine = app.indexOf('<BottomNav')
+  assert.ok(navLine > 0, 'BottomNav пропал из App')
+  const dayLine = app.indexOf('<DayScreen')
+  assert.ok(dayLine > 0 && navLine > dayLine, 'BottomNav должен рендериться рядом с экранами, а не внутри них')
+  assert.ok(!/<DayScreen[\s\S]*?<BottomNav[\s\S]*?<\/DayScreen>/.test(app), 'панель оказалась внутри экрана дня')
+})
