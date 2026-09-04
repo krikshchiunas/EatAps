@@ -14,6 +14,7 @@ import { useSheetDrag } from '../lib/useSheetDrag.js'
 import SupplementsCard from './SupplementsCard.jsx'
 import SupplementSheet from './SupplementSheet.jsx'
 import MicroGoalSheet from './MicroGoalSheet.jsx'
+import FoodInfoSheet from './FoodInfoSheet.jsx'
 import { buildMicroSummary } from '../lib/microSummary.js'
 import { stackMicroKeys } from '../lib/suppStack.js'
 import MealSectionSheet from './MealSectionSheet.jsx'
@@ -43,6 +44,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
   const openSaveTemplate = (section, foods) => setSaveTpl({ section, foods })
   const [toast, setToast] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const [infoFood, setInfoFood] = useState(null)
   const [suppOpen, setSuppOpen] = useState(false)
   const [goalKey, setGoalKey] = useState(null)
   const today = keyOf()
@@ -252,7 +254,8 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 
   const bodyProps = {
     profile, days, dayOf, removeFood, addFood, moveMealSection,
-    clipboard, setClipboard, onOpenAdd, onEditFood: setEditingFood, onEditSection: openEditSection,
+    clipboard, setClipboard, onOpenAdd, onEditFood: setEditingFood, onFoodInfo: setInfoFood,
+    onEditSection: openEditSection,
     onCreateSection: openCreateSection, today,
     setDayWeight, setDayActivity, setDayActivityScore, setDayStrength, setDefaultActivityScore,
     setDayStatsExcluded, confirmDayStats,
@@ -327,6 +330,15 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
           <div className="day-page" aria-hidden="true"><DayBody date={nextDate} interactive={false} {...bodyProps} /></div>
         </div>
       </div>
+
+      {infoFood && (
+        <FoodInfoSheet
+          food={infoFood}
+          profile={profile}
+          microGoals={microGoals}
+          onClose={() => setInfoFood(null)}
+        />
+      )}
 
       {suppOpen && (
         <SupplementSheet
@@ -407,7 +419,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 // ── Контент одного дня (переиспользуется тремя страницами пейджера) ────────────
 function DayBody({
   date, interactive, profile, days, dayOf, removeFood, addFood, moveMealSection,
-  clipboard, setClipboard, onOpenAdd, onEditFood, onEditSection, onCreateSection, today,
+  clipboard, setClipboard, onOpenAdd, onEditFood, onFoodInfo, onEditSection, onCreateSection, today,
   setDayWeight, setDayActivity, setDayActivityScore, setDayStrength, setDefaultActivityScore,
   setDayStatsExcluded, confirmDayStats,
   repeatMeal, prevDate, onToast, onSaveTemplate,
@@ -511,6 +523,7 @@ function DayBody({
           moveMealSection={moveMealSection}
           onOpenAdd={onOpenAdd}
           onEditFood={onEditFood}
+          onFoodInfo={onFoodInfo}
           onEditSection={onEditSection}
           canMoveUp={section.renameable && i > 0 && sections[i - 1].renameable}
           canMoveDown={section.renameable && i < sections.length - 1 && sections[i + 1].renameable}
@@ -588,7 +601,7 @@ function DayBody({
 // ── Секция приёма пищи (завтрак/обед/ужин/перекус/пользовательский) ────────────
 function MealSectionCard({
   date, section, foods, clipboard, setClipboard, addFood, removeFood, moveMealSection,
-  onOpenAdd, onEditFood, onEditSection, canMoveUp, canMoveDown,
+  onOpenAdd, onEditFood, onFoodInfo, onEditSection, canMoveUp, canMoveDown,
   repeatMeal, prevDate, prevCount, onToast, onSaveTemplate,
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -653,7 +666,7 @@ function MealSectionCard({
         <p className="muted" style={{ fontSize: 14, padding: '2px 0 12px' }}>Пока ничего не добавлено</p>
       ) : (
         foods.map((f) => (
-          <SwipeableFoodItem key={f.id} m={f} date={date} removeFood={removeFood} setClipboard={setClipboard} onEdit={onEditFood} />
+          <SwipeableFoodItem key={f.id} m={f} date={date} removeFood={removeFood} setClipboard={setClipboard} onEdit={onEditFood} onInfo={onFoodInfo} />
         ))
       )}
 
@@ -1072,7 +1085,7 @@ function HeroStat({ label, value }) {
 const ACTION_W = 80
 const SNAP = 32
 
-function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit }) {
+function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit, onInfo }) {
   const [offsetX, setOffsetX] = useState(0)
   const [dragging, setDragging] = useState(false)
   // Зафиксированное положение строки: -ACTION_W (удалить) | 0 | ACTION_W (изменить).
@@ -1167,11 +1180,24 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit }) {
       >
         <div className="meal-item" style={{ borderBottom: 'none' }}>
           <span className="meal-emoji">{m.emoji || '🍽️'}</span>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="meal-name">{m.name}</div>
             <div className="meal-meta">{m.grams ? `${amountLabel(m.grams, m.unit || 'г')} · ` : ''}{macroLabel(m)}</div>
           </div>
-          <div className="tabular" style={{ fontWeight: 650 }}>{m.kcal}</div>
+          <div className="tabular" style={{ fontWeight: 650, flex: '0 0 auto' }}>{m.kcal}</div>
+          {/* Разбор порции. Кнопка живёт ВНУТРИ свайпаемой строки, поэтому
+              гасит свои события указателя: без этого долгое нажатие на «i»
+              копировало бы продукт в буфер, а протяжка открывала бы строку. */}
+          <button
+            className="meal-info"
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onInfo?.(m) }}
+            aria-label={`Что внутри: ${m.name}`}
+            title="Что внутри"
+          >
+            i
+          </button>
         </div>
       </div>
     </div>

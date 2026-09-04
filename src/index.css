@@ -2143,3 +2143,35 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   transition: transform 0.12s ease, opacity 0.2s ease;
 }
 .ai-badge--action:active { transform: scale(0.97); }
+
+/* Кружок «i» на строке продукта: разбор порции по белкам, углеводам, жирам,
+   витаминам и минералам. Размер кнопки 28 px, но зона нажатия расширена
+   псевдоэлементом до 44 — палец не обязан попадать в кружок. */
+.meal-info {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  position: relative;
+  margin-left: 10px;
+  border: 1.5px solid var(--border-strong);
+  color: var(--ink-3);
+  font-size: 14px;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.meal-info::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.meal-info:active {
+  transform: scale(0.9);
+  background: var(--primary-weak);
+  color: var(--primary);
+}
