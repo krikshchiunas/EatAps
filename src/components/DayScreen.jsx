@@ -3,7 +3,10 @@ import { plural } from '../lib/text.js'
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
-import { targetsForDay, baselineTargetsForDay, profileScore, dayWeight, hasDayActivity, effectiveActivity } from '../lib/body.js'
+import {
+  targetsForDay, baselineTargetsForDay, profileScore, dayWeight, hasDayActivity, effectiveActivity,
+  ACTIVITY_LEVELS, activityLevelFor, strengthDeltaForDay,
+} from '../lib/body.js'
 import { isLowLogged } from '../lib/stats.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { getMealSections, foodsForMeal, resolvedTime, newCustomSection } from '../lib/meals.js'
@@ -27,9 +30,11 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
   const {
     profile, days, dayOf, removeFood, editFood, addFood,
     upsertMealSection, deleteMealSection, moveMealSection,
-    setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
+    setDayWeight, setDayActivity, setDayActivityScore, setDayStrength, setDefaultActivityScore,
+    setDayStatsExcluded, confirmDayStats,
     repeatDay, repeatMeal, templates, saveTemplate,
-    supplements, microGoals, addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, setMicroGoal,
+    supplements, microGoals, suppDoses, addSupp, removeSupp, editSupp,
+    saveStackItem, removeStackItem, setSuppDose, setMicroGoal,
   } = store
   const [editingFood, setEditingFood] = useState(null)
   const [sectionSheet, setSectionSheet] = useState(null) // null | { mode, section }
@@ -249,7 +254,8 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     profile, days, dayOf, removeFood, addFood, moveMealSection,
     clipboard, setClipboard, onOpenAdd, onEditFood: setEditingFood, onEditSection: openEditSection,
     onCreateSection: openCreateSection, today,
-    setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
+    setDayWeight, setDayActivity, setDayActivityScore, setDayStrength, setDefaultActivityScore,
+    setDayStatsExcluded, confirmDayStats,
     repeatMeal, prevDate, onToast: setToast, onSaveTemplate: openSaveTemplate,
     supplements, microGoals, addSupp, removeSupp, editSupp, saveStackItem, removeStackItem,
     onOpenSupp: () => setSuppOpen(true), onOpenGoal: setGoalKey,
@@ -325,6 +331,8 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
       {suppOpen && (
         <SupplementSheet
           summary={microSummary}
+          suppDoses={suppDoses}
+          setSuppDose={setSuppDose}
           onAdd={(entry) => { addSupp(date, entry); setToast(`${entry.name} записана`) }}
           // Ответ стека важнее подтверждения записи и поэтому перекрывает его:
           // «записана» человек и так видит в списке, а вот молчаливый отказ
@@ -400,7 +408,8 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 function DayBody({
   date, interactive, profile, days, dayOf, removeFood, addFood, moveMealSection,
   clipboard, setClipboard, onOpenAdd, onEditFood, onEditSection, onCreateSection, today,
-  setDayWeight, setDayActivity, setDayActivityScore, setDayStatsExcluded, confirmDayStats,
+  setDayWeight, setDayActivity, setDayActivityScore, setDayStrength, setDefaultActivityScore,
+  setDayStatsExcluded, confirmDayStats,
   repeatMeal, prevDate, onToast, onSaveTemplate,
   supplements, microGoals, addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, onOpenSupp, onOpenGoal,
 }) {
@@ -474,8 +483,11 @@ function DayBody({
         targets={t}
         baseTargets={baseT}
         calGoal={calGoal}
+        days={days}
         setDayWeight={setDayWeight}
         setDayActivityScore={setDayActivityScore}
+        setDayStrength={setDayStrength}
+        setDefaultActivityScore={setDefaultActivityScore}
       />
 
       {grade.level !== 'none' && (
@@ -774,24 +786,15 @@ function QualityBar({ label, value, max, invert, hint }) {
 // лежит на кровати, другой много ходит — и норма у этих дней разная. Здесь он
 // отмечает то и другое за пару касаний, а кольцо калорий выше сразу
 // пересчитывается (см. targetsForDay в lib/body.js).
-// Пять уровней вместо непрерывного ползунка: балл — это якорь для TDEE
-// (scoreToActivityKey в body.js), а не то, что человек выбирает напрямую.
-const ACTIVITY_LEVELS = [
-  { score: 5,  emoji: '🛌', label: 'Постельный режим', desc: 'Весь день лёжа, почти не вставал' },
-  { score: 20, emoji: '🛋️', label: 'Минимум движения', desc: 'Диван, кресло, почти без ходьбы' },
-  { score: 40, emoji: '🚶', label: 'Малоподвижно', desc: 'Обычный день, лёгкие дела по дому' },
-  { score: 65, emoji: '🏃', label: 'Активно', desc: 'Хорошая прогулка или тренировка средней тяжести' },
-  { score: 95, emoji: '🔥', label: 'Максимум', desc: 'Профессиональный уровень нагрузки' },
-]
+// Шкала уровней живёт в body.js: от неё зависит цель по калориям, а не только
+// подписи. Здесь — только показ.
 
-function closestActivityLevel(score) {
-  return ACTIVITY_LEVELS.reduce((best, lvl) => (
-    Math.abs(lvl.score - score) < Math.abs(best.score - score) ? lvl : best
-  ))
-}
-
-function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWeight, setDayActivityScore }) {
+function BodyCard({
+  date, day, days, profile, targets, baseTargets, calGoal,
+  setDayWeight, setDayActivityScore, setDayStrength, setDefaultActivityScore,
+}) {
   const [open, setOpen] = useState(false)
+  const [defaultOpen, setDefaultOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const weight = dayWeight(day)
 
@@ -809,7 +812,15 @@ function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWei
     setDayWeight(date, n)
   }
 
-  const level = closestActivityLevel(score)
+  const level = activityLevelFor(score)
+  const defaultLevel = activityLevelFor(profileScore(profile))
+  const strengthOn = day.strength === true
+  // Прибавка за тренировку — РАЗНИЦА двух целей этого дня, а не отдельная
+  // формула: иначе подпись и скачок цели расходятся на глазах (см. body.js).
+  const strengthBonus = useMemo(
+    () => strengthDeltaForDay(days, date, profile),
+    [days, date, profile],
+  )
 
   // Насколько балл сдвинул цель относительно активности из анкеты — это и есть
   // ответ на «ползунок вообще на что-то влияет?».
@@ -869,7 +880,12 @@ function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWei
           </div>
 
           <div className="activity-zone">
-            <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 12 }}>Активность дня</div>
+            <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 4 }}>Сколько ходил</div>
+            {/* Шаги, а не эпитеты. «Активный день» у каждого свой, а число шагов
+                человек видит в телефоне и может с ним сверить. */}
+            <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 12px', lineHeight: 1.45 }}>
+              Шаги — ориентир, чтобы было с чем сверяться. Приложение их не читает.
+            </p>
 
             <div className="row wrap gap8">
               {ACTIVITY_LEVELS.map((lvl) => (
@@ -878,15 +894,94 @@ function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWei
                   className={`chip ${level === lvl ? 'on' : ''}`}
                   onClick={() => setDayActivityScore(date, lvl.score)}
                 >
-                  {lvl.emoji} {lvl.label}
+                  {lvl.emoji} {lvl.label} · {lvl.hint}
                 </button>
               ))}
             </div>
 
             <p style={{ fontSize: 12, color: isDefault ? 'var(--ink-3)' : 'var(--ink-2)', marginTop: 10, lineHeight: 1.5, minHeight: 32 }}>
               {level.desc}
-              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — из анкеты, нажмите, чтобы изменить</span>}
+              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — стоит по умолчанию, нажмите, чтобы изменить</span>}
             </p>
+
+            {/* ── Силовая тренировка ─────────────────────────────────────────
+                Отдельно от ходьбы: час со штангой даёт мало шагов, но заметный
+                расход, и подкручивать ради него ползунок ходьбы человеку
+                пришлось бы наугад. */}
+            <div className="divider" style={{ margin: '14px 0' }} />
+            <button
+              onClick={() => setDayStrength(date, !strengthOn)}
+              aria-pressed={strengthOn}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                padding: '10px 12px', borderRadius: 'var(--r-sm)',
+                background: strengthOn ? 'var(--primary-weak)' : 'var(--surface-2)',
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 22, height: 22, flex: '0 0 auto', borderRadius: 7,
+                  display: 'grid', placeItems: 'center', fontSize: 13,
+                  border: strengthOn ? 'none' : '2px solid var(--border-strong)',
+                  background: strengthOn ? 'var(--primary)' : 'transparent',
+                  color: 'var(--on-primary)',
+                }}
+              >
+                {strengthOn ? '✓' : ''}
+              </span>
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <span style={{ fontSize: 14, fontWeight: 550, display: 'block' }}>🏋️ Силовая тренировка</span>
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                  {strengthOn
+                    ? `Учтена${strengthBonus ? ` · +${strengthBonus} ккал к цели` : ''}`
+                    : `Была сегодня?${strengthBonus ? ` Добавит ≈ ${strengthBonus} ккал` : ''}`}
+                </span>
+              </span>
+              <span style={{ fontSize: 12, color: strengthOn ? 'var(--good)' : 'var(--ink-3)', flex: '0 0 auto' }}>
+                {strengthOn ? 'была' : 'отметить'}
+              </span>
+            </button>
+            <p style={{ fontSize: 11.5, color: 'var(--ink-3)', margin: '8px 0 0', lineHeight: 1.45 }}>
+              Считается отдельно от ходьбы: занятие на 45–60 минут средней тяжести. Оценка, а не замер.
+            </p>
+
+            {/* ── Что ставить по умолчанию ───────────────────────────────────
+                Анкета спрашивает про образ жизни один раз и словами. Живут люди
+                по-разному, и подставлять всем одно и то же — значит для одних
+                завышать цель, для других занижать. */}
+            <div className="divider" style={{ margin: '14px 0' }} />
+            <button
+              onClick={() => setDefaultOpen((o) => !o)}
+              aria-expanded={defaultOpen}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}
+            >
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 550, display: 'block' }}>Обычный мой день</span>
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                  подставляется, пока день не отмечен · сейчас {defaultLevel.emoji} {defaultLevel.hint}
+                </span>
+              </span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: defaultOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+            {defaultOpen && (
+              <div style={{ marginTop: 10 }}>
+                <div className="row wrap gap8">
+                  {ACTIVITY_LEVELS.map((lvl) => (
+                    <button
+                      key={lvl.label}
+                      className={`chip ${defaultLevel === lvl ? 'on' : ''}`}
+                      onClick={() => setDefaultActivityScore(lvl.score)}
+                    >
+                      {lvl.emoji} {lvl.hint}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ fontSize: 11.5, color: 'var(--ink-3)', margin: '8px 0 0', lineHeight: 1.45 }}>
+                  Меняет только дни, где активность не отмечена вручную. Уже отмеченные дни остаются как есть.
+                </p>
+              </div>
+            )}
 
             {goal && (
               <div className="activity-goal">
@@ -902,8 +997,8 @@ function BodyCard({ date, day, profile, targets, baseTargets, calGoal, setDayWei
                 </div>
                 <div className="activity-goal__delta" style={{ color: goal.delta === 0 ? 'var(--ink-3)' : 'var(--primary)' }}>
                   {goal.delta === 0
-                    ? 'Столько же, сколько по активности из анкеты'
-                    : `${goal.delta > 0 ? '+' : '−'}${Math.abs(goal.delta)} ккал к цели по анкете — активность дня пересчитала КБЖУ`}
+                    ? 'Столько же, сколько в обычный ваш день'
+                    : `${goal.delta > 0 ? '+' : '−'}${Math.abs(goal.delta)} ккал к обычному дню — ходьба${strengthOn ? ' и силовая' : ''} пересчитали КБЖУ`}
                 </div>
               </div>
             )}

@@ -9,6 +9,7 @@ import {
   SUPPLEMENTS, SUPP_BY_ID, SUPP_GROUPS, POPULAR_SUPPLEMENTS,
   supplementById, searchSupplements, scaleProvides, makeSuppEntry,
   makeCustomSupplement, doseLabel, sumSuppMicros,
+  doseFields, providesFromFields, unitProvides, unitDose, needsDoseSetup, hasOwnDose,
 } from './supplements.js'
 import { MICRO_BY_KEY } from './micronutrients.js'
 
@@ -212,4 +213,93 @@ test('пустой и битый список добавок не ломает �
   assert.deepEqual(sumSuppMicros([]).values, {})
   assert.deepEqual(sumSuppMicros(null).values, {})
   assert.deepEqual(sumSuppMicros([null, {}, { provides: null }]).values, {})
+})
+
+// ── «Что в одной таблетке»: своя дозировка с этикетки ────────────────────────
+//
+// Дозировки в банках не стандартизованы, и это не мелочь: рыбий жир бывает и
+// 300 мг омега-3 на капсулу, и 800. Считать по типовому числу — значит врать
+// в два-три раза.
+
+test('уточнения просят только там, где дозировка правда плавает', () => {
+  // Название пришпилило дозу — переспрашивать не о чем.
+  assert.equal(needsDoseSetup(supplementById('vitd-2000'), {}), false)
+  assert.equal(needsDoseSetup(supplementById('vitc-500'), {}), false)
+  // Меряется граммами — доза задана самим веществом.
+  assert.equal(needsDoseSetup(supplementById('creatine'), {}), false)
+  assert.equal(needsDoseSetup(supplementById('beta-alanine'), {}), false)
+  assert.equal(needsDoseSetup(supplementById('citrulline'), {}), false)
+  // А здесь у каждого производителя своё.
+  assert.equal(needsDoseSetup(supplementById('omega3'), {}), true)
+  assert.equal(needsDoseSetup(supplementById('vitd-k2'), {}), true)
+  assert.equal(needsDoseSetup(supplementById('multi-basic'), {}), true)
+  assert.equal(needsDoseSetup(supplementById('probiotic-10'), {}), true)
+})
+
+test('второй раз состав уже не спрашивают', () => {
+  const saved = { omega3: { provides: { omega3: 750 }, dose: 2 } }
+  assert.equal(needsDoseSetup(supplementById('omega3'), saved), false)
+  assert.equal(hasOwnDose(supplementById('omega3'), saved), true)
+  assert.equal(hasOwnDose(supplementById('vitd-k2'), saved), false)
+})
+
+test('рыбий жир спрашивает EPA и DHA раздельно, как на банке', () => {
+  const f = doseFields(supplementById('omega3'))
+  const ids = f.map((x) => x.id)
+  assert.ok(ids.includes('epa') && ids.includes('dha'), 'на этикетке два числа — и полей два')
+  assert.ok(f.every((x) => x.unit), 'у каждого поля должна быть единица')
+})
+
+test('EPA и DHA складываются в одну норму омега-3', () => {
+  // В справочнике это ОДИН показатель (EPA + DHA), и два поля обязаны сложиться,
+  // а не перезаписать друг друга.
+  const f = doseFields(supplementById('omega3'))
+  assert.deepEqual(providesFromFields(f, { epa: '500', dha: '250' }), { omega3: 750 })
+  assert.deepEqual(providesFromFields(f, { epa: '500', dha: '250', vitE: '2' }), { omega3: 750, vitE: 2 })
+})
+
+test('поля формы у обычной добавки берутся из её состава', () => {
+  const f = doseFields(supplementById('vitd-k2'))
+  assert.deepEqual(f.map((x) => x.key).sort(), ['vitD', 'vitK'])
+  assert.deepEqual(providesFromFields(f, { vitD: '62,5', vitK: '200' }), { vitD: 62.5, vitK: 200 })
+})
+
+test('пустые и мусорные поля не попадают в состав', () => {
+  // Человек вправе не знать, сколько в его банке витамина E, — выдумывать нельзя.
+  const f = doseFields(supplementById('omega3'))
+  assert.deepEqual(providesFromFields(f, { epa: '500', dha: '', vitE: 'много' }), { omega3: 500 })
+  assert.deepEqual(providesFromFields(f, { epa: '-5', dha: '0' }), {})
+  assert.deepEqual(providesFromFields(null, {}), {})
+})
+
+test('своя банка сильнее каталожной, но не стирает её', () => {
+  const supp = supplementById('omega3')
+  const saved = { omega3: { provides: { omega3: 750, vitE: 2 }, dose: 3 } }
+  assert.deepEqual(unitProvides(supp, saved), { omega3: 750, vitE: 2 })
+  assert.equal(unitDose(supp, saved), 3)
+  // Без сохранённого — типовые числа каталога.
+  assert.deepEqual(unitProvides(supp, {}), supp.provides)
+  assert.equal(unitDose(supp, {}), supp.defaultDose)
+})
+
+test('пустой сохранённый состав не подменяет каталожный', () => {
+  // Иначе добавка молча перестала бы что-либо приносить.
+  const supp = supplementById('omega3')
+  assert.deepEqual(unitProvides(supp, { omega3: { provides: {}, dose: 2 } }), supp.provides)
+})
+
+test('у каждой добавки с плавающей дозой поля формы непусты', () => {
+  const broken = SUPPLEMENTS.filter((s) => s.variable && doseFields(s).length === 0)
+  assert.deepEqual(broken.map((s) => s.id), [], 'спрашивать нечего — форма будет пустой')
+})
+
+test('явные поля ссылаются только на существующие вещества', () => {
+  const bad = []
+  for (const s of SUPPLEMENTS) {
+    for (const f of s.fields || []) {
+      if (!MICRO_BY_KEY[f.key]) bad.push(`${s.id}:${f.key}`)
+      if (!f.id || !f.label) bad.push(`${s.id}: поле без id или подписи`)
+    }
+  }
+  assert.deepEqual(bad, [])
 })

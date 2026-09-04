@@ -6,6 +6,7 @@ import {
   weightSeries, movingAverage, weightTrend, bmi, bmiBand,
   weightSummary, activitySummary, scoreToFactor, effectiveActivityFactor,
   profileScore, ACTIVITY_SCORE,
+  ACTIVITY_LEVELS, activityLevelFor, walkFactor, hasStrength, strengthDeltaForDay,
 } from './body.js'
 import { computeTargets, ACTIVITY } from './nutrition.js'
 
@@ -371,4 +372,88 @@ test('activitySummary без отметок отдаёт null вместо вы�
   assert.equal(a.avgFactor, null)
   assert.equal(a.vsProfile, null)
   assert.equal(a.mostCommon, null)
+})
+
+// ── Шкала в шагах, силовая и «обычный мой день» ──────────────────────────────
+
+test('шкала активности идёт от лежачего дня к пределу и растёт по шагам', () => {
+  const steps = ACTIVITY_LEVELS.map((l) => l.steps)
+  const scores = ACTIVITY_LEVELS.map((l) => l.score)
+  assert.deepEqual(steps, [...steps].sort((a, b) => a - b), 'шаги должны идти по возрастанию')
+  assert.deepEqual(scores, [...scores].sort((a, b) => a - b), 'баллы должны идти вместе с шагами')
+  assert.equal(steps[0], 500)
+  assert.equal(steps[steps.length - 1], 50000)
+  for (const l of ACTIVITY_LEVELS) {
+    assert.ok(l.hint && /шаг/.test(l.hint), `${l.label}: подпись обязана называть шаги`)
+    assert.ok(l.score >= 0 && l.score <= 100, `${l.label}: балл вне 0–100`)
+  }
+})
+
+test('больше шагов — выше цель по калориям', () => {
+  const p = { sex: 'male', age: 30, height: 182, weight: 83, activity: 'light', goal: 'maintain' }
+  const cal = (score) => computeTargets({ ...p, activityFactor: scoreToFactor(score) }).calories
+  const byLevel = ACTIVITY_LEVELS.map((l) => cal(l.score))
+  for (let i = 1; i < byLevel.length; i++) {
+    assert.ok(byLevel[i] > byLevel[i - 1], `${ACTIVITY_LEVELS[i].label} должен давать больше, чем предыдущий`)
+  }
+})
+
+test('силовая считается отдельно от ходьбы и поднимает цель', () => {
+  const p = { sex: 'male', age: 30, height: 182, weight: 83, activity: 'light', goal: 'maintain' }
+  const walk = { activityScore: 37 }
+  const walkAndGym = { activityScore: 37, strength: true }
+  assert.equal(walkFactor(walkAndGym, p), walkFactor(walk, p), 'ходьба от тренировки не меняется')
+  assert.ok(effectiveActivityFactor(walkAndGym, p) > effectiveActivityFactor(walk, p))
+
+  const без = computeTargets({ ...p, activityFactor: effectiveActivityFactor(walk, p) }).calories
+  const с = computeTargets({ ...p, activityFactor: effectiveActivityFactor(walkAndGym, p) }).calories
+  assert.ok(с - без > 150 && с - без < 450, `прибавка за тренировку вышла ${с - без} ккал`)
+})
+
+test('день с одной только тренировкой считается отмеченным', () => {
+  assert.equal(hasDayActivity({ strength: true }), true)
+  assert.equal(hasDayActivity({}), false)
+  assert.equal(hasStrength({ strength: true }), true)
+  assert.equal(hasStrength({ strength: 'да' }), false, 'только настоящее true')
+})
+
+test('обещанная прибавка за силовую совпадает с тем, на сколько прыгает цель', () => {
+  // Человек видит оба числа сразу: подпись «+N ккал» и саму цель до и после.
+  // Отдельная формула давала 270 при реальном скачке 280 — из-за того, что обе
+  // цели округляются до десятков каждая.
+  const p = { sex: 'male', age: 30, height: 182, weight: 83, activity: 'moderate', goal: 'maintain' }
+  const days = { '2026-09-04': { meals: [], weight: 83 } }
+  const обещано = strengthDeltaForDay(days, '2026-09-04', p)
+  const без = targetsForDay(days, '2026-09-04', p).calories
+  const с = targetsForDay({ '2026-09-04': { ...days['2026-09-04'], strength: true } }, '2026-09-04', p).calories
+  assert.equal(обещано, с - без)
+  assert.ok(обещано > 150 && обещано < 450, `прибавка вышла ${обещано} ккал`)
+})
+
+test('прибавка за силовую не выдумывается там, где цель не считается', () => {
+  // Профиль без роста и возраста — Mifflin-St Jeor считать не из чего.
+  assert.equal(strengthDeltaForDay({}, '2026-09-04', { weight: 80 }), null)
+  assert.equal(strengthDeltaForDay(null, '2026-09-04', null), null)
+})
+
+test('«обычный мой день» сильнее анкеты, но не меняет уже отмеченные дни', () => {
+  const anketa = { activity: 'sedentary' }
+  assert.equal(profileScore(anketa), 12, 'без личной настройки берётся анкета')
+  assert.equal(profileScore({ ...anketa, defaultActivityScore: 72 }), 72)
+  // Отмеченный руками день настройка не трогает.
+  const marked = { activityScore: 18 }
+  assert.equal(walkFactor(marked, { ...anketa, defaultActivityScore: 88 }), scoreToFactor(18))
+})
+
+test('личная настройка по умолчанию зажимается в 0–100', () => {
+  assert.equal(profileScore({ defaultActivityScore: 999 }), 100)
+  assert.equal(profileScore({ defaultActivityScore: -50 }), 0)
+  assert.equal(profileScore({ defaultActivityScore: 'много', activity: 'moderate' }), 62, 'мусор игнорируется')
+})
+
+test('уровень подбирается ближайший к баллу', () => {
+  assert.equal(activityLevelFor(37).steps, 7000)
+  assert.equal(activityLevelFor(0).steps, 500)
+  assert.equal(activityLevelFor(100).steps, 50000)
+  assert.equal(activityLevelFor(undefined).steps, 7000, 'без балла — обычный день')
 })

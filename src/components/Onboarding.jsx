@@ -11,14 +11,12 @@ import AvatarPicker from './AvatarPicker.jsx'
 // только когда пользователь открывает окно входа.
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 
-// Экран опросника (интро вынесено в отдельный welcome-гейт над опросником).
+// Опросник открывается сразу: интро-экрана над ним больше нет.
 const STEPS = ['name', 'sex', 'body', 'activity', 'goal', 'result']
 
 export default function Onboarding() {
   const { setProfile, supabaseEnabled, signedIn } = useStore()
-  const [phase, setPhase] = useState('welcome') // welcome | survey
   const [step, setStep] = useState(0)
-  const [intent, setIntent] = useState('guest') // guest | account
   const [auth, setAuth] = useState(null) // null | { mode: 'login' | 'register' }
   const registeredRef = useRef(false) // email-регистрация прошла — сохранить анкету при закрытии шторки
   const [data, setData] = useState({ name: '', avatar: null, sex: 'male', age: '', height: '', weight: '', activity: 'moderate', goal: 'maintain' })
@@ -26,10 +24,7 @@ export default function Onboarding() {
   const set = (patch) => setData((d) => ({ ...d, ...patch }))
   const name = STEPS[step]
   const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1))
-  const back = () => {
-    if (step === 0) setPhase('welcome')
-    else setStep((s) => Math.max(s - 1, 0))
-  }
+  const back = () => setStep((s) => Math.max(s - 1, 0))
 
   const bodyOk = data.age >= 10 && data.age <= 100 && data.height >= 120 && data.height <= 230 && data.weight >= 30 && data.weight <= 250
 
@@ -52,92 +47,25 @@ export default function Onboarding() {
     })
   }
 
-  // Пользователь вошёл в существующий аккаунт. Если в облаке уже есть профиль —
-  // App сам переключится на приложение (profile != null, этот компонент
-  // размонтируется). Если облако пустое (аккаунт есть, а анкету не заполняли) —
-  // мы всё ещё здесь → ведём в опросник.
-  //
-  // Ждать синхронизации тут больше не нужно: App вообще не рендерит онбординг,
-  // пока состояние аккаунта не определено. Раньше эта проверка по syncStatus и
-  // была источником мигания «приветствие → опросник → приложение».
+  // Вошёл в существующий аккаунт. Если в облаке уже есть профиль — App сам
+  // переключится на приложение (profile != null, этот компонент размонтируется).
+  // Если облако пустое (аккаунт есть, а анкету не заполняли) — остаёмся в
+  // опроснике, только закрываем шторку входа.
   useEffect(() => {
-    if (phase !== 'welcome' || !signedIn) return
+    if (!signedIn) return
     setAuth(null)
-    setIntent('account')
-    setStep(0)
-    setPhase('survey')
-  }, [phase, signedIn])
+  }, [signedIn])
 
-  const startSurvey = (chosen) => {
-    setIntent(chosen)
-    setStep(0)
-    setPhase('survey')
-  }
-
-  // После опросника при регистрации нужно завести аккаунт.
-  const needsRegister = intent === 'account' && supabaseEnabled && !signedIn
-
-  if (phase === 'welcome') {
-    return (
-      <>
-        <div className="screen" style={{ paddingBottom: 40 }}>
-          <div style={{ paddingTop: 40, textAlign: 'center' }}>
-            <img src="/logo.png" width="140" height="140" style={{ margin: '0 auto 12px', display: 'block' }} alt="" />
-            <div className="eyebrow">EatAps</div>
-            <h1 className="h1" style={{ margin: '8px 0 12px' }}>Больше здоровья<br />за меньше денег</h1>
-            <p className="muted" style={{ fontSize: 16, maxWidth: 320, margin: '0 auto 36px' }}>
-              Умный дневник питания: персональная норма калорий и белка, история и друзья.
-            </p>
-
-            <div className="stack" style={{ maxWidth: 340, margin: '0 auto' }}>
-              {supabaseEnabled && signedIn ? (
-                // Уже вошли — данные загружены, сейчас переведём в опросник.
-                <p className="muted" style={{ fontSize: 15, padding: '12px 0' }}>Открываем аккаунт…</p>
-              ) : supabaseEnabled ? (
-                <>
-                  <button className="btn" onClick={() => startSurvey('account')}>Зарегистрироваться</button>
-                  <button className="btn ghost" onClick={() => setAuth({ mode: 'login' })}>Войти</button>
-                  <button
-                    style={{ marginTop: 4, fontSize: 15, color: 'var(--ink-3)', fontWeight: 550 }}
-                    onClick={() => startSurvey('guest')}
-                  >
-                    Войти как гость
-                  </button>
-                </>
-              ) : (
-                <button className="btn" onClick={() => startSurvey('guest')}>Начать</button>
-              )}
-            </div>
-
-            {supabaseEnabled && !signedIn && hasAnyAccountCache() && (
-              <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 18, maxWidth: 320, marginInline: 'auto' }}>
-                На этом устройстве остались данные аккаунта. Войдите — история и цели вернутся.
-              </p>
-            )}
-
-            <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 20 }}>
-              {supabaseEnabled
-                ? 'Гостевой режим хранит данные только на этом устройстве'
-                : 'Займёт меньше минуты'}
-            </p>
-          </div>
-        </div>
-
-        {auth && (
-          <LazyBoundary onClose={() => setAuth(null)}>
-            <Suspense fallback={null}>
-              <AuthSheet mode={auth.mode} onClose={() => setAuth(null)} />
-            </Suspense>
-          </LazyBoundary>
-        )}
-      </>
-    )
-  }
+  // Аккаунта ещё нет — после опросника предложим его завести. Гостевой путь
+  // остаётся: на последнем шаге есть «Продолжить без аккаунта».
+  const needsRegister = supabaseEnabled && !signedIn
 
   return (
     <div className="screen" style={{ paddingBottom: 40 }}>
       <div className="row between" style={{ marginBottom: 22 }}>
-        <button className="iconbtn" onClick={back} aria-label="Назад">‹</button>
+        {step > 0
+          ? <button className="iconbtn" onClick={back} aria-label="Назад">‹</button>
+          : <div style={{ width: 40 }} />}
         <div style={{ display: 'flex', gap: 6 }}>
           {STEPS.map((_, i) => (
             <div key={i} style={{ width: i <= step ? 22 : 8, height: 8, borderRadius: 4, background: i <= step ? 'var(--primary)' : 'var(--track)', transition: 'all 0.3s ease' }} />
@@ -156,6 +84,25 @@ export default function Onboarding() {
             <input className="input" value={data.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
           </div>
           <Continue onClick={next} />
+
+          {/* Вход перенесён сюда с бывшего интро-экрана: анкету теперь видно
+              сразу, а войти в существующий аккаунт можно с первого шага. */}
+          {supabaseEnabled && !signedIn && (
+            <>
+              <button
+                className="btn ghost"
+                style={{ marginTop: 12 }}
+                onClick={() => setAuth({ mode: 'login' })}
+              >
+                Уже есть аккаунт? Войти
+              </button>
+              {hasAnyAccountCache() && (
+                <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 14, textAlign: 'center' }}>
+                  На этом устройстве остались данные аккаунта. Войдите — история и цели вернутся.
+                </p>
+              )}
+            </>
+          )}
         </StepShell>
       )}
 

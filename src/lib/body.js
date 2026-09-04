@@ -74,6 +74,67 @@ export function scoreToActivityKey(score) {
 // отличную от анкетной.
 export const ACTIVITY_SCORE = { sedentary: 12, light: 37, moderate: 62, high: 87 }
 
+// ── Шкала активности дня, привязанная к ШАГАМ ────────────────────────────────
+//
+// «Малоподвижно», «активно», «очень» — слова, под которыми каждый понимает своё.
+// Один считает активным днём поход в магазин, другой — двадцать километров. От
+// этого зависит цель по калориям, то есть сколько человеку сегодня есть, и
+// гадать тут нельзя.
+//
+// Шаги — единственная мера, которая у человека есть в кармане: их показывает
+// телефон, и с ними можно себя сверить, а не угадывать. Поэтому подпись у
+// каждого уровня — не эпитет, а число шагов.
+//
+// Числа — ОРИЕНТИР, а не измерение: приложение не читает шагомер, и одинаковое
+// число шагов у разных людей стоит разных калорий. Об этом сказано и на экране.
+//
+// Балл (score) остаётся прежней величиной 0–100 — той самой, из которой
+// scoreToFactor делает множитель к BMR. Шаги лишь дают ей понятную опору:
+// «обычный день» — это ровно та активность, под которую подобран light (1.375).
+export const ACTIVITY_LEVELS = [
+  { score: 3,   steps: 500,   emoji: '🛌', label: 'Лежачий день', hint: 'до 1000 шагов', desc: 'Весь день в постели: болезнь, восстановление' },
+  { score: 18,  steps: 3000,  emoji: '🛋️', label: 'Почти не выходил', hint: '≈ 3 000 шагов', desc: 'Дом и работа сидя, до магазина и обратно' },
+  { score: 37,  steps: 7000,  emoji: '🚶', label: 'Обычный день', hint: '≈ 7 000 шагов', desc: 'Дорога, дела, немного ходьбы — как у большинства' },
+  { score: 55,  steps: 12000, emoji: '🚶‍♂️', label: 'Много ходил', hint: '≈ 12 000 шагов', desc: 'Долгая прогулка или день на ногах' },
+  { score: 72,  steps: 20000, emoji: '🏃', label: 'Очень активно', hint: '≈ 20 000 шагов', desc: 'Долгая прогулка, поход или работа на ногах' },
+  { score: 88,  steps: 30000, emoji: '🔥', label: 'На ногах весь день', hint: '≈ 30 000 шагов', desc: 'Тяжёлая физическая работа или долгий поход' },
+  { score: 100, steps: 50000, emoji: '⛰️', label: 'Предел', hint: '≈ 50 000 шагов', desc: 'Марафон, горы, смена на стройке — так не бывает каждый день' },
+]
+
+// Уровень, ближайший к баллу. Балл может прийти любой (старые дни, анкета),
+// а показать надо конкретную кнопку.
+export function activityLevelFor(score) {
+  const n = Number.isFinite(Number(score)) ? Number(score) : ACTIVITY_SCORE.light
+  return ACTIVITY_LEVELS.reduce((best, lvl) => (
+    Math.abs(lvl.score - n) < Math.abs(best.score - n) ? lvl : best
+  ))
+}
+
+// ── Силовая тренировка ───────────────────────────────────────────────────────
+//
+// Считается ОТДЕЛЬНО от ходьбы, и это не придирка к оформлению. Штанга и шаги —
+// разные траты: час в зале даёт немного шагов, но заметный расход, и человек,
+// отметивший «обычный день», не должен из-за тренировки вручную подкручивать
+// ползунок ходьбы, гадая, на сколько.
+//
+// Величина: силовая на 45–60 минут средней тяжести — примерно +15% к основному
+// обмену за сутки (около 280 ккал при обмене 1870). Выражена надбавкой к
+// КОЭФФИЦИЕНТУ активности, а не отдельным слагаемым к калориям, и это не
+// оформление: computeTargets считает белки, жиры и углеводы ОТ калорий, поэтому
+// калории, добавленные мимо коэффициента, не попали бы в макросы — человек
+// получил бы +280 ккал без единого грамма белка под них.
+//
+// Надбавка постоянная, потому что и расход на тренировке, и основной обмен
+// растут вместе с массой тела: доля между ними держится куда лучше, чем
+// абсолютное число калорий.
+export const STRENGTH_FACTOR_BONUS = 0.15
+
+// (прибавка за тренировку считается ниже — strengthDeltaForDay)
+
+export function hasStrength(day) {
+  return day?.strength === true
+}
+
 // Наклон выводим из самих коэффициентов ACTIVITY, а не вписываем числом:
 // поменяется ACTIVITY — прямая поедет за ним и опоры останутся точными.
 const FACTOR_SLOPE =
@@ -92,8 +153,16 @@ export function scoreToFactor(score) {
   return Math.round(f * 10000) / 10000
 }
 
-// Балл, который показывает ползунок, пока день не отмечен вручную.
+// Балл, который стоит в дне, пока человек не отметил активность руками.
+//
+// Приоритет: личная настройка «что ставить по умолчанию» → уровень из анкеты →
+// обычный день. Настройка нужна потому, что анкета спрашивает про образ жизни
+// один раз и словами, а живёт человек по-разному: у одного «по умолчанию» это
+// три тысячи шагов, у другого двенадцать. Пока он не выбрал сам, ничего не
+// меняем — иначе цель поехала бы у всех разом.
 export function profileScore(profile) {
+  const own = Number(profile?.defaultActivityScore)
+  if (Number.isFinite(own)) return Math.min(100, Math.max(0, own))
   return ACTIVITY_SCORE[profile?.activity] ?? ACTIVITY_SCORE.light
 }
 
@@ -110,15 +179,24 @@ export function effectiveActivity(day, profile) {
 // Множитель к BMR для этого дня: балл ползунка (непрерывно) → ключ дня →
 // ключ профиля. Именно он идёт в расчёт КБЖУ, в отличие от effectiveActivity,
 // который остаётся «ступенчатым» и нужен только для подписей и сводок.
-export function effectiveActivityFactor(day, profile) {
+// Множитель к BMR за ХОДЬБУ (без силовой) — нужен отдельно, чтобы показать на
+// экране, сколько добавила именно тренировка.
+export function walkFactor(day, profile) {
   const score = day?.activityScore
   if (score != null && Number.isFinite(Number(score))) return scoreToFactor(Number(score))
-  return ACTIVITY[effectiveActivity(day, profile)]?.factor ?? ACTIVITY.light.factor
+  if (isValidActivity(day?.activity)) return ACTIVITY[day.activity].factor
+  return scoreToFactor(profileScore(profile))
+}
+
+export function effectiveActivityFactor(day, profile) {
+  const base = walkFactor(day, profile)
+  return hasStrength(day) ? Math.round((base + STRENGTH_FACTOR_BONUS) * 10000) / 10000 : base
 }
 
 // Активность задана вручную именно для этого дня.
 export function hasDayActivity(day) {
   if (day?.activityScore != null && Number.isFinite(Number(day.activityScore))) return true
+  if (hasStrength(day)) return true
   return isValidActivity(day?.activity)
 }
 
@@ -207,6 +285,28 @@ export function profileTargets(profile) {
 // Разовый расчёт целей одного дня (для экрана дня — там дней три, индекс не нужен).
 export function targetsForDay(days, dateKey, profile) {
   return createTargetResolver(days, profile)(dateKey, days?.[dateKey])
+}
+
+// Сколько калорий добавляет к цели ИМЕННО силовая — разница двух целей одного
+// и того же дня, с отметкой и без неё.
+//
+// Считать отдельной формулой («15% от обмена») нельзя, и это выяснилось на
+// экране: цели округляются до десятков каждая, поэтому разность округлённых
+// целей (280) и округлённая разность (270) расходятся. Человек видит оба числа
+// сразу — «+270 ккал» под кнопкой и скачок 2820 → 3100 — и это выглядит как
+// ошибка в расчёте. Возвращаем ровно ту разницу, которую он и увидит.
+//
+// Один резолвер на оба вызова: внутри кэш по (вес, коэффициент), поэтому вторая
+// цель считается без повторного обхода истории веса.
+export function strengthDeltaForDay(days, dateKey, profile) {
+  const day = days?.[dateKey] || {}
+  const resolve = createTargetResolver(days, profile)
+  const on = resolve(dateKey, { ...day, strength: true })
+  const off = resolve(dateKey, { ...day, strength: false })
+  const a = Number(on?.calories)
+  const b = Number(off?.calories)
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return null
+  return a - b
 }
 
 // Цель того же дня, но БЕЗ ручной отметки активности — то есть по активности из

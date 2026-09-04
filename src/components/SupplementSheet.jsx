@@ -3,6 +3,7 @@ import { useSheetDrag } from '../lib/useSheetDrag.js'
 import {
   SUPPLEMENTS, SUPP_GROUPS, POPULAR_SUPPLEMENTS,
   searchSupplements, scaleProvides, makeCustomSupplement, doseLabel,
+  doseFields, providesFromFields, unitProvides, unitDose, needsDoseSetup, hasOwnDose,
 } from '../lib/supplements.js'
 import { MICRONUTRIENTS, MICRO_GROUPS, formatMicro } from '../lib/micronutrients.js'
 import { previewSupplement } from '../lib/microSummary.js'
@@ -26,13 +27,16 @@ import { plural } from '../lib/text.js'
 
 const num = (v) => { const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0 }
 
-export default function SupplementSheet({ summary, onAdd, onPin, onClose }) {
+export default function SupplementSheet({ summary, suppDoses = {}, setSuppDose, onAdd, onPin, onClose }) {
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
   const [q, setQ] = useState('')
   const [group, setGroup] = useState(null)
   const [selected, setSelected] = useState(null)
   const [dose, setDose] = useState('1')
   const [custom, setCustom] = useState(false)
+  // Шаг «что в одной таблетке». Открывается сам у добавок с плавающей
+  // дозировкой, пока человек не указал свою, и по кнопке — у любых других.
+  const [editingUnit, setEditingUnit] = useState(false)
 
   const list = useMemo(() => {
     if (q.trim()) return searchSupplements(q).slice(0, 40)
@@ -42,11 +46,17 @@ export default function SupplementSheet({ summary, onAdd, onPin, onClose }) {
 
   const pick = (s) => {
     setSelected(s)
-    setDose(String(s.defaultDose ?? 1))
+    setDose(String(unitDose(s, suppDoses)))
+    // У рыбьего жира и мультивитаминов состав капсулы у каждого свой. Спрашиваем
+    // один раз, при первом выборе, — дальше человек указывает только количество.
+    setEditingUnit(needsDoseSetup(s, suppDoses))
   }
 
   const doseN = num(dose)
-  const provides = selected ? scaleProvides(selected.provides, doseN) : {}
+  // Состав ОДНОЙ единицы: сохранённый человеком либо типовой из каталога.
+  const unit = selected ? unitProvides(selected, suppDoses) : {}
+  const own = selected ? hasOwnDose(selected, suppDoses) : false
+  const provides = selected ? scaleProvides(unit, doseN) : {}
   const preview = useMemo(
     () => (selected && summary ? previewSupplement(summary, provides) : []),
     [selected, summary, provides],
@@ -62,7 +72,8 @@ export default function SupplementSheet({ summary, onAdd, onPin, onClose }) {
       dose: doseN,
       provides,
     })
-    if (alsoPin) onPin(stackItemFromSupplement(selected, doseN))
+    // В стек уезжает СВОЙ состав единицы, а не каталожный.
+    if (alsoPin) onPin({ ...stackItemFromSupplement(selected, doseN), provides: unit })
     close()
   }
 
@@ -85,18 +96,46 @@ export default function SupplementSheet({ summary, onAdd, onPin, onClose }) {
     <div className="sheet-backdrop" {...backdropProps} onClick={close}>
       <div className="sheet sheet-tall" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
-        <div className="row between" style={{ marginBottom: 14 }}>
-          <h2 className="h2">{selected ? 'Сколько принято' : 'Добавка'}</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+        {/* Один заголовок на весь лист. Шаг «что в одной таблетке» раньше
+            рисовал свой поверх этого, и человек видел «Сколько принято» над
+            формой состава — то есть подпись не про то, что на экране. */}
+        <div className="row between" style={{ marginBottom: 14, gap: 8 }}>
+          <div className="row gap8" style={{ minWidth: 0, flex: '1 1 auto' }}>
+            {selected && editingUnit && (
+              <button
+                className="iconbtn"
+                onClick={() => (own || !selected.variable ? setEditingUnit(false) : setSelected(null))}
+                aria-label="Назад"
+              >←</button>
+            )}
+            <h2 className="h2" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {!selected ? 'Добавка' : editingUnit ? selected.name : 'Сколько принято'}
+            </h2>
+          </div>
+          <button className="iconbtn" onClick={close} aria-label="Закрыть" style={{ flex: '0 0 auto' }}>✕</button>
         </div>
 
-        {selected ? (
+        {selected && editingUnit ? (
+          <UnitEditor
+            supp={selected}
+            saved={suppDoses}
+            onSave={(p) => {
+              setSuppDose?.(selected.id, { provides: p, dose: doseN > 0 ? doseN : (selected.defaultDose ?? 1) })
+              setEditingUnit(false)
+            }}
+          />
+        ) : selected ? (
           <>
             <div className="row gap12" style={{ alignItems: 'flex-start', marginBottom: 16 }}>
               <span className="meal-emoji" style={{ width: 42, height: 42, fontSize: 20, flex: '0 0 auto' }}>{selected.emoji}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 16, fontWeight: 600 }}>{selected.name}</div>
-                {selected.note && <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.4 }}>{selected.note}</div>}
+                {/* Типовую подпись с этикетки прячем, если человек указал свою
+                    банку: «≈ 180 EPA + 120 DHA» рядом с его собственными 500/250
+                    читается как спор приложения с самим собой. */}
+                {selected.note && !own && (
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.4 }}>{selected.note}</div>
+                )}
               </div>
               <button className="btn soft" style={{ width: 'auto', height: 34, padding: '0 12px', fontSize: 13, flex: '0 0 auto' }} onClick={() => setSelected(null)}>Другая</button>
             </div>
@@ -106,6 +145,26 @@ export default function SupplementSheet({ summary, onAdd, onPin, onClose }) {
                 ⚠️ {selected.warn}
               </p>
             )}
+
+            {/* Что в одной единице — всегда на виду и всегда правится: у
+                каталожной записи это типовая банка, у уточнённой — своя. */}
+            <button
+              onClick={() => setEditingUnit(true)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)', marginBottom: 16,
+              }}
+            >
+              <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: 'var(--ink-3)', display: 'block' }}>
+                  {own ? 'Ваша банка · в одной единице' : 'Типовая банка · в одной единице'}
+                </span>
+                <span style={{ fontSize: 13.5, fontWeight: 550, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {describeUnit(unit)}
+                </span>
+              </span>
+              <span style={{ fontSize: 12.5, color: 'var(--primary)', fontWeight: 600, flex: '0 0 auto' }}>изменить</span>
+            </button>
 
             <div className="field">
               <label>Сколько ({selected.unit})</label>
@@ -162,7 +221,7 @@ export default function SupplementSheet({ summary, onAdd, onPin, onClose }) {
                   <span style={{ minWidth: 0, flex: 1 }}>
                     <span style={{ fontSize: 14.5, fontWeight: 550, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
                     <span style={{ fontSize: 12, color: 'var(--ink-3)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {mainSubstances(s)}
+                      {hasOwnDose(s, suppDoses) ? `ваша банка · ${describeUnit(suppDoses[s.id].provides)}` : mainSubstances(s)}
                     </span>
                   </span>
                 </button>
@@ -207,6 +266,74 @@ function doseChoices(s) {
 }
 
 // ── Прикидка: что станет после приёма ────────────────────────────────────────
+// Состав единицы одной строкой: «D 50 мкг · K 100 мкг».
+function describeUnit(provides) {
+  const keys = Object.keys(provides || {})
+  if (!keys.length) return 'состав не указан'
+  const defs = MICRONUTRIENTS.filter((d) => keys.includes(d.key))
+  if (defs.length > 4) return `${defs.length} ${plural(defs.length, 'вещество', 'вещества', 'веществ')}`
+  return defs.map((d) => `${d.short} ${formatMicro(provides[d.key], d.unit)}`).join(' · ')
+}
+
+// ── Что в одной таблетке ─────────────────────────────────────────────────────
+// Человек переписывает состав со своей банки, и приложение его запоминает.
+// Дальше при каждом приёме он указывает только количество капсул.
+function UnitEditor({ supp, saved, onSave }) {
+  const fields = useMemo(() => doseFields(supp), [supp])
+  const start = useMemo(() => {
+    const cur = unitProvides(supp, saved)
+    const out = {}
+    for (const f of fields) {
+      // Несколько полей на один ключ (EPA и DHA в омега-3) из суммы не
+      // восстановить — там показываем типовые числа, а не делим 750 пополам.
+      const many = fields.filter((x) => x.key === f.key).length > 1
+      const v = many ? null : cur[f.key]
+      out[f.id] = v != null ? String(v) : String(f.typical ?? '')
+    }
+    return out
+  }, [supp, saved, fields])
+
+  const [values, setValues] = useState(start)
+  const provides = providesFromFields(fields, values)
+  const ready = Object.keys(provides).length > 0
+
+  return (
+    <>
+      <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.5, margin: '0 0 4px' }}>
+        Сколько в ОДНОЙ {supp.unit === 'г' || supp.unit === 'мл' ? `единице (${supp.unit})` : supp.unit === 'порция' ? 'порции' : supp.unit.replace(/а$/, 'е')}?
+      </p>
+      <p style={{ fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.45, margin: '0 0 16px' }}>
+        {supp.variable
+          ? 'У разных производителей дозировки сильно отличаются — перепишите со своей банки. Дальше будете указывать только количество.'
+          : 'Числа подставлены типовые. Если на вашей банке другие — поправьте, приложение запомнит.'}
+      </p>
+
+      <div className="stack" style={{ marginTop: 0, marginBottom: 18 }}>
+        {fields.map((f) => (
+          <div key={f.id} className="row gap8">
+            <span style={{ fontSize: 13.5, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.label}</span>
+            <input
+              className="input" type="text" inputMode="decimal" placeholder="0"
+              value={values[f.id] ?? ''}
+              onChange={(e) => setValues((v) => ({ ...v, [f.id]: sanitizeAmount(e.target.value) }))}
+              style={{ width: 96, flex: '0 0 auto', textAlign: 'right', height: 42 }}
+              aria-label={`${f.label}, ${f.unit}`}
+            />
+            <span style={{ fontSize: 12.5, color: 'var(--ink-3)', width: 46, flex: '0 0 auto' }}>{f.unit}</span>
+          </div>
+        ))}
+      </div>
+
+      <button className="btn" onClick={() => onSave(provides)} disabled={!ready}>Запомнить эту банку</button>
+      {!ready && (
+        <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '10px 0 0', lineHeight: 1.45 }}>
+          Заполните хотя бы одно поле — иначе считать будет нечего.
+        </p>
+      )}
+    </>
+  )
+}
+
 const VERDICT = {
   ul: { color: 'var(--danger)', text: 'выше верхнего предела' },
   excess: { color: 'var(--warn)', text: 'заметно выше нормы' },

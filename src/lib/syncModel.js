@@ -60,7 +60,12 @@ export function blankDay() {
 // Пока его тут не было, поле выживало только на честном слове спреда в
 // mergeDay: метка времени для него терялась при первом же слиянии, а день, где
 // человек ТОЛЬКО двинул ползунок, считался пустым и удалялся вместе с целью.
-export const DAY_SCALARS = ['mood', 'wellbeing', 'note', 'weight', 'activity', 'activityScore', 'statsExcluded', 'statsConfirmed']
+// strength — «сегодня была силовая». Отдельный флаг, а не часть ползунка
+// ходьбы: штанга и шаги — разные траты, и цель по калориям поднимает именно он
+// (см. STRENGTH_FACTOR_BONUS в body.js). Как и всё, от чего зависит цель, поле
+// обязано быть здесь: иначе его метка терялась бы при слиянии, а день, где
+// человек только отметил тренировку, считался бы пустым.
+export const DAY_SCALARS = ['mood', 'wellbeing', 'note', 'weight', 'activity', 'activityScore', 'strength', 'statsExcluded', 'statsConfirmed']
 
 // ── Ключи тумбстоунов ────────────────────────────────────────────────────────
 export const tombMeal = (date, id) => `d:${date}:m:${id}`
@@ -144,6 +149,7 @@ function normalizeDay(raw) {
     weight: normWeight(d.weight),
     activity: normActivity(d.activity),
     activityScore: normActivityScore(d.activityScore),
+    strength: d.strength === true,
     // Флаги учёта в статистике: строго булевы, чтобы не было «то ли есть, то ли нет».
     statsExcluded: d.statsExcluded === true,
     statsConfirmed: d.statsConfirmed === true,
@@ -320,6 +326,7 @@ function mergeDay(base, inc, date, baseFieldTs, incFieldTs, tombstones) {
   day.weight = normWeight(day.weight)
   day.activity = normActivity(day.activity)
   day.activityScore = normActivityScore(day.activityScore)
+  day.strength = day.strength === true
   day.statsExcluded = day.statsExcluded === true
   day.statsConfirmed = day.statsConfirmed === true
 
@@ -431,6 +438,7 @@ export function isDayEmpty(day) {
     d.weight == null &&
     d.activity == null &&
     d.activityScore == null &&
+    d.strength !== true &&
     d.statsExcluded !== true
   )
 }

@@ -706,6 +706,26 @@ export function StoreProvider({ children }) {
     setDayField(date, 'activityScore', Number.isFinite(n) ? n : null)
   }, [setDayField])
 
+  // Силовая тренировка этого дня. Отдельно от ходьбы: это разные траты, и
+  // человеку не нужно догадываться, на сколько подкрутить ползунок шагов.
+  const setDayStrength = useCallback((date, on) => {
+    setDayField(date, 'strength', on === true)
+  }, [setDayField])
+
+  // «Что ставить по умолчанию» — уровень активности для дней, где человек
+  // ничего не отмечал. Живёт в профиле, а не в prefs: от него зависит цель по
+  // калориям, а всё, из чего считается цель (пол, возраст, рост, вес, режим),
+  // профиль и хранит. Расчёту (body.js) доступен именно профиль.
+  const setDefaultActivityScore = useCallback((score) => {
+    const n = Math.round(Math.max(0, Math.min(100, Number(score))))
+    if (!Number.isFinite(n)) return
+    const ts = clock.tick()
+    setState((s) => {
+      if (!s.profile) return s
+      return { ...s, profile: { ...s.profile, defaultActivityScore: n }, meta: { ...s.meta, profileTs: ts } }
+    })
+  }, [])
+
   // ── Учёт дня в статистике ─────────────────────────────────────────────────
   // «Пропустить день» — против самой частой причины вранья в статистике: было
   // лень записать всё съеденное, и средние поехали вниз. Продукты дня при этом
@@ -954,6 +974,39 @@ export function StoreProvider({ children }) {
   // «мне нужно 500 витамина C» — это его дело, наше — честно показать, где он
   // относительно этой цифры и где верхний предел.
   // null (пустое поле) стирает личную цель и возвращает справочную норму.
+  // Состав СВОЕЙ банки: сколько чего в одной капсуле и сколько их обычно.
+  // Хранится по id добавки и переживает всё: в следующий раз человек указывает
+  // только количество капсул, как и просили. Сбрасывается передачей null.
+  const setSuppDose = useCallback((suppId, dose) => {
+    const id = typeof suppId === 'string' ? suppId.slice(0, 40) : ''
+    if (!id) return
+    const ts = clock.tick()
+    setState((s) => {
+      const prev = (s.prefs && typeof s.prefs.suppDoses === 'object' && s.prefs.suppDoses) || {}
+      const next = { ...prev }
+      if (dose == null) delete next[id]
+      else next[id] = { provides: dose.provides || {}, dose: Number(dose.dose) > 0 ? Number(dose.dose) : 1 }
+
+      // Та же добавка в стеке обновляется вместе с настройкой. Человек поправил
+      // состав своей банки — значит, он поправил его вообще, а не только для
+      // следующего разового приёма. Иначе галочка в стеке продолжала бы молча
+      // писать старые цифры, и два числа в одном приложении разошлись бы.
+      // Уже записанные приёмы не трогаем: это факты прошедших дней.
+      const supplements = dose == null
+        ? (s.supplements || [])
+        : (s.supplements || []).map((x) => (
+          x.suppId === id ? { ...x, provides: { ...(dose.provides || {}) }, updatedAt: ts } : x
+        ))
+
+      return {
+        ...s,
+        supplements,
+        prefs: { ...s.prefs, suppDoses: next },
+        meta: setPrefTs(s.meta, 'suppDoses', ts),
+      }
+    })
+  }, [])
+
   const setMicroGoal = useCallback((key, value) => {
     const clean = sanitizeMicroGoal(key, value)
     const ts = clock.tick()
@@ -1103,6 +1156,7 @@ export function StoreProvider({ children }) {
     recipes: state.recipes || [],
     supplements: state.supplements || [],
     microGoals: (state.prefs && typeof state.prefs.microGoals === 'object' && state.prefs.microGoals) || {},
+    suppDoses: (state.prefs && typeof state.prefs.suppDoses === 'object' && state.prefs.suppDoses) || {},
     foodMemory,
     recents: state.recents || [],
     prefs: state.prefs || {},
@@ -1125,6 +1179,8 @@ export function StoreProvider({ children }) {
     setDayWeight,
     setDayActivity,
     setDayActivityScore,
+    setDayStrength,
+    setDefaultActivityScore,
     setWeightGoal,
     // учёт дня в статистике
     setDayStatsExcluded,
@@ -1143,6 +1199,7 @@ export function StoreProvider({ children }) {
     editSupp,
     saveStackItem,
     removeStackItem,
+    setSuppDose,
     setMicroGoal,
     setPref,
     purchaseSubscription,
@@ -1179,8 +1236,9 @@ export function StoreProvider({ children }) {
     setProfile, setTheme, addFood, addFoods, repeatDay, repeatMeal, removeFood, editFood, upsertMealSection, deleteMealSection,
     moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient, toggleFavorite,
     saveTemplate, removeTemplate, saveRecipe, removeRecipe,
-    addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, setMicroGoal,
-    setDayWeight, setDayActivity, setDayActivityScore, setWeightGoal, setDayStatsExcluded, confirmDayStats,
+    addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, setSuppDose, setMicroGoal,
+    setDayWeight, setDayActivity, setDayActivityScore, setDayStrength, setDefaultActivityScore,
+    setWeightGoal, setDayStatsExcluded, confirmDayStats,
     setPref, purchaseSubscription, openSubscriptionPortal, refreshSubscription, applyPromo,
     resetAll, signOut, stopSync, beginSignIn, endSignIn, completeRecovery, cancelRecovery,
     retryData, retrySync, dismissAuthError,

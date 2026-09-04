@@ -436,3 +436,35 @@ test('мусорный балл активности не доезжает до 
   assert.equal(norm(''), null)
   assert.equal(norm(62.4), 62)
 })
+
+// ── Силовая тренировка дня ───────────────────────────────────────────────────
+
+test('отметка о силовой версионируется своей меткой', () => {
+  const mk = (on, ts) => normalizeState({
+    days: { [DATE]: { ...blankDay(), strength: on } },
+    meta: setDayFieldTs(emptyMeta(), DATE, 'strength', ts),
+  })
+  const older = mk(true, phone.tick())
+  ms.b = 12_000
+  const newer = mk(false, laptop.tick())
+  assert.equal(mergeState(older, newer).days[DATE], undefined, 'снятая отметка оставляет день пустым')
+
+  ms.b = 20_000
+  const on = mk(true, laptop.tick())
+  assert.equal(mergeState(mk(false, phone.tick()), on).days[DATE].strength, true)
+})
+
+test('день, где отмечена только тренировка, не считается пустым', () => {
+  // Иначе слияние выбросило бы его вместе с поднятой целью по калориям.
+  assert.equal(isDayEmpty({ ...blankDay(), strength: true }), false)
+  const merged = mergeState(stateWith(), stateWith({ [DATE]: { ...blankDay(), strength: true } }))
+  assert.equal(merged.days[DATE]?.strength, true)
+})
+
+test('отметка о силовой строго булева', () => {
+  const norm = (v) => normalizeState({ days: { [DATE]: { ...blankDay(), strength: v, note: 'x' } } }).days[DATE].strength
+  assert.equal(norm('да'), false)
+  assert.equal(norm(1), false)
+  assert.equal(norm(true), true)
+  assert.equal(norm(undefined), false)
+})

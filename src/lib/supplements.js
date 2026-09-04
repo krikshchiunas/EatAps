@@ -59,6 +59,20 @@ const S = (id, name, emoji, group, unit, provides, extra = {}) => ({
   defaultDose: extra.defaultDose ?? 1,
   note: extra.note || '',
   alias: extra.alias || '',
+  // variable: состав ОДНОЙ единицы у этой добавки всерьёз разный у разных
+  // производителей, и наше число — только типовое. У рыбьего жира EPA и DHA
+  // отличаются в разы, у мультивитаминов различается всё, у пробиотиков —
+  // количество бактерий. Такие приложение просит уточнить по этикетке один
+  // раз и дальше помнит.
+  //
+  // Там, где дозировка зашита в название («Витамин D3 2000 МЕ», «Цинк 25 мг»)
+  // или задана самим веществом (креатин и бета-аланин мерят граммами), флага
+  // нет — переспрашивать не о чем. Уточнить состав можно и у них, но по своей
+  // воле, а не обязательным шагом.
+  variable: extra.variable === true,
+  // Чем спрашивать, если на этикетке пишут не так, как мы считаем: у рыбьего
+  // жира на банке два числа (EPA и DHA), а в норму они идут одной суммой.
+  fields: extra.fields || null,
   // Предупреждение, которое показывается при добавлении. Не запрет — но
   // молчать о взаимодействии, про которое человек мог не знать, нельзя.
   warn: extra.warn || '',
@@ -70,41 +84,41 @@ export const SUPPLEMENTS = [
     vitA: 800, vitD: 5, vitE: 15, vitK: 30, vitC: 100, b1: 1.4, b2: 1.75, b3: 20,
     b5: 6, b6: 2, b7: 50, b9: 200, b12: 2.5, ca: 162, mg: 100, fe: 5, zn: 5,
     cu: 0.5, mn: 2, se: 30, i: 100, cr: 40, mo: 50, p: 125, k: 40,
-  }, { alias: 'мультивитамины комплекс centrum витрум супрадин компливит multivitamin multi мультивитаминный', note: 'состав как у обычного взрослого комплекса' }),
+  }, { variable: true, alias: 'мультивитамины комплекс centrum витрум супрадин компливит multivitamin multi мультивитаминный', note: 'состав как у обычного взрослого комплекса' }),
 
   S('multi-sport', 'Мультивитамины спортивные', '🏋️', 'multi', 'порция', {
     vitA: 1050, vitD: 25, vitE: 60, vitK: 80, vitC: 300, b1: 75, b2: 75, b3: 75,
     b5: 50, b6: 10, b7: 300, b9: 400, b12: 100, ca: 200, mg: 160, fe: 8, zn: 15,
     cu: 2, mn: 5, se: 70, i: 150, cr: 120, mo: 90, k: 100, choline: 50, lutein: 1,
-  }, { alias: 'opti men animal pak спортивные витамины дозировки', note: 'порция = 2–3 таблетки, дозы кратно выше бытовых' }),
+  }, { variable: true, alias: 'opti men animal pak спортивные витамины дозировки', note: 'порция = 2–3 таблетки, дозы кратно выше бытовых' }),
 
   S('multi-women', 'Мультивитамины для женщин', '💗', 'multi', 'таблетка', {
     vitA: 700, vitD: 10, vitE: 15, vitK: 30, vitC: 90, b1: 1.2, b2: 1.4, b3: 16,
     b5: 6, b6: 2, b7: 60, b9: 400, b12: 3, ca: 200, mg: 100, fe: 14, zn: 8,
     cu: 0.5, mn: 1.8, se: 55, i: 150, cr: 25, p: 100,
-  }, { alias: 'женские витамины для женщин', note: 'больше железа и фолата' }),
+  }, { variable: true, alias: 'женские витамины для женщин', note: 'больше железа и фолата' }),
 
   S('multi-men', 'Мультивитамины для мужчин', '💙', 'multi', 'таблетка', {
     vitA: 900, vitD: 10, vitE: 15, vitK: 40, vitC: 100, b1: 1.5, b2: 1.7, b3: 20,
     b5: 7, b6: 2.5, b7: 60, b9: 300, b12: 4, ca: 120, mg: 110, zn: 15,
     cu: 0.9, mn: 2.3, se: 70, i: 150, cr: 35, p: 100,
-  }, { alias: 'мужские витамины для мужчин', note: 'без железа, больше цинка и селена' }),
+  }, { variable: true, alias: 'мужские витамины для мужчин', note: 'без железа, больше цинка и селена' }),
 
   S('multi-prenatal', 'Витамины для беременных', '🤱', 'multi', 'таблетка', {
     vitA: 770, vitD: 15, vitE: 15, vitK: 45, vitC: 85, b1: 1.4, b2: 1.4, b3: 18,
     b5: 6, b6: 1.9, b7: 30, b9: 600, b12: 2.6, ca: 200, mg: 50, fe: 27, zn: 11,
     cu: 1, se: 60, i: 220, omega3: 200,
-  }, { alias: 'пренатальные элевит фемибион для беременных', note: 'фолат 600 мкг, железо 27 мг', warn: 'Приём во время беременности согласуйте с врачом, который вас ведёт.' }),
+  }, { variable: true, alias: 'пренатальные элевит фемибион для беременных', note: 'фолат 600 мкг, железо 27 мг', warn: 'Приём во время беременности согласуйте с врачом, который вас ведёт.' }),
 
   S('multi-50', 'Мультивитамины 50+', '🧓', 'multi', 'таблетка', {
     vitA: 700, vitD: 20, vitE: 15, vitK: 40, vitC: 100, b1: 1.2, b2: 1.4, b3: 16,
     b5: 6, b6: 2, b7: 50, b9: 400, b12: 25, ca: 200, mg: 100, zn: 11,
     cu: 0.9, mn: 2, se: 55, i: 150, cr: 30, lutein: 2,
-  }, { alias: 'для пожилых 50+ 60+ silver', note: 'больше B12 и витамина D' }),
+  }, { variable: true, alias: 'для пожилых 50+ 60+ silver', note: 'больше B12 и витамина D' }),
 
   S('multi-gummy', 'Мультивитамины жевательные', '🍬', 'multi', 'пастилка', {
     vitA: 300, vitD: 5, vitE: 7, vitC: 45, b5: 2.5, b6: 0.7, b7: 25, b9: 100, b12: 1.5, i: 50, zn: 2,
-  }, { defaultDose: 2, alias: 'мармеладки гамми жевательные витамины gummy' }),
+  }, { variable: true, defaultDose: 2, alias: 'мармеладки гамми жевательные витамины gummy' }),
 
   // ── Витамины по отдельности ───────────────────────────────────────────────
   S('vitd-1000', 'Витамин D3 1000 МЕ', '☀️', 'vitamin', 'капсула', { vitD: 25 },
@@ -116,7 +130,7 @@ export const SUPPLEMENTS = [
   S('vitd-drops', 'Витамин D3 в каплях', '💧', 'vitamin', 'капля', { vitD: 12.5 },
     { defaultDose: 2, alias: 'д3 капли масляный раствор', note: 'капля ≈ 500 МЕ' }),
   S('vitd-k2', 'Витамин D3 + K2', '☀️', 'vitamin', 'капсула', { vitD: 50, vitK: 100 },
-    { alias: 'д3 к2 мк7 менахинон d3 k2 mk-7', note: '2000 МЕ D3 + 100 мкг K2 (MK-7)' }),
+    { variable: true, alias: 'д3 к2 мк7 менахинон d3 k2 mk-7', note: '2000 МЕ D3 + 100 мкг K2 (MK-7)' }),
 
   S('vitc-500', 'Витамин C 500 мг', '🍊', 'vitamin', 'таблетка', { vitC: 500 },
     { alias: 'аскорбиновая кислота витамин ц vitamin c аскорбинка' }),
@@ -125,7 +139,7 @@ export const SUPPLEMENTS = [
   S('vitc-fizz', 'Витамин C шипучий', '🥂', 'vitamin', 'таблетка', { vitC: 1000, na: 300 },
     { alias: 'шипучка растворимый витамин ц', note: 'в шипучих таблетках заметно натрия' }),
   S('vitc-zinc', 'Витамин C + цинк', '🍊', 'vitamin', 'таблетка', { vitC: 500, zn: 10 },
-    { alias: 'ц цинк простуда иммунитет' }),
+    { variable: true, alias: 'ц цинк простуда иммунитет' }),
 
   S('vita', 'Витамин A (ретинол)', '🥕', 'vitamin', 'капсула', { vitA: 1500 },
     { alias: 'ретинол витамин а retinol', note: '5000 МЕ ≈ 1500 мкг RAE', warn: 'Витамин A накапливается в печени; при беременности высокие дозы опасны.' }),
@@ -136,7 +150,7 @@ export const SUPPLEMENTS = [
 
   S('b-complex', 'B-комплекс', '🅱️', 'vitamin', 'капсула', {
     b1: 50, b2: 50, b3: 50, b5: 50, b6: 50, b7: 50, b9: 400, b12: 50, choline: 20,
-  }, { alias: 'б комплекс группы b b-complex витамины группы б' }),
+  }, { variable: true, alias: 'б комплекс группы b b-complex витамины группы б' }),
   S('b12', 'Витамин B12 1000 мкг', '🅱️', 'vitamin', 'таблетка', { b12: 1000 },
     { alias: 'метилкобаламин цианокобаламин b12 в12 б12', note: 'подъязычная форма, 1000 мкг' }),
   S('b9', 'Фолиевая кислота 400 мкг', '🥬', 'vitamin', 'таблетка', { b9: 400 },
@@ -164,13 +178,13 @@ export const SUPPLEMENTS = [
   S('mg-glycinate', 'Магний глицинат 200 мг', '🧂', 'mineral', 'капсула', { mg: 200, glycine: 1 },
     { alias: 'магний бисглицинат хелат magnesium glycinate', note: 'мягче для ЖКТ, чем оксид' }),
   S('mg-b6', 'Магний + B6', '🧂', 'mineral', 'таблетка', { mg: 100, b6: 5 },
-    { alias: 'магне b6 магний в6 magne', defaultDose: 2 }),
+    { variable: true, alias: 'магне b6 магний в6 magne', defaultDose: 2 }),
   S('zn-25', 'Цинк 25 мг', '⚪', 'mineral', 'таблетка', { zn: 25 },
     { alias: 'цинк пиколинат хелат zinc picolinate', warn: 'Долгий приём больших доз цинка вымывает медь.' }),
   S('zn-se', 'Цинк + селен', '⚪', 'mineral', 'таблетка', { zn: 15, se: 55 },
-    { alias: 'цинк селен иммунитет' }),
+    { variable: true, alias: 'цинк селен иммунитет' }),
   S('ca-d3', 'Кальций + D3', '🦴', 'mineral', 'таблетка', { ca: 500, vitD: 5 },
-    { alias: 'кальций д3 никомед carbonate calcium', defaultDose: 2 }),
+    { variable: true, alias: 'кальций д3 никомед carbonate calcium', defaultDose: 2 }),
   S('ca-citrate', 'Кальций цитрат', '🦴', 'mineral', 'таблетка', { ca: 250 },
     { alias: 'кальций цитрат calcium citrate', defaultDose: 2 }),
   S('fe-25', 'Железо 25 мг', '🩸', 'mineral', 'капсула', { fe: 25 },
@@ -194,31 +208,78 @@ export const SUPPLEMENTS = [
   S('silicon', 'Кремний (хвощ)', '🌾', 'mineral', 'капсула', { silicon: 20 },
     { alias: 'кремний хвощ полевой silicon волосы ногти' }),
   S('zma', 'ZMA (цинк + магний + B6)', '😴', 'mineral', 'порция', { zn: 30, mg: 450, b6: 10.5 },
-    { alias: 'зма zma цинк магний в6 перед сном', note: 'порция = 3 капсулы' }),
+    { variable: true, alias: 'зма zma цинк магний в6 перед сном', note: 'порция = 3 капсулы' }),
   S('electrolytes', 'Электролиты', '⚡', 'mineral', 'саше', { na: 500, k: 200, mg: 60, ca: 20 },
-    { alias: 'электролиты изотоник регидрон соли electrolytes' }),
+    { variable: true, alias: 'электролиты изотоник регидрон соли electrolytes' }),
 
   // ── Омега и жиры ──────────────────────────────────────────────────────────
   S('omega3', 'Омега-3 (рыбий жир)', '🐟', 'omega', 'капсула', { omega3: 300, vitE: 1 },
-    { defaultDose: 2, alias: 'омега 3 рыбий жир epa dha fish oil omega омега3', note: 'капсула 1000 мг ≈ 180 EPA + 120 DHA' }),
+    {
+      variable: true,
+      // На банке всегда пишут EPA и DHA по отдельности — так и спрашиваем.
+      // В норму они идут одной суммой (ключ omega3), поэтому оба поля
+      // складываются в него: providesFromFields суммирует одинаковые ключи.
+      fields: [
+        { id: 'epa', key: 'omega3', label: 'EPA', typical: 180 },
+        { id: 'dha', key: 'omega3', label: 'DHA', typical: 120 },
+        { id: 'vitE', key: 'vitE', label: 'Витамин E', typical: 1 },
+      ],
+      defaultDose: 2, alias: 'омега 3 рыбий жир epa dha fish oil omega омега3', note: 'капсула 1000 мг ≈ 180 EPA + 120 DHA' }),
   S('omega3-conc', 'Омега-3 концентрат', '🐟', 'omega', 'капсула', { omega3: 800, vitE: 1 },
-    { alias: 'омега 3 концентрат тройная сила triple strength', note: '≈ 500 EPA + 300 DHA в капсуле' }),
+    {
+      variable: true,
+      fields: [
+        { id: 'epa', key: 'omega3', label: 'EPA', typical: 500 },
+        { id: 'dha', key: 'omega3', label: 'DHA', typical: 300 },
+        { id: 'vitE', key: 'vitE', label: 'Витамин E', typical: 1 },
+      ],
+      alias: 'омега 3 концентрат тройная сила triple strength', note: '≈ 500 EPA + 300 DHA в капсуле' }),
   S('omega3-algae', 'Омега-3 из водорослей', '🌿', 'omega', 'капсула', { omega3: 300 },
-    { alias: 'веган омега 3 водоросли algae dha веганская' }),
+    {
+      variable: true,
+      fields: [
+        { id: 'epa', key: 'omega3', label: 'EPA', typical: 100 },
+        { id: 'dha', key: 'omega3', label: 'DHA', typical: 200 },
+      ],
+      alias: 'веган омега 3 водоросли algae dha веганская' }),
   S('fish-oil-liquid', 'Рыбий жир жидкий', '🥄', 'omega', 'ч. ложка', { omega3: 1200, vitD: 10, vitA: 250 },
-    { alias: 'рыбий жир жидкий ложка тресковый' }),
+    {
+      variable: true,
+      fields: [
+        { id: 'epa', key: 'omega3', label: 'EPA', typical: 700 },
+        { id: 'dha', key: 'omega3', label: 'DHA', typical: 500 },
+        { id: 'vitD', key: 'vitD', label: 'Витамин D', typical: 10 },
+        { id: 'vitA', key: 'vitA', label: 'Витамин A', typical: 250 },
+      ],
+      alias: 'рыбий жир жидкий ложка тресковый' }),
   S('krill', 'Масло криля', '🦐', 'omega', 'капсула', { omega3: 150, astaxanthin: 0.1, choline: 60 },
-    { alias: 'криль krill oil масло криля' }),
+    {
+      variable: true,
+      fields: [
+        { id: 'epa', key: 'omega3', label: 'EPA', typical: 90 },
+        { id: 'dha', key: 'omega3', label: 'DHA', typical: 60 },
+        { id: 'astaxanthin', key: 'astaxanthin', label: 'Астаксантин', typical: 0.1 },
+        { id: 'choline', key: 'choline', label: 'Холин', typical: 60 },
+      ],
+      alias: 'криль krill oil масло криля' }),
   S('cod-liver', 'Масло печени трески', '🐟', 'omega', 'капсула', { omega3: 250, vitA: 250, vitD: 2.5 },
-    { alias: 'печень трески cod liver oil' }),
+    {
+      variable: true,
+      fields: [
+        { id: 'epa', key: 'omega3', label: 'EPA', typical: 150 },
+        { id: 'dha', key: 'omega3', label: 'DHA', typical: 100 },
+        { id: 'vitA', key: 'vitA', label: 'Витамин A', typical: 250 },
+        { id: 'vitD', key: 'vitD', label: 'Витамин D', typical: 2.5 },
+      ],
+      alias: 'печень трески cod liver oil' }),
   S('flax-oil', 'Льняное масло в капсулах', '🌾', 'omega', 'капсула', { ala: 0.5 },
-    { defaultDose: 2, alias: 'льняное масло омега 3 растительная ала flax' }),
+    { variable: true, defaultDose: 2, alias: 'льняное масло омега 3 растительная ала flax' }),
   S('mct-oil', 'MCT-масло', '🥥', 'omega', 'ст. ложка', { mct: 14 },
-    { alias: 'мст масло кокосовое среднецепочечные mct oil кето' }),
+    { variable: true, alias: 'мст масло кокосовое среднецепочечные mct oil кето' }),
   S('cla', 'CLA 1000 мг', '🔥', 'omega', 'капсула', { cla: 800 },
     { defaultDose: 3, alias: 'кла cla конъюгированная линолевая' }),
   S('lecithin', 'Лецитин', '🥚', 'omega', 'ст. ложка', { lecithin: 7.5, choline: 250 },
-    { alias: 'лецитин соевый подсолнечный lecithin' }),
+    { variable: true, alias: 'лецитин соевый подсолнечный lecithin' }),
 
   // ── Спортивные ────────────────────────────────────────────────────────────
   S('creatine', 'Креатин моногидрат', '💪', 'sport', 'г', { creatine: 1 },
@@ -241,39 +302,39 @@ export const SUPPLEMENTS = [
     { alias: 'кофеин бензоат таблетки caffeine 200', warn: 'Считайте вместе с кофе и энергетиками: суточный ориентир — 400 мг.' }),
   S('preworkout', 'Предтренировочный комплекс', '🚀', 'sport', 'порция', {
     caffeine: 200, betaAlanine: 2, citrulline: 4, taurine: 500, b3: 20, b6: 5, b12: 50,
-  }, { alias: 'предтрен предтренировочный preworkout прешка', note: 'состав сильно разный — сверьтесь с этикеткой', warn: 'Не принимать во второй половине дня: кофеина здесь как в двух чашках кофе.' }),
+  }, { variable: true, alias: 'предтрен предтренировочный preworkout прешка', note: 'состав сильно разный — сверьтесь с этикеткой', warn: 'Не принимать во второй половине дня: кофеина здесь как в двух чашках кофе.' }),
   S('beetroot', 'Свекольный экстракт (нитраты)', '🫐', 'sport', 'порция', { nitrate: 400, betaine: 100 },
     { alias: 'свекла нитраты выносливость beetroot оксид азота' }),
   S('isotonic', 'Изотоник', '🥤', 'sport', 'порция', { na: 400, k: 120, mg: 25 },
-    { alias: 'изотоник спортивный напиток isotonic регидратация' }),
+    { variable: true, alias: 'изотоник спортивный напиток isotonic регидратация' }),
 
   // ── Протеин и аминокислоты ────────────────────────────────────────────────
   S('whey', 'Сывороточный протеин', '🥤', 'protein', 'порция', {
     leucine: 2.7, bcaa: 5.5, eaa: 11, glutamine: 4, ca: 150, na: 90, k: 150, mg: 20,
-  }, { alias: 'протеин сывороточный вей whey protein концентрат сыворотка', note: 'порция ≈ 30 г порошка (24 г белка)' }),
+  }, { variable: true, alias: 'протеин сывороточный вей whey protein концентрат сыворотка', note: 'порция ≈ 30 г порошка (24 г белка)' }),
   S('whey-isolate', 'Изолят сывороточного протеина', '🥤', 'protein', 'порция', {
     leucine: 3, bcaa: 6, eaa: 12.5, glutamine: 4.5, ca: 130, na: 60, k: 140,
-  }, { alias: 'изолят whey isolate протеин без лактозы' }),
+  }, { variable: true, alias: 'изолят whey isolate протеин без лактозы' }),
   S('casein', 'Казеин', '🌙', 'protein', 'порция', {
     leucine: 2.4, bcaa: 5, eaa: 10, glutamine: 4.5, ca: 500, na: 60, p: 300,
-  }, { alias: 'казеин мицеллярный casein на ночь' }),
+  }, { variable: true, alias: 'казеин мицеллярный casein на ночь' }),
   S('plant-protein', 'Растительный протеин', '🌱', 'protein', 'порция', {
     leucine: 1.9, bcaa: 4.2, eaa: 8.5, glutamine: 3.5, fe: 5, ca: 60, k: 200, mg: 60,
-  }, { alias: 'гороховый рисовый веган протеин plant protein' }),
+  }, { variable: true, alias: 'гороховый рисовый веган протеин plant protein' }),
   S('gainer', 'Гейнер', '🍚', 'protein', 'порция', {
     leucine: 2.5, bcaa: 5, eaa: 10, ca: 200, k: 400, na: 200, mg: 40,
-  }, { alias: 'гейнер масса углеводы gainer', note: 'порция ≈ 100 г' }),
+  }, { variable: true, alias: 'гейнер масса углеводы gainer', note: 'порция ≈ 100 г' }),
   S('bcaa', 'BCAA 2:1:1', '🧬', 'protein', 'порция', { bcaa: 5, leucine: 2.5 },
-    { alias: 'бцаа bcaa лейцин изолейцин валин', note: 'при достаточном белке в рационе почти не нужны' }),
+    { variable: true, alias: 'бцаа bcaa лейцин изолейцин валин', note: 'при достаточном белке в рационе почти не нужны' }),
   S('eaa', 'EAA (незаменимые аминокислоты)', '🧬', 'protein', 'порция', { eaa: 10, bcaa: 4.5, leucine: 2.5 },
-    { alias: 'еаа eaa незаменимые аминокислоты' }),
+    { variable: true, alias: 'еаа eaa незаменимые аминокислоты' }),
   S('leucine', 'Лейцин', '🧬', 'protein', 'г', { leucine: 1, bcaa: 1 },
     { defaultDose: 3, alias: 'лейцин leucine' }),
   S('glutamine', 'Глутамин', '🧬', 'protein', 'г', { glutamine: 1 },
     { defaultDose: 5, alias: 'глютамин глутамин glutamine' }),
   S('protein-bar', 'Протеиновый батончик', '🍫', 'protein', 'шт', {
     leucine: 1.7, bcaa: 3.5, eaa: 7, ca: 120, mg: 40, k: 180, fe: 2,
-  }, { alias: 'протеиновый батончик бар protein bar' }),
+  }, { variable: true, alias: 'протеиновый батончик бар protein bar' }),
 
   // ── Суставы, кожа, волосы ─────────────────────────────────────────────────
   S('collagen', 'Коллаген', '✨', 'joint', 'г', { collagen: 1, glycine: 0.22 },
@@ -281,9 +342,9 @@ export const SUPPLEMENTS = [
   S('collagen-marine', 'Коллаген морской', '🐟', 'joint', 'г', { collagen: 1, glycine: 0.2 },
     { defaultDose: 10, alias: 'морской рыбий коллаген marine collagen' }),
   S('collagen-c', 'Коллаген + витамин C', '✨', 'joint', 'порция', { collagen: 10, glycine: 2.2, vitC: 80, hyaluronic: 50 },
-    { alias: 'коллаген с витамином ц кожа' }),
+    { variable: true, alias: 'коллаген с витамином ц кожа' }),
   S('glucosamine-chondroitin', 'Глюкозамин + хондроитин', '🦴', 'joint', 'таблетка', { glucosamine: 750, chondroitin: 600 },
-    { defaultDose: 2, alias: 'глюкозамин хондроитин суставы артра терафлекс' }),
+    { variable: true, defaultDose: 2, alias: 'глюкозамин хондроитин суставы артра терафлекс' }),
   S('msm', 'МСМ (сера)', '🦴', 'joint', 'капсула', { msm: 1000 },
     { defaultDose: 2, alias: 'мсм msm метилсульфонилметан сера' }),
   S('hyaluronic', 'Гиалуроновая кислота', '💧', 'joint', 'капсула', { hyaluronic: 100 },
@@ -291,15 +352,15 @@ export const SUPPLEMENTS = [
 
   // ── Пищеварение ───────────────────────────────────────────────────────────
   S('probiotic-10', 'Пробиотики 10 млрд', '🦠', 'gut', 'капсула', { probiotics: 10 },
-    { alias: 'пробиотики лактобактерии бифидо probiotic probiotics кое лактобациллы' }),
+    { variable: true, alias: 'пробиотики лактобактерии бифидо probiotic probiotics кое лактобациллы' }),
   S('probiotic-50', 'Пробиотики 50 млрд', '🦠', 'gut', 'капсула', { probiotics: 50 },
-    { alias: 'пробиотики высокая доза probiotic 50' }),
+    { variable: true, alias: 'пробиотики высокая доза probiotic 50' }),
   S('inulin', 'Инулин (пребиотик)', '🌾', 'gut', 'г', { inulin: 1 },
     { defaultDose: 5, alias: 'инулин пребиотик цикорий fos гуар' }),
   S('psyllium', 'Псиллиум', '🌾', 'gut', 'г', { psyllium: 1 },
     { defaultDose: 5, alias: 'псиллиум клетчатка подорожник psyllium', warn: 'Принимать только с большим стаканом воды.' }),
   S('enzymes', 'Пищеварительные ферменты', '⚙️', 'gut', 'капсула', { enzymes: 300 },
-    { alias: 'ферменты панкреатин амилаза липаза протеаза enzymes' }),
+    { variable: true, alias: 'ферменты панкреатин амилаза липаза протеаза enzymes' }),
   S('betaine-hcl', 'Бетаин (TMG)', '🫐', 'gut', 'капсула', { betaine: 750 },
     { alias: 'бетаин триметилглицин tmg betaine' }),
 
@@ -410,6 +471,67 @@ export function searchSupplements(query) {
 
 // Подборка для пустого поиска: с чего человек чаще всего начинает.
 export const POPULAR_SUPPLEMENTS = SUPPLEMENTS.filter((s) => POPULAR.has(s.id))
+
+// ── «Что в одной таблетке» ───────────────────────────────────────────────────
+//
+// Дозировки в банках не стандартизованы: рыбий жир бывает и 300 мг омега-3 на
+// капсулу, и 800; у мультивитаминов различается вообще всё. Поэтому человек
+// один раз переписывает состав СВОЕЙ банки, а дальше указывает только сколько
+// капсул выпил.
+
+// Поля формы. По умолчанию — по одному на каждое вещество состава. Явный
+// fields нужен там, где на этикетке написано иначе, чем мы считаем: у рыбьего
+// жира указывают EPA и DHA раздельно, а в норму они идут суммой.
+export function doseFields(supp) {
+  if (supp?.fields?.length) {
+    return supp.fields.map((f) => ({ ...f, unit: f.unit || MICRO_BY_KEY[f.key]?.unit || '' }))
+  }
+  return Object.keys(supp?.provides || {}).map((key) => ({
+    id: key,
+    key,
+    label: MICRO_BY_KEY[key]?.label || key,
+    unit: MICRO_BY_KEY[key]?.unit || '',
+    typical: supp.provides[key],
+  }))
+}
+
+// Значения полей → состав одной единицы.
+//
+// Поля с ОДНИМ И ТЕМ ЖЕ ключом складываются: EPA 500 и DHA 250 дают 750 мг
+// омега-3. Пустые поля просто не попадают в состав: человек вправе не знать,
+// сколько в его банке витамина E, и выдумывать за него нельзя.
+export function providesFromFields(fields, values) {
+  const out = {}
+  for (const f of fields || []) {
+    if (!MICRO_BY_KEY[f.key]) continue
+    const n = Number(String(values?.[f.id] ?? '').replace(',', '.'))
+    if (!Number.isFinite(n) || n <= 0) continue
+    out[f.key] = (out[f.key] || 0) + n
+  }
+  for (const k in out) out[k] = Math.round(out[k] * 1000) / 1000
+  return out
+}
+
+// Состав одной единицы: сохранённый человеком либо типовой из каталога.
+export function unitProvides(supp, saved) {
+  const own = saved?.[supp?.id]?.provides
+  return own && Object.keys(own).length ? own : (supp?.provides || {})
+}
+
+// Привычная доза: сохранённая либо типовая.
+export function unitDose(supp, saved) {
+  const own = Number(saved?.[supp?.id]?.dose)
+  return Number.isFinite(own) && own > 0 ? own : (supp?.defaultDose ?? 1)
+}
+
+// Спросить состав перед первым приёмом — только у тех, где он правда разный и
+// человек ещё ничего не указывал.
+export function needsDoseSetup(supp, saved) {
+  return Boolean(supp?.variable) && !saved?.[supp?.id]
+}
+
+// Своя ли это дозировка — для подписи «ваша банка».
+export const hasOwnDose = (supp, saved) => Boolean(saved?.[supp?.id])
 
 // ── Расчёт принятой дозы ─────────────────────────────────────────────────────
 // Состав в каталоге дан на ОДНУ единицу. Здесь он умножается на количество и
