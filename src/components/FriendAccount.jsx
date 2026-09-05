@@ -8,6 +8,7 @@
 // еду, которая уходит ЛИЧНЫМ сообщением в чат (MealReactSheet).
 import { useState, useEffect, useRef } from 'react'
 import { pullFriendState, sendChatMessage } from '../lib/supabase.js'
+import { newClientId } from '../lib/chatLog.js'
 import { unfollow } from '../lib/social.js'
 import { normalizeError } from '../lib/authErrors.js'
 import { useSwipeBack } from '../lib/useSwipeBack.js'
@@ -56,9 +57,11 @@ function MealReactSheet({ meal, mealDate, friend, myId, onClose }) {
     setSending(true)
     setErr(null)
     const res = await sendChatMessage({
-      sender: myId,
       recipient: friend.id,
       text: message,
+      // Ключ идемпотентности: повторное нажатие «отправить» на медленной сети
+      // не должно превращаться во второе сообщение.
+      clientId: newClientId(),
       // Единый формат карточки (v2) — тот же, что у «отправить приём пищи».
       // Раньше здесь строился плоский {name, emoji, kcal}, из-за чего в чате
       // жили две несовместимые карточки и две ветки отрисовки.

@@ -31,8 +31,19 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
 
   const [card, setCard] = useState(null)
   const [rel, setRel] = useState({ ...EMPTY_RELATIONSHIP })
+  // Три разных состояния, которые раньше сливались в одно.
+  //   loading — ещё не знаем ничего;
+  //   ready   — профиль пришёл;
+  //   missing — сервер ответил, но профиля нет (удалённый аккаунт, блокировка);
+  //   error   — не дозвонились.
+  // Прежний экран рисовал полную витрину сразу: пока запрос летел, человек
+  // видел «Без имени», прочерки в счётчиках и пустую ленту мыслей — то есть
+  // экран утверждал то, чего ещё не знал, а при ошибке продолжал утверждать
+  // это же.
+  const [phase, setPhase] = useState('loading')
   const [tab, setTab] = useState('thoughts') // thoughts | followers | following | friends
   const [people, setPeople] = useState(null)
+  const [peopleLoading, setPeopleLoading] = useState(false)
   const [err, setErr] = useState(null)
   const [note, setNote] = useState(null)
   const [menu, setMenu] = useState(false)
@@ -59,15 +70,21 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
   const load = useCallback(async () => {
     if (!userId) return
     setErr(null)
+    setPhase('loading')
     try {
+      // Отношение спрашиваем ВСЕГДА, даже когда карточка не пришла: именно оно
+      // отвечает, почему её нет — потому что нас заблокировали или потому что
+      // аккаунта больше не существует. Без него оба случая выглядят одинаково.
       const [p, r] = await Promise.all([
         userProfile(userId),
         isMe ? Promise.resolve({ ...EMPTY_RELATIONSHIP }) : getRelationship(userId),
       ])
       setCard(p)
       setRel(r)
+      setPhase(p ? 'ready' : 'missing')
     } catch (e) {
       setErr(e.message || 'Не удалось открыть профиль')
+      setPhase('error')
     }
   }, [userId, isMe])
 
@@ -75,8 +92,9 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
 
   useEffect(() => {
     let alive = true
-    if (tab === 'thoughts') { setPeople(null); return }
+    if (tab === 'thoughts') { setPeople(null); setPeopleLoading(false); return }
     setPeople(null)
+    setPeopleLoading(true)
     ;(async () => {
       try {
         const list =
@@ -86,7 +104,11 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
             user_id: f.id, username: f.username, display_name: f.name, avatar_url: f.avatar,
           }))
         if (alive) setPeople(list)
-      } catch { if (alive) setPeople([]) }
+      } catch {
+        if (alive) setPeople([])
+      } finally {
+        if (alive) setPeopleLoading(false)
+      }
     })()
     return () => { alive = false }
   }, [tab, userId])
@@ -102,21 +124,104 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
   const name = card?.display_name || card?.username || 'Без имени'
   const label = isMe ? null : relationshipLabel(rel)
 
+  // Оболочка одна на все состояния: шапка с «назад» должна быть на месте и
+  // тогда, когда показывать нечего. Без неё экран ошибки становится ловушкой —
+  // выйти из него можно только жестом, о котором никто не предупреждал.
+  const Shell = ({ children, withMenu = false }) => (
+    <>
+      <div className="nav-scrim" {...scrimProps} />
+      <div className="chat-overlay" {...panelProps}>
+        <header className="chat-header">
+          <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }} aria-label="Назад">‹</button>
+          <span style={{ fontSize: 16, fontWeight: 640, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {card?.username || 'Профиль'}
+          </span>
+          {withMenu}
+        </header>
+        {children}
+      </div>
+    </>
+  )
+
   // Человек нас заблокировал — профиля для нас нет. Показать пустую карточку
   // честнее, чем делать вид, что страница просто не загрузилась.
   if (rel.blockedBy) {
     return (
-      <>
-        <div className="nav-scrim" {...scrimProps} />
-        <div className="chat-overlay" {...panelProps}>
-          <header className="chat-header">
-            <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }}>‹</button>
-          </header>
-          <div className="screen" style={{ textAlign: 'center', paddingTop: 60 }}>
-            <p className="muted" style={{ fontSize: 15 }}>Профиль недоступен.</p>
-          </div>
+      <Shell>
+        <div className="screen" style={{ textAlign: 'center', paddingTop: 60 }}>
+          <div style={{ fontSize: 34, marginBottom: 10 }}>🚫</div>
+          <p className="muted" style={{ fontSize: 15 }}>Профиль недоступен.</p>
         </div>
-      </>
+      </Shell>
+    )
+  }
+
+  // Ещё грузим. Заглушка повторяет разметку готовой витрины, поэтому в момент
+  // подстановки экран не перекладывается.
+  if (phase === 'loading') {
+    return (
+      <Shell>
+        <div className="screen">
+          <div style={{ textAlign: 'center', marginBottom: 16 }}>
+            <div className="skel" style={{ width: 82, height: 82, borderRadius: '50%', margin: '0 auto' }} />
+            <div className="skel" style={{ width: 140, height: 18, borderRadius: 9, margin: '12px auto 8px' }} />
+            <div className="skel" style={{ width: 90, height: 12, borderRadius: 6, margin: '0 auto' }} />
+          </div>
+          <div className="row" style={{ marginBottom: 16, gap: 10 }}>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} style={{ flex: 1 }}>
+                <div className="skel" style={{ height: 20, borderRadius: 8, marginBottom: 6 }} />
+                <div className="skel" style={{ height: 10, borderRadius: 5 }} />
+              </div>
+            ))}
+          </div>
+          <div className="skel skel-card" style={{ height: 120, borderRadius: 18 }} />
+          <div className="skel skel-card" style={{ height: 120, borderRadius: 18 }} />
+        </div>
+      </Shell>
+    )
+  }
+
+  // Запрос не дошёл. Это не «профиля нет» — и повторить должно быть чем.
+  if (phase === 'error') {
+    return (
+      <Shell>
+        <div className="screen" style={{ textAlign: 'center', paddingTop: 48 }}>
+          <div style={{ fontSize: 34, marginBottom: 10 }}>📡</div>
+          <p style={{ fontSize: 15, color: 'var(--danger)', marginBottom: 14, lineHeight: 1.5 }}>{err}</p>
+          <button className="btn ghost" style={{ width: 'auto', padding: '0 22px', margin: '0 auto' }} onClick={load}>
+            Повторить
+          </button>
+        </div>
+      </Shell>
+    )
+  }
+
+  // Сервер ответил, а профиля нет: аккаунт удалён либо мы его заблокировали
+  // (user_profile не отдаёт строку ни в ту, ни в другую сторону). Разница
+  // между этими случаями человеку важна — во втором есть что нажать.
+  if (phase === 'missing') {
+    return (
+      <Shell>
+        <div className="screen" style={{ textAlign: 'center', paddingTop: 48 }}>
+          <div style={{ fontSize: 34, marginBottom: 10 }}>{rel.blocked ? '🚫' : '👻'}</div>
+          <p className="muted" style={{ fontSize: 15, lineHeight: 1.5, marginBottom: 14 }}>
+            {rel.blocked
+              ? 'Вы заблокировали этого человека. Его профиль, мысли и переписка скрыты.'
+              : 'Профиль недоступен — возможно, аккаунт удалён.'}
+          </p>
+          {rel.blocked && (
+            <button
+              className="btn ghost"
+              style={{ width: 'auto', padding: '0 22px', margin: '0 auto', color: 'var(--danger)', borderColor: 'var(--danger)' }}
+              onClick={() => act(() => unblock(myId, userId))}
+            >
+              Разблокировать
+            </button>
+          )}
+          {err && <p style={{ fontSize: 13, color: 'var(--danger)', marginTop: 12 }}>{err}</p>}
+        </div>
+      </Shell>
     )
   }
 
@@ -125,7 +230,7 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
     <div className="nav-scrim" {...scrimProps} />
     <div className="chat-overlay" {...panelProps}>
       <header className="chat-header">
-        <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }}>‹</button>
+        <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }} aria-label="Назад">‹</button>
         <span style={{ fontSize: 16, fontWeight: 640, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {card?.username || 'Профиль'}
         </span>
@@ -197,11 +302,13 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
             isOwnProfile={isMe}
             authorName={name}
             authorAvatar={card?.avatar_url}
+            rel={isMe ? null : rel}
           />
         )}
         {tab !== 'thoughts' && (
           <PeopleList
             people={people || []}
+            loading={peopleLoading}
             myId={myId}
             onOpen={onOpenProfile}
             empty={

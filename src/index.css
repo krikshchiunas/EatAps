@@ -1235,6 +1235,14 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .chat-empty-emoji { font-size: 40px; }
 .chat-empty p { font-size: 14.5px; line-height: 1.5; }
 
+/* Догрузка более ранних сообщений. Полоска сверху ленты: она не двигает
+   содержимое и не перекрывает его — человек в этот момент читает. */
+.chat-older { display: grid; place-items: center; padding: 10px 0 4px; }
+.chat-spinner.small { width: 18px; height: 18px; border-width: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-spinner { animation-duration: 1.6s; }
+}
+
 /* Date separator — центрированная пилюля с зелёной обводкой */
 .chat-day {
   display: block; width: fit-content;
@@ -2175,3 +2183,39 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   background: var(--primary-weak);
   color: var(--primary);
 }
+
+/* ── Заглушки загрузки (skeleton) ──────────────────────────────────────────
+   Одно правило на всё приложение: у списка людей, у ленты и у профиля должна
+   быть одна и та же «пустая полоска», иначе разные экраны грузятся по-разному
+   и это читается как разное качество.
+
+   Заглушка держит высоту будущего содержимого — поэтому список не прыгает под
+   пальцем в момент, когда данные приезжают. Ради этого она и нужна; сама по
+   себе анимация не сообщает ничего сверх «идёт загрузка». */
+.skel {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+  animation: skel-sweep 1.25s ease-in-out infinite;
+}
+@keyframes skel-sweep {
+  100% { transform: translateX(100%); }
+}
+/* Бесконечное движение — первое, что мешает при чувствительности к анимации.
+   Полоски остаются, двигаться перестают. */
+@media (prefers-reduced-motion: reduce) {
+  .skel::after { animation: none; }
+}
+
+/* Карточка поста-заглушки: те же размеры, что у настоящей, чтобы лента не
+   меняла высоту в момент подстановки. */
+.skel-card { padding: 14px; }
+.skel-card + .skel-card { margin-top: 12px; }

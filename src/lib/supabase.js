@@ -6,6 +6,7 @@ import { isMissingColumn } from './pgErrors.js'
 import { log } from './log.js'
 import { newId } from './uuid.js'
 import { DEFAULT_VISIBILITY } from './relationship.js'
+import { createRealtimeHub } from './realtime.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -59,6 +60,12 @@ export const supabase = supabaseEnabled
     })
   : null
 
+// Единый реестр realtime-каналов. Все подписки приложения идут через него —
+// см. realtime.js: supabase-js на одну тему отдаёт один и тот же канал и
+// БРОСАЕТ при повторном .on('postgres_changes'), поэтому два компонента на
+// одной теме роняли приложение.
+export const realtime = createRealtimeHub(supabase)
+
 export { pickSyncable }
 
 // ---------------- Состояние приложения (app_state) ----------------
@@ -108,33 +115,28 @@ export async function saveAppState(state, baseRevision) {
 // оставляют висящих каналов.
 export function subscribeToAppState(userId, onChange) {
   if (!supabase || !userId) return () => {}
-  // Подписка обёрнута целиком: сбой при создании канала (заблокированный
-  // websocket, не включённый Realtime, экзотическая сеть) не должен ронять
-  // запуск приложения. Синхронизация без Realtime работает — правки просто
-  // приезжают при следующей сверке, а не мгновенно.
-  try {
-    const channel = supabase
-      .channel(`app_state:${userId}`)
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'app_state', filter: `user_id=eq.${userId}` },
-        (payload) => {
-          const row = payload.new
-          if (!row || row.user_id !== userId) return
-          onChange({
-            revision: Number(row.revision) || 0,
-            updatedAt: row.updated_at || null,
-            // Крупные состояния realtime обрезает (лимит размера записи). Тогда
-            // state приедет пустым — подписчик обязан дочитать строку сам.
-            state: payload.errors?.length ? null : (row.state ?? null),
-          })
-        },
-      )
-      .subscribe()
-    return () => { try { supabase.removeChannel(channel) } catch {} }
-  } catch (e) {
-    log.error('realtime', 'не удалось подписаться на состояние', e)
-    return () => {}
-  }
+  // Сбой при создании канала (заблокированный websocket, не включённый
+  // Realtime, экзотическая сеть) не должен ронять запуск приложения:
+  // синхронизация без Realtime работает — правки просто приезжают при
+  // следующей сверке, а не мгновенно. Обработку сбоя взял на себя хаб.
+  return realtime.subscribe(
+    `app_state:${userId}`,
+    (channel, emit) => channel.on('postgres_changes',
+      { event: '*', schema: 'public', table: 'app_state', filter: `user_id=eq.${userId}` },
+      emit,
+    ),
+    (payload) => {
+      const row = payload.new
+      if (!row || row.user_id !== userId) return
+      onChange({
+        revision: Number(row.revision) || 0,
+        updatedAt: row.updated_at || null,
+        // Крупные состояния realtime обрезает (лимит размера записи). Тогда
+        // state приедет пустым — подписчик обязан дочитать строку сам.
+        state: payload.errors?.length ? null : (row.state ?? null),
+      })
+    },
+  )
 }
 
 // ---------------- Подписки Stripe ----------------
@@ -194,19 +196,14 @@ export async function pullAiUsage(userId, period) {
 // вебхук записал новый статус после оплаты/отмены.
 export function subscribeToSubscription(userId, onChange) {
   if (!supabase || !userId) return () => {}
-  try {
-    const channel = supabase
-      .channel(`sub:${userId}`)
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'subscriptions', filter: `user_id=eq.${userId}` },
-        (payload) => onChange(payload.new || null),
-      )
-      .subscribe()
-    return () => { try { supabase.removeChannel(channel) } catch {} }
-  } catch (e) {
-    log.error('realtime', 'не удалось подписаться на подписку', e)
-    return () => {}
-  }
+  return realtime.subscribe(
+    `sub:${userId}`,
+    (channel, emit) => channel.on('postgres_changes',
+      { event: '*', schema: 'public', table: 'subscriptions', filter: `user_id=eq.${userId}` },
+      emit,
+    ),
+    (payload) => onChange(payload.new || null),
+  )
 }
 
 // ---------------- Друзья ----------------
@@ -251,26 +248,17 @@ export async function listFriends(myId) {
   }))
 }
 
-// Имя и фото по списку ID. RPC friend_briefs отдаёт только эти два поля и
-// только для принятых друзей; прямое чтение чужого app_state закрыто политикой.
-// Фолбэк — для проектов без миграции friend_privacy.
-async function fetchFriendBriefs(ids) {
-  const out = {}
-  if (!supabase || !ids?.length) return out
-
-  const { data, error } = await supabase.rpc('friend_briefs', { p_user_ids: ids })
-  if (!error) {
-    for (const r of data || []) out[r.user_id] = { name: r.name || null, avatar: r.avatar || null }
-    return out
-  }
-
-  const legacy = await supabase
-    .from('app_state')
-    .select('user_id, fname:state->profile->>name, favatar:state->profile->>avatar')
-    .in('user_id', ids)
-  for (const r of legacy.data || []) out[r.user_id] = { name: r.fname || null, avatar: r.favatar || null }
-  return out
-}
+// friend_briefs здесь больше не вызывается.
+//
+// Она читала имя и аватар ИЗ ЧУЖОГО app_state — то есть ради двух публичных
+// полей заглядывала в самый чувствительный объект приложения, — и отдавала их
+// только друзьям. С тех пор как имя и аватар стали публичной витриной
+// (profiles.display_name/avatar_url, миграция 2026-08-25), это лишний путь к
+// тем же данным: user_cards отдаёт их по обычным правилам видимости и работает
+// для любого человека, а не только для друга.
+//
+// Сама функция в базе остаётся: на неё может опираться ещё не обновлённый
+// клиент. Здесь просто нет второй реализации одного и того же.
 
 // acceptFriend и removeFriendship удалены вместе с заявками: строку в
 // friendships теперь создаёт и удаляет только сервер, по подпискам. «Удалить
@@ -295,11 +283,20 @@ export async function pullFriendState(friendId) {
   return legacy ? { ...legacy, state: projectFriendState(legacy.state) } : null
 }
 
-// Быстрый лукап имени и аватара по id — используется при пуше о новом сообщении.
+// Быстрый лукап имени и аватара по id — используется при пуше о новом
+// сообщении. Идёт через ту же публичную карточку, что и все списки людей.
 export async function fetchUserBrief(userId) {
   if (!supabase || !userId) return null
-  const briefs = await fetchFriendBriefs([userId])
-  return briefs[userId] || null
+  try {
+    const { data, error } = await supabase.rpc('user_cards', { p_user_ids: [userId] })
+    if (error) return null
+    const row = (data || [])[0]
+    return row ? { name: row.display_name || row.username || null, avatar: row.avatar_url || null } : null
+  } catch {
+    // Имя в пуше — украшение. Без него уведомление всё равно придёт («Новое
+    // сообщение»), и ронять обработчик входящего из-за этого нельзя.
+    return null
+  }
 }
 
 // ---------------- Мысли (posts) ----------------
@@ -382,14 +379,32 @@ export async function togglePostReaction(postId, reaction) {
   return { ok: row || null }
 }
 
-export async function listPostComments(postId, limit = 100) {
-  if (!supabase || !postId) return []
-  const { data, error } = await supabase.rpc('list_post_comments', { p_post_id: postId, p_limit: limit })
+// Ветка ответов. Сервер отдаёт СНАЧАЛА НОВЫЕ (так работает курсор), а читают
+// ветку сверху вниз — поэтому страницу переворачиваем здесь, в одном месте,
+// а не в каждом компоненте.
+//
+// Возвращает { items, cursor }. cursor — пара (created_at, id) самого раннего
+// ответа страницы; с ним грузятся более ранние. null означает «раньше ничего
+// нет», и кнопка «показать ещё» не появляется.
+export async function listPostComments(postId, { limit = 30, cursor = null } = {}) {
+  if (!supabase || !postId) return { items: [], cursor: null }
+  const { data, error } = await supabase.rpc('list_post_comments', {
+    p_post_id: postId,
+    p_limit: limit,
+    p_before_at: cursor?.createdAt || null,
+    p_before_id: cursor?.id || null,
+  })
   if (error) {
-    if (isMissingRelation(error)) return []
+    if (isMissingRelation(error)) return { items: [], cursor: null, unavailable: true }
     throw error
   }
-  return data || []
+  const rows = data || []
+  const oldest = rows[rows.length - 1]
+  return {
+    items: [...rows].reverse(),
+    // Курсор есть, только если страница пришла полной: иначе более ранних нет.
+    cursor: rows.length === limit && oldest ? { createdAt: oldest.created_at, id: oldest.id } : null,
+  }
 }
 
 export async function addPostComment({ postId, userId, text }) {
@@ -536,14 +551,14 @@ export async function fetchUnreadCounts(myId) {
 // оставлял бы висеть по каналу на каждое пересоздание эффекта.
 export function subscribeToIncoming(myId, onNew) {
   if (!supabase || !myId) return () => {}
-  const channel = supabase
-    .channel(`incoming:${myId}`)
-    .on('postgres_changes',
+  return realtime.subscribe(
+    `incoming:${myId}`,
+    (channel, emit) => channel.on('postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'messages', filter: `recipient=eq.${myId}` },
-      onNew,
-    )
-    .subscribe()
-  return () => { try { supabase.removeChannel(channel) } catch {} }
+      emit,
+    ),
+    onNew,
+  )
 }
 
 const MSG_COLS = 'id, sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, created_at, read_at, reactions'
@@ -572,22 +587,20 @@ export async function markMessagesRead(senderId) {
 // вызывающий сам решает, что из неё изменилось.
 export function subscribeToSentUpdates(myId, friendId, onUpdate) {
   if (!supabase || !myId) return () => {}
-  try {
-    const channel = supabase
-      .channel(`sent:${myId}:${friendId}`)
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender=eq.${myId}` },
-        (payload) => {
-          const row = payload.new
-          if (row?.recipient === friendId) onUpdate(row)
-        },
-      )
-      .subscribe()
-    return () => { try { supabase.removeChannel(channel) } catch {} }
-  } catch (e) {
-    log.error('realtime', 'не удалось подписаться на обновления своих сообщений', e)
-    return () => {}
-  }
+  // Тема без friendId: фильтр всё равно один и тот же (все МОИ сообщения), а
+  // отдельный канал на каждого собеседника означал бы новую подписку с тем же
+  // содержимым при каждом открытии другого чата.
+  return realtime.subscribe(
+    `sent:${myId}`,
+    (channel, emit) => channel.on('postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender=eq.${myId}` },
+      emit,
+    ),
+    (payload) => {
+      const row = payload.new
+      if (row?.recipient === friendId) onUpdate(row)
+    },
+  )
 }
 
 // Переключить реакцию на сообщении (сейчас — единственная, 🥕). Сервер решает
@@ -602,19 +615,68 @@ export async function toggleMessageReaction(messageId, emoji = '🥕') {
   return { ok: data }
 }
 
-export async function sendChatMessage({ sender, recipient, text, imageUrl, mealRef, replyTo, replySnapshot, forwardedName }) {
+// Отправка сообщения.
+//
+// clientId — ключ идемпотентности: клиент придумывает его ОДИН раз на
+// сообщение и повторяет при каждой попытке. Сервер, увидев знакомый ключ,
+// возвращает уже существующую строку вместо второй такой же. Без этого
+// «отправил → сеть отвалилась → повторил» давало в переписке два одинаковых
+// сообщения, причём ровно на плохой связи, где повтор и нужен.
+//
+// sender в запросе больше не передаётся: отправителя определяет сервер по
+// auth.uid(). Параметр оставлен в сигнатуре для совместимости вызывающего
+// кода и игнорируется — правило «сервер решает, кто действует» не должно
+// зависеть от того, что клиент прислал правильное значение.
+export async function sendChatMessage({
+  recipient, text, imageUrl, mealRef, replyTo, replySnapshot, forwardedName, clientId,
+}) {
   if (!supabase) return { error: 'Нет подключения' }
+  const body = text?.trim() ? text.trim() : null
+  if (!body && !imageUrl && !mealRef) return { error: 'Пустое сообщение' }
+
+  const { data, error } = await supabase.rpc('send_message', {
+    p_recipient: recipient,
+    p_text: body,
+    p_image_url: imageUrl || null,
+    p_meal_ref: mealRef || null,
+    p_reply_to: replyTo || null,
+    p_reply_snapshot: replySnapshot || null,
+    p_forwarded_name: forwardedName || null,
+    p_client_id: clientId || null,
+  })
+
+  // База ещё без миграции 2026-09-05 — функции нет. Тогда шлём по-старому,
+  // прямым INSERT: без идемпотентности, но переписка работает. Порядок
+  // деплоя «фронтенд раньше SQL» в этом проекте нормален (см. isMissingColumn
+  // в createPost), и чат не должен от него ломаться.
+  if (error && isMissingRelation(error)) return legacySendChatMessage({
+    recipient, text: body, imageUrl, mealRef, replyTo, replySnapshot, forwardedName,
+  })
+  if (error) return { error: normalizeError(error).message }
+  const row = Array.isArray(data) ? data[0] : data
+  // reactions приходит из базы как NULL, пока на сообщение никто не реагировал.
+  // Спред `{ reactions: {}, ...row }` затирал бы значение по умолчанию этим
+  // NULL, и обработчик двойного тапа получал бы null вместо объекта.
+  return row ? { ok: { ...row, reactions: row.reactions || {} } } : { error: 'Сообщение не отправилось' }
+}
+
+// Путь для базы без send_message. Оставлен отдельной функцией, а не веткой
+// внутри основной: так видно, что это запасной вариант, и его легко удалить,
+// когда миграция прогнана везде.
+async function legacySendChatMessage({ recipient, text, imageUrl, mealRef, replyTo, replySnapshot, forwardedName }) {
+  const { data: sess } = await supabase.auth.getSession()
+  const sender = sess?.session?.user?.id
+  if (!sender) return { error: 'Нужно войти в аккаунт' }
   const payload = {
     sender,
     recipient,
-    text: text?.trim() ? text.trim() : null,
+    text: text || null,
     image_url: imageUrl || null,
     meal_ref: mealRef || null,
     reply_to: replyTo || null,
     reply_snapshot: replySnapshot || null,
     forwarded_name: forwardedName || null,
   }
-  if (!payload.text && !payload.image_url && !payload.meal_ref) return { error: 'Пустое сообщение' }
   let { data, error } = await supabase.from('messages').insert(payload).select(MSG_COLS).single()
   if (error && isMissingColumn(error)) {
     // Колонка отсутствует → RETURNING падает на этапе планирования запроса,
@@ -627,13 +689,49 @@ export async function sendChatMessage({ sender, recipient, text, imageUrl, mealR
   return { ok: data }
 }
 
-export async function listMessagesWith(myId, friendId, limit = 300) {
-  if (!supabase) return []
+// История переписки — страницами, начиная с конца.
+//
+// ЧТО ЗДЕСЬ БЫЛО СЛОМАНО. Прежний запрос звучал так:
+//     .order('created_at', { ascending: true }).limit(300)
+// то есть брал САМЫЕ СТАРЫЕ триста сообщений. Пока переписка короче трёхсот
+// реплик, разницы не видно вовсе — поэтому ошибка и прожила незамеченной. А в
+// длинной переписке человек открывал чат и не видел в нём ни одного свежего
+// сообщения: экран показывал разговор годичной давности.
+//
+// Возвращает { items, cursor }: items в порядке чтения (старые сверху),
+// cursor — на более ранние. null означает «дальше в прошлое ничего нет».
+export async function listMessagesWith(myId, friendId, { limit = 60, cursor = null } = {}) {
+  if (!supabase) return { items: [], cursor: null }
+  const { data, error } = await supabase.rpc('list_messages', {
+    p_peer: friendId,
+    p_limit: limit,
+    p_before_at: cursor?.createdAt || null,
+    p_before_id: cursor?.id || null,
+  })
+  if (error) {
+    if (isMissingRelation(error)) return legacyListMessagesWith(myId, friendId, limit)
+    throw error
+  }
+  const rows = data || []
+  const oldest = rows[rows.length - 1]
+  const hidden = getHiddenMessageIds()
+  return {
+    items: [...rows].reverse()
+      .map((m) => ({ ...m, reactions: m.reactions || {} }))
+      .filter((m) => !hidden.has(String(m.id))),
+    cursor: rows.length === limit && oldest ? { createdAt: oldest.created_at, id: oldest.id } : null,
+  }
+}
+
+// База без list_messages. Читаем прямым запросом, но уже правильным концом:
+// сначала новые, потом переворачиваем. Пагинации здесь нет — она и не нужна,
+// это временный путь до прогона миграции.
+async function legacyListMessagesWith(myId, friendId, limit) {
   const query = (cols) => supabase
     .from('messages')
     .select(cols)
     .or(`and(sender.eq.${myId},recipient.eq.${friendId}),and(sender.eq.${friendId},recipient.eq.${myId})`)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(limit)
 
   let { data, error } = await query(MSG_COLS)
@@ -642,9 +740,11 @@ export async function listMessagesWith(myId, friendId, limit = 300) {
     if (data) data = data.map((m) => ({ ...m, reactions: {} }))
   }
   if (error) throw error
-  // Скрытые «у меня» не показываем — в БД они остаются для собеседника.
   const hidden = getHiddenMessageIds()
-  return (data || []).filter((m) => !hidden.has(String(m.id)))
+  return {
+    items: [...(data || [])].reverse().filter((m) => !hidden.has(String(m.id))),
+    cursor: null,
+  }
 }
 
 // ── Присутствие (онлайн/офлайн) ───────────────────────────────────────────────
@@ -653,30 +753,40 @@ export async function listMessagesWith(myId, friendId, limit = 300) {
 // присутствие видно только тем, кто спросил, а не всем сразу — в отличие от
 // одного общего канала на всё приложение.
 
+// Свой канал присутствия: «я в сети». Живёт один на всё приложение, поэтому
+// через хаб — иначе два вызова startPresence (например, после смены аккаунта
+// без размонтирования) встретились бы на одной теме.
 export function startPresence(myId) {
   if (!supabase || !myId) return () => {}
-  const channel = supabase.channel(`presence:user:${myId}`, {
-    config: { presence: { key: myId } },
-  })
-  channel.subscribe((status) => {
-    if (status === 'SUBSCRIBED') channel.track({ at: Date.now() }).catch(() => {})
-  })
-  return () => supabase.removeChannel(channel)
+  return realtime.subscribe(
+    `presence:self:${myId}`,
+    (channel) => (status) => {
+      if (status === 'SUBSCRIBED') channel.track?.({ at: Date.now() })?.catch?.(() => {})
+    },
+    () => {},
+  )
 }
 
+// Наблюдение за чужим присутствием. Один канал на наблюдаемого человека,
+// сколько бы экранов на него ни смотрело: раньше второй наблюдатель получал
+// тот же объект канала и падал на .on('presence') после subscribe().
 export function watchPresence(userId, onChange) {
   if (!supabase || !userId) return () => {}
-  const channel = supabase.channel(`presence:user:${userId}`)
-  const read = () => {
-    const metas = channel.presenceState?.()?.[userId]
-    onChange(Array.isArray(metas) && metas.length > 0)
-  }
-  channel
-    .on('presence', { event: 'sync' }, read)
-    .on('presence', { event: 'join' }, read)
-    .on('presence', { event: 'leave' }, read)
-    .subscribe((status) => { if (status === 'SUBSCRIBED') read() })
-  return () => supabase.removeChannel(channel)
+  return realtime.subscribe(
+    `presence:watch:${userId}`,
+    (channel, emit) => {
+      const read = () => {
+        const metas = channel.presenceState?.()?.[userId]
+        emit(Array.isArray(metas) && metas.length > 0)
+      }
+      channel
+        .on('presence', { event: 'sync' }, read)
+        .on('presence', { event: 'join' }, read)
+        .on('presence', { event: 'leave' }, read)
+      return (status) => { if (status === 'SUBSCRIBED') read() }
+    },
+    onChange,
+  )
 }
 
 // Отметка «был(а) в сети». Тихо ничего не делает, если миграция ещё не
@@ -706,17 +816,18 @@ export async function fetchLastSeen(userId) {
 export function createTypingChannel(myId, friendId, onTyping) {
   if (!supabase || !myId || !friendId) return { sendTyping: () => {}, unsubscribe: () => {} }
   const pair = [myId, friendId].sort().join('_')
-  const channel = supabase
-    .channel(`typing:${pair}`, { config: { broadcast: { self: false } } })
-    .on('broadcast', { event: 'typing' }, ({ payload }) => {
+  const name = `typing:${pair}`
+  const off = realtime.subscribe(
+    name,
+    (channel, emit) => channel.on('broadcast', { event: 'typing' }, emit),
+    ({ payload }) => {
       if (payload?.from === friendId) onTyping(payload.typing !== false)
-    })
-    .subscribe()
-
+    },
+  )
   const sendTyping = (typing) => {
-    try { channel.send({ type: 'broadcast', event: 'typing', payload: { from: myId, typing } }) } catch {}
+    realtime.send(name, { type: 'broadcast', event: 'typing', payload: { from: myId, typing } })
   }
-  return { sendTyping, unsubscribe: () => supabase.removeChannel(channel) }
+  return { sendTyping, unsubscribe: off }
 }
 
 // Realtime-подписка на новые входящие сообщения от конкретного друга.
@@ -724,44 +835,67 @@ export function createTypingChannel(myId, friendId, onTyping) {
 // для изменений в них (сейчас единственное такое изменение — реакция на
 // сообщение друга; собственное прочтение мы не пишем через этот путь).
 export function subscribeToChat(myId, friendId, onEvent) {
-  if (!supabase) return () => {}
-  try {
-    const channel = supabase
-      .channel(`chat:${myId}:${friendId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages', filter: `recipient=eq.${myId}` },
-        (payload) => {
-          const row = payload.new
-          if (row?.sender === friendId && (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE')) {
-            onEvent(payload.eventType, row)
-          }
-        },
-      )
-      .subscribe()
-    return () => { try { supabase.removeChannel(channel) } catch {} }
-  } catch (e) {
-    log.error('realtime', 'не удалось подписаться на чат', e)
-    return () => {}
-  }
+  if (!supabase || !myId) return () => {}
+  // Как и у sent: фильтр «всё входящее мне» одинаков для любого собеседника,
+  // поэтому тема общая, а отбор по конкретному другу — в слушателе.
+  return realtime.subscribe(
+    `chat:${myId}`,
+    (channel, emit) => channel.on('postgres_changes',
+      { event: '*', schema: 'public', table: 'messages', filter: `recipient=eq.${myId}` },
+      emit,
+    ),
+    (payload) => {
+      const row = payload.new
+      if (row?.sender === friendId && (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE')) {
+        onEvent(payload.eventType, row)
+      }
+    },
+  )
 }
 
-// Последнее сообщение в каждом диалоге — для списка чатов.
-export async function listConversations(myId, limit = 200) {
+// Последнее сообщение в каждом диалоге — для порядка в списке друзей.
+//
+// Раньше клиент выгружал последние 200 сообщений ПО ВСЕМ перепискам и
+// группировал их у себя. Два изъяна, и оба видны на живом аккаунте: активная
+// переписка с одним человеком вытесняла из выборки всех остальных (диалог с
+// редким собеседником просто пропадал из сортировки), а по сети ехал текст
+// двухсот сообщений ради двух десятков строк предпросмотра.
+//
+// RPC отдаёт ровно по одному последнему сообщению на диалог.
+export async function listConversations(myId, limit = 100) {
   if (!supabase) return []
+  const { data, error } = await supabase.rpc('list_conversations', { p_limit: limit })
+  if (error) {
+    if (isMissingRelation(error)) return legacyListConversations(myId)
+    throw error
+  }
+  return (data || []).map((r) => ({
+    id: r.peer_id,
+    unread: r.unread_count || 0,
+    last: {
+      id: r.last_id,
+      sender: r.last_sender,
+      text: r.last_text,
+      image_url: r.last_image,
+      created_at: r.last_at,
+    },
+  }))
+}
+
+async function legacyListConversations(myId) {
   const { data, error } = await supabase
     .from('messages')
     .select('id, sender, recipient, text, image_url, created_at')
     .or(`sender.eq.${myId},recipient.eq.${myId}`)
     .order('created_at', { ascending: false })
-    .limit(limit)
+    .limit(200)
   if (error) throw error
   const byPartner = new Map()
   for (const m of data || []) {
     const partner = m.sender === myId ? m.recipient : m.sender
     if (!byPartner.has(partner)) byPartner.set(partner, m)
   }
-  return Array.from(byPartner, ([id, last]) => ({ id, last }))
+  return Array.from(byPartner, ([id, last]) => ({ id, last, unread: 0 }))
 }
 
 // DSGVO «право на удаление»: стираем данные из облака и удаляем сам аккаунт.
@@ -802,6 +936,9 @@ export async function deleteAccount(userId) {
 // сессию (и держал бы сокет открытым).
 export function removeAllRealtimeChannels() {
   if (!supabase) return
+  // Сначала реестр (он снимает свои каналы и забывает записи), потом всё
+  // остальное — на случай канала, заведённого мимо хаба.
+  try { realtime.reset() } catch {}
   try {
     for (const ch of supabase.getChannels()) supabase.removeChannel(ch)
   } catch {}

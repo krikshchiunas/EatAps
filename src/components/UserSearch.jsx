@@ -24,6 +24,10 @@ export default function UserSearch({ onOpenProfile }) {
   const [results, setResults] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  // Счётчик ручных повторов: меняясь, он перезапускает эффект поиска с тем же
+  // запросом. Дописывать пробел к запросу ради перезапуска было бы фокусом,
+  // который потом никто не объяснит.
+  const [attempt, setAttempt] = useState(0)
   const reqId = useRef(0)
 
   useEffect(() => {
@@ -47,7 +51,7 @@ export default function UserSearch({ onOpenProfile }) {
       }
     }, 280)
     return () => clearTimeout(t)
-  }, [query])
+  }, [query, attempt])
 
   const short = query.trim().length > 0 && query.trim().length < MIN_QUERY
 
@@ -70,15 +74,25 @@ export default function UserSearch({ onOpenProfile }) {
         </p>
       )}
 
-      {busy && !short && (
-        <p className="muted" style={{ fontSize: 13, textAlign: 'center', padding: '16px 0' }}>Ищем…</p>
+      {/* Ошибка поиска — с кнопкой повтора: сеть моргнула, а человек уже
+          набрал ник и не должен набирать его заново. */}
+      {err && !busy && (
+        <div style={{ textAlign: 'center', padding: '16px 0' }}>
+          <p style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 10 }}>{err}</p>
+          <button
+            className="btn ghost"
+            style={{ width: 'auto', padding: '0 20px', margin: '0 auto' }}
+            onClick={() => { setErr(null); setAttempt((n) => n + 1) }}
+          >
+            Повторить
+          </button>
+        </div>
       )}
 
-      {err && <p style={{ fontSize: 13, color: 'var(--danger)' }}>{err}</p>}
-
-      {!busy && results && (
+      {!short && !err && (busy || results) && (
         <PeopleList
-          people={results}
+          people={results || []}
+          loading={busy}
           myId={myId}
           onOpen={onOpenProfile}
           empty="Никого не нашли. Ник нужно ввести целиком или с начала — по имени поиск не ищет."

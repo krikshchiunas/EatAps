@@ -15,6 +15,7 @@ import { setActiveChat } from '../lib/notifications.js'
 import { getMealSections, foodsForMeal } from '../lib/meals.js'
 import { mealCardFromGroup, normalizeMealCard } from '../lib/mealCard.js'
 import { createDoubleTap } from '../lib/doubleTap.js'
+import { mergeMessages, settleMessage, failMessage, newClientId, isTempId } from '../lib/chatLog.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
@@ -28,6 +29,11 @@ const REDUCED_MOTION = typeof window !== 'undefined' && window.matchMedia?.('(pr
 // вторая морковка (второй двойной тап) снимает первую — переключение, а не
 // добавление новой реакции поверх старой.
 const CARROT = '🥕'
+
+// Размер страницы истории. Шестьдесят — примерно два-три экрана на телефоне:
+// достаточно, чтобы прокрутка вверх успела догрузить следующую страницу
+// раньше, чем человек упрётся в её начало.
+const PAGE = 60
 
 function timeShort(iso) {
   if (!iso) return ''
@@ -84,6 +90,9 @@ export default function ChatView({ friend, onClose }) {
 
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState(null)
+  const [olderCursor, setOlderCursor] = useState(null)   // на более ранние страницы
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [reply, setReply] = useState(null)          // { id, snapshot }
   const [menuMsg, setMenuMsg] = useState(null)      // сообщение для контекст-меню
   const [forwardMsg, setForwardMsg] = useState(null)
@@ -99,6 +108,7 @@ export default function ChatView({ friend, onClose }) {
   const [peerLastSeen, setPeerLastSeen] = useState(null)
 
   const listRef = useRef(null)
+  const retryLoadRef = useRef(() => {})
   const atBottomRef = useRef(true)
   const bootedRef = useRef(false)
   const messagesRef = useRef(messages)
@@ -212,27 +222,63 @@ export default function ChatView({ friend, onClose }) {
   }, [friend.id])
 
   // Загрузка истории + realtime.
+  //
+  // ЗДЕСЬ БЫЛА ГОНКА, И ОНА ТЕРЯЛА СООБЩЕНИЯ. Подписка создавалась синхронно,
+  // а история приезжала асинхронно и вызывала setMessages(rows) — ПЕРЕЗАПИСЬ.
+  // Сообщение, пришедшее в промежуток между подпиской и ответом истории,
+  // добавлялось в пустой список и через мгновение исчезало вместе с ним.
+  // Увидеть его снова можно было только переоткрыв чат.
+  //
+  // Теперь ни один источник не перезаписывает список: и история, и realtime, и
+  // локальные черновики сливаются mergeMessages по id. Слияние идемпотентно,
+  // поэтому повторное событие и переподписка после разрыва связи безопасны.
   useEffect(() => {
     markChatRead(friend.id)
     markMessagesRead(friend.id)
     let cancelled = false
-    ;(async () => {
+
+    // Сброс при СМЕНЕ собеседника обязателен именно теперь, когда история не
+    // перезаписывает список, а сливается с ним. Открыть чат с другим человеком
+    // можно и без размонтирования (из профиля, поверх уже открытого чата) —
+    // тогда без сброса переписки двух людей слились бы в одну ленту.
+    // Раньше это скрывала перезапись: setMessages(rows) стирала чужое заодно.
+    //
+    // Сброс идёт СИНХРОННО, до создания подписки и до первого await, поэтому
+    // событие, пришедшее по realtime следом, попадает уже в чистый список и
+    // не теряется.
+    setMessages([])
+    setOlderCursor(null)
+    setLoading(true)
+    setLoadErr(null)
+    setShowJump(false)
+    atBottomRef.current = true
+    // Первый показ нового чата снова должен встать у последнего сообщения.
+    bootedRef.current = false
+
+    const load = async () => {
       try {
-        const rows = await listMessagesWith(myId, friend.id)
+        const { items, cursor } = await listMessagesWith(myId, friend.id, { limit: PAGE })
         if (cancelled) return
-        setMessages(rows)
+        setMessages((cur) => mergeMessages(cur, items))
+        setOlderCursor(cursor)
         setLoading(false)
       } catch (e) {
-        if (!cancelled) { flash(normalizeError(e).message); setLoading(false) }
+        if (cancelled) return
+        // Пустой экран и «сообщений нет» — разные вещи. Раньше сбой загрузки
+        // показывал заглушку «Напишите первым!», то есть врал про переписку.
+        setLoadErr(normalizeError(e).message)
+        setLoading(false)
       }
-    })()
+    }
+    load()
+    retryLoadRef.current = () => { setLoading(true); setLoadErr(null); load() }
 
     const unsub = subscribeToChat(myId, friend.id, (eventType, m) => {
       if (eventType === 'INSERT') {
         markChatRead(friend.id)
         // Чат открыт — сразу отмечаем входящее прочитанным (собеседник увидит вилку).
         markMessagesRead(friend.id)
-        setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]))
+        setMessages((cur) => mergeMessages(cur, [m]))
         if (atBottomRef.current) requestAnimationFrame(() => pinBottom(true))
         else setShowJump(true)
       } else if (eventType === 'UPDATE') {
@@ -250,6 +296,31 @@ export default function ChatView({ friend, onClose }) {
     return () => { cancelled = true; unsub(); unsubSent() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myId, friend.id])
+
+  // Догрузка более ранних сообщений при прокрутке к началу.
+  //
+  // Высоту сохраняем вручную: вставка страницы сверху сдвигает содержимое, и
+  // без поправки лента прыгает у человека под пальцем ровно в тот момент,
+  // когда он читает.
+  const loadOlder = useCallback(async () => {
+    if (!olderCursor || loadingOlder) return
+    setLoadingOlder(true)
+    const el = listRef.current
+    const before = el ? el.scrollHeight - el.scrollTop : 0
+    try {
+      const { items, cursor } = await listMessagesWith(myId, friend.id, { limit: PAGE, cursor: olderCursor })
+      setMessages((cur) => mergeMessages(items, cur))
+      setOlderCursor(cursor)
+      requestAnimationFrame(() => {
+        const node = listRef.current
+        if (node) node.scrollTop = node.scrollHeight - before
+      })
+    } catch (e) {
+      flash(normalizeError(e).message)
+    } finally {
+      setLoadingOlder(false)
+    }
+  }, [olderCursor, loadingOlder, myId, friend.id, flash])
 
   // «Печатает…»: канал живёт весь чат. Гасим индикатор по таймауту — если
   // собеседник свернул вкладку, события просто перестают приходить и «печатает»
@@ -329,12 +400,16 @@ export default function ChatView({ friend, onClose }) {
     return clearAll
   }, [menuMsg])
 
-  // Отслеживаем «у низа ли пользователь».
+  // Отслеживаем «у низа ли пользователь» и догружаем историю у верха.
   const onScroll = useCallback(() => {
     const nb = nearBottom()
     atBottomRef.current = nb
     if (nb && showJump) setShowJump(false)
-  }, [showJump])
+    // Порог с запасом: страница должна начать грузиться до того, как человек
+    // упрётся в пустоту, иначе прокрутка останавливается и ждёт сеть.
+    const el = listRef.current
+    if (el && el.scrollTop < 320) loadOlder()
+  }, [showJump, loadOlder])
 
   // Пин при подгрузке картинок (высота меняется).
   const onImgLoad = useCallback(() => { if (atBottomRef.current) pinBottom(false) }, [])
@@ -363,75 +438,83 @@ export default function ChatView({ friend, onClose }) {
   const doSend = useCallback(async ({ text, file }) => {
     const r = reply
     setReply(null)
-    const tempId = 'temp-' + (crypto.randomUUID?.() || Date.now() + Math.random())
+    const tempId = 'temp-' + newClientId()
+    // Ключ идемпотентности придумывается ОДИН раз на сообщение и живёт на нём.
+    // Повтор (кнопка «Повторить» или автоматическая пересылка) уходит с ТЕМ ЖЕ
+    // ключом — сервер вернёт уже сохранённую строку вместо второго сообщения.
+    const clientId = newClientId()
     const localUrl = file ? takeBlobUrl(file) : null
     const temp = {
       id: tempId, sender: myId, recipient: friend.id,
       text: text || null, image_url: localUrl, meal_ref: null,
       reply_to: r?.id || null, reply_snapshot: r?.snapshot || null, forwarded_name: null,
-      created_at: new Date().toISOString(), status: 'sending',
+      created_at: new Date().toISOString(), status: 'sending', _clientId: clientId,
     }
-    setMessages((cur) => [...cur, temp])
+    setMessages((cur) => mergeMessages(cur, [temp]))
     atBottomRef.current = true
     requestAnimationFrame(() => pinBottom(true))
     try {
       let imageUrl = null
       if (file) imageUrl = await uploadChatImage(myId, file)
       const res = await sendChatMessage({
-        sender: myId, recipient: friend.id, text, imageUrl,
-        replyTo: r?.id, replySnapshot: r?.snapshot,
+        recipient: friend.id, text, imageUrl,
+        replyTo: r?.id, replySnapshot: r?.snapshot, clientId,
       })
       if (res.error) throw new Error(res.error)
-      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...res.ok, status: 'sent' } : m)))
+      setMessages((cur) => settleMessage(cur, tempId, res.ok))
       releaseBlobUrl(localUrl)
-    } catch (e) {
-      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...m, status: 'failed', _payload: { text, file } } : m)))
+    } catch {
+      setMessages((cur) => failMessage(cur, tempId, { text, file, clientId }))
     }
   }, [reply, myId, friend.id, takeBlobUrl, releaseBlobUrl])
 
   // Отправка карточки приёма пищи — оптимистично, как обычное сообщение.
   const sendMeal = useCallback(async (mealRef) => {
-    const tempId = 'temp-' + (crypto.randomUUID?.() || Date.now() + Math.random())
+    const tempId = 'temp-' + newClientId()
+    const clientId = newClientId()
     const temp = {
       id: tempId, sender: myId, recipient: friend.id,
       text: null, image_url: null, meal_ref: mealRef,
       reply_to: null, reply_snapshot: null, forwarded_name: null,
-      created_at: new Date().toISOString(), status: 'sending',
+      created_at: new Date().toISOString(), status: 'sending', _clientId: clientId,
     }
-    setMessages((cur) => [...cur, temp])
+    setMessages((cur) => mergeMessages(cur, [temp]))
     atBottomRef.current = true
     requestAnimationFrame(() => pinBottom(true))
     try {
-      const res = await sendChatMessage({ sender: myId, recipient: friend.id, mealRef })
+      const res = await sendChatMessage({ recipient: friend.id, mealRef, clientId })
       if (res.error) throw new Error(res.error)
-      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...res.ok, status: undefined } : m)))
+      setMessages((cur) => settleMessage(cur, tempId, res.ok))
     } catch {
-      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)))
+      setMessages((cur) => failMessage(cur, tempId, { mealRef, clientId }))
     }
   }, [myId, friend.id])
 
   const retry = useCallback(async (m) => {
     const p = m._payload || { text: m.text, file: null }
-    setMessages((cur) => cur.filter((x) => x.id !== m.id))
-    // повторно шлём с теми же данными и (если был) reply-снимком сообщения
-    const tempId = 'temp-' + (crypto.randomUUID?.() || Date.now() + Math.random())
-    const temp = { ...m, id: tempId, status: 'sending', created_at: new Date().toISOString() }
-    setMessages((cur) => [...cur, temp])
-    requestAnimationFrame(() => pinBottom(true))
+    // Ключ берём СТАРЫЙ — тот, с которым уходила первая попытка. Именно это
+    // делает повтор безопасным: если первая попытка на самом деле дошла и
+    // потерялся только ответ, сервер вернёт ту же строку, а не создаст вторую.
+    // Новый ключ на повторе означал бы ровно ту дублирующуюся отправку, от
+    // которой идемпотентность и защищает.
+    const clientId = m._clientId || p.clientId || newClientId()
+    setMessages((cur) => cur.map((x) => (
+      x.id === m.id ? { ...x, status: 'sending', _clientId: clientId } : x
+    )))
     try {
       let imageUrl = m.image_url && !m.image_url.startsWith('blob:') ? m.image_url : null
       if (p.file) imageUrl = await uploadChatImage(myId, p.file)
       // meal_ref и forwarded_name обязательно переносим: без них повтор
       // упавшей карточки еды уходил пустым и сервер отклонял его всегда.
       const res = await sendChatMessage({
-        sender: myId, recipient: friend.id, text: p.text, imageUrl,
-        mealRef: m.meal_ref, forwardedName: m.forwarded_name,
-        replyTo: m.reply_to, replySnapshot: m.reply_snapshot,
+        recipient: friend.id, text: p.text, imageUrl,
+        mealRef: m.meal_ref || p.mealRef, forwardedName: m.forwarded_name,
+        replyTo: m.reply_to, replySnapshot: m.reply_snapshot, clientId,
       })
       if (res.error) throw new Error(res.error)
-      setMessages((cur) => cur.map((x) => (x.id === tempId ? { ...res.ok, status: 'sent' } : x)))
+      setMessages((cur) => settleMessage(cur, m.id, res.ok))
     } catch {
-      setMessages((cur) => cur.map((x) => (x.id === tempId ? { ...x, status: 'failed', _payload: p } : x)))
+      setMessages((cur) => failMessage(cur, m.id, { ...p, clientId }))
     }
   }, [myId, friend.id])
 
@@ -446,7 +529,7 @@ export default function ChatView({ friend, onClose }) {
   // Сообщение, ещё не сохранённое на сервере (status 'sending'/'failed'),
   // реагировать не на что — у него ещё нет строки в БД, RPC его не найдёт.
   const toggleReaction = useCallback(async (m) => {
-    if (!m || String(m.id).startsWith('temp-')) return
+    if (!m || isTempId(m.id)) return
     const mine = (m.reactions || {})[myId] === CARROT
     haptic(mine ? 10 : 16)
     setMessages((cur) => cur.map((x) => {
@@ -481,13 +564,13 @@ export default function ChatView({ friend, onClose }) {
   // temp-сообщений в БД нет, для них достаточно убрать из списка.
   const doDeleteForMe = useCallback((m) => {
     setMessages((cur) => cur.filter((x) => x.id !== m.id))
-    if (!String(m.id).startsWith('temp-')) hideMessageLocally(m.id)
+    if (!isTempId(m.id)) hideMessageLocally(m.id)
   }, [])
 
   // Очистить переписку у себя: прячем локально всё, что сейчас загружено.
   // У собеседника история остаётся — как «удалить у меня» для одного сообщения.
   const clearChatForMe = useCallback(() => {
-    const ids = messagesRef.current.map((m) => m.id).filter((id) => !String(id).startsWith('temp-'))
+    const ids = messagesRef.current.map((m) => m.id).filter((id) => !isTempId(id))
     hideMessagesLocally(ids)
     setMessages([])
     flash('Переписка очищена у вас')
@@ -638,8 +721,29 @@ export default function ChatView({ friend, onClose }) {
         </header>
 
         <div className="chat-list" ref={listRef} onScroll={onScroll}>
+          {/* Догрузка более ранних. Полоска сверху, а не спиннер по центру:
+              содержимое ленты при этом остаётся на месте. */}
+          {loadingOlder && (
+            <div className="chat-older"><span className="chat-spinner small" /></div>
+          )}
+
           {loading ? (
             <div className="chat-state"><span className="chat-spinner" /></div>
+          ) : loadErr ? (
+            /* Сбой загрузки — НЕ «сообщений нет». Раньше оба случая показывали
+               заглушку «Напишите первым!», то есть экран уверенно сообщал, что
+               переписки не существует, когда просто не дозвонился. */
+            <div className="chat-empty">
+              <div className="chat-empty-emoji">📡</div>
+              <p style={{ color: 'var(--danger)' }}>{loadErr}</p>
+              <button
+                className="btn ghost"
+                style={{ width: 'auto', padding: '0 20px', marginTop: 12 }}
+                onClick={() => retryLoadRef.current()}
+              >
+                Повторить
+              </button>
+            </div>
           ) : messages.length === 0 ? (
             // Заглушку прячем, пока собеседник печатает: иначе экран
             // одновременно говорит «сообщений нет» и «Х печатает».
@@ -1331,9 +1435,14 @@ function ForwardSheet({ m, myId, fromName, onClose, onDone }) {
     if (busy) return
     setBusy(true)
     const res = await sendChatMessage({
-      sender: myId, recipient: f.id,
+      recipient: f.id,
       text: m.text, imageUrl: m.image_url && !String(m.image_url).startsWith('blob:') ? m.image_url : null,
       mealRef: m.meal_ref, forwardedName: fromName,
+      // Ключ на каждое нажатие свой: переслать одно и то же сообщение двум
+      // разным людям — законное действие, а вот дважды одному и тому же от
+      // двойного нажатия — нет. Ключ создаётся в момент нажатия и в пределах
+      // этого нажатия не меняется.
+      clientId: newClientId(),
     })
     setBusy(false)
     if (res.error) return

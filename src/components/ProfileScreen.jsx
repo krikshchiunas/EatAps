@@ -20,6 +20,8 @@ import {
   unreadNotificationCount, subscribeToNotifications,
 } from '../lib/social.js'
 import { listFriends } from '../lib/supabase.js'
+import { removeFollower } from '../lib/social.js'
+import ConfirmDialog from './ConfirmDialog.jsx'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import PushScreen from './PushScreen.jsx'
@@ -74,6 +76,8 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
   const [card, setCard] = useState(null)
   const [list, setList] = useState(null)      // null | 'followers' | 'following' | 'friends'
   const [people, setPeople] = useState(null)
+  const [peopleLoading, setPeopleLoading] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(null)
   const [openProfile, setOpenProfile] = useState(null)
   const [eventsOpen, setEventsOpen] = useState(false)
   const [eventTab, setEventTab] = useState('feed')
@@ -109,8 +113,9 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
   // Список грузим только когда его открыли: на профиле их три, и тянуть все
   // три ради счётчиков, которые уже пришли в карточке, незачем.
   useEffect(() => {
-    if (!list || !uid) { setPeople(null); return }
+    if (!list || !uid) { setPeople(null); setPeopleLoading(false); return }
     let alive = true
+    setPeopleLoading(true)
     ;(async () => {
       try {
         const rows =
@@ -122,7 +127,11 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
             user_id: f.id, username: f.username, display_name: f.name, avatar_url: f.avatar,
           }))
         if (alive) setPeople(rows)
-      } catch { if (alive) setPeople([]) }
+      } catch {
+        if (alive) setPeople([])
+      } finally {
+        if (alive) setPeopleLoading(false)
+      }
     })()
     return () => { alive = false }
   }, [list, uid])
@@ -203,9 +212,16 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
                 <h1 className="h1" style={{ margin: 0, fontSize: 22 }}>{LIST_TITLE[list]}</h1>
                 <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
               </div>
-              {people === null
-                ? <p className="muted" style={{ fontSize: 14 }}>Загружаем…</p>
-                : <PeopleList people={people} myId={uid} onOpen={setOpenProfile} empty={LIST_EMPTY[list]} />}
+              <PeopleList
+                people={people || []}
+                loading={peopleLoading}
+                myId={uid}
+                onOpen={setOpenProfile}
+                empty={LIST_EMPTY[list]}
+                /* Убрать можно только СВОЕГО подписчика: в остальных списках
+                   такой кнопки нет — там нечего убирать. */
+                onRemove={list === 'followers' ? setConfirmRemove : null}
+              />
             </div>
           )}
         </PushScreen>
@@ -266,6 +282,21 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
           onClose={() => { setOpenProfile(null); loadCard() }}
           onOpenProfile={setOpenProfile}
           onOpenChat={onOpenChat ? (peer) => { setOpenProfile(null); onOpenChat(peer.id) } : null}
+        />
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          text={`Убрать ${confirmRemove.display_name || confirmRemove.username || 'этого человека'} из подписчиков? Он перестанет видеть ваши записи для подписчиков. Уведомления об этом он не получит и сможет подписаться снова.`}
+          onYes={async () => {
+            const person = confirmRemove
+            setConfirmRemove(null)
+            const res = await removeFollower(uid, person.user_id)
+            if (res?.error) return
+            setPeople((prev) => (prev || []).filter((p) => p.user_id !== person.user_id))
+            loadCard() // счётчик подписчиков уменьшился
+          }}
+          onNo={() => setConfirmRemove(null)}
         />
       )}
 

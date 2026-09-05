@@ -11,7 +11,7 @@
 // отреагировавших. Поэтому почти всё идёт через RPC, а не через select со
 // связанными таблицами.
 
-import { supabase } from './supabase.js'
+import { supabase, realtime } from './supabase.js'
 import { normalizeError } from './authErrors.js'
 import { toRelationship, EMPTY_RELATIONSHIP } from './relationship.js'
 import { isMissingColumn } from './pgErrors.js'
@@ -147,6 +147,31 @@ export async function searchUsers(query, { limit = 20 } = {}) {
   return data || []
 }
 
+// Отношения сразу с несколькими людьми — один запрос на весь список.
+//
+// Раньше список людей спрашивал getRelationship по одному человеку: пятьдесят
+// строк означали пятьдесят обращений к базе, отправленных параллельно. Это
+// «один круг ожидания вместо N» по времени, но пятьдесят запросов по нагрузке
+// — и ровно тот случай, про который сказано «карточки людей не должны делать
+// сотни отдельных запросов».
+//
+// Возвращает { [userId]: relationship }. Разбирается тем же toRelationship,
+// что и одиночный ответ: две трактовки одних и тех же флагов нам не нужны.
+export async function relationshipsWith(ids) {
+  const out = {}
+  if (!supabase || !ids?.length) return out
+  const unique = [...new Set(ids.filter(Boolean))]
+  const { data, error } = await supabase.rpc('relationships_with', { p_user_ids: unique })
+  if (error) {
+    // Миграция ещё не прогнана — отношения просто неизвестны. Список людей
+    // при этом должен отрисоваться: без кнопки подписки, но с именами.
+    if (isMissingRelation(error)) return out
+    throw error
+  }
+  for (const row of data || []) out[row.user_id] = toRelationship(row)
+  return out
+}
+
 // Смена ника. Уникальность проверяет база, а не клиент: между проверкой
 // «свободен ли» и записью всегда есть промежуток, в который его может занять
 // кто-то другой. Поэтому единственный надёжный ответ — тот, что вернул INSERT.
@@ -156,6 +181,10 @@ export async function setUsername(username) {
   if (error) {
     if (error.code === '23505') return { error: 'Этот ник уже занят' }
     if (error.code === '22023') return { error: 'От 3 до 20 символов: латиница, цифры, _' }
+    // 54000 приходит из ограничения частоты: ник — единственный адрес человека,
+    // и менять его чаще раза в сутки нельзя (см. set_username в миграции
+    // 2026-09-05). Сообщение должно называть причину, а не «что-то пошло не так».
+    if (error.code === '54000') return { error: 'Ник можно менять не чаще раза в сутки' }
     return fail(error)
   }
   return { ok: data }
@@ -219,53 +248,26 @@ export async function markAllNotificationsRead() {
 // Realtime на уведомления. Источник истины — таблица, а не локальный счётчик:
 // пометив прочитанным на телефоне, человек должен увидеть это и на ноутбуке.
 //
-// Канал ОДИН на пользователя, слушателей у него сколько угодно. Это не
-// экономия сокетов, а обязательное условие: supabase-js на один и тот же topic
-// отдаёт ОДИН И ТОТ ЖЕ объект канала (RealtimeClient.channel ищет существующий
-// по topic), а второй `.on('postgres_changes')` по уже подписанному каналу
-// библиотека считает ошибкой и бросает исключение:
+// Подписчиков несколько — бейдж в нижней навигации (App), блок «События»
+// в профиле и сам экран уведомлений, — и все они смотрят на одну тему.
+// Раньше здесь стоял собственный singleton с набором слушателей: его завели
+// после того, как второй подписчик уронил приложение исключением
 //
 //   cannot add `postgres_changes` callbacks for realtime:notifications:… after `subscribe()`
 //
-// Подписчиков ровно два — бейдж в нижней навигации (App) и хаб «Общение»
-// (FriendsScreen), — и второй ронял всё приложение в RootErrorBoundary.
-let notifications = null // { userId, channel, listeners: Set }
-
+// Ловушка была не в уведомлениях, а в устройстве supabase-js, и стояла она под
+// каждой подпиской приложения. Поэтому решение переехало в realtime.js и стало
+// общим, а здесь остался обычный вызов.
 export function subscribeToNotifications(myId, onChange) {
   if (!supabase || !myId) return () => {}
-
-  // Канал мёртв (сменился аккаунт или его сняли снаружи) — заводим заново.
-  const alive = notifications
-    && notifications.userId === myId
-    && supabase.getChannels().includes(notifications.channel)
-  if (notifications && !alive) {
-    try { supabase.removeChannel(notifications.channel) } catch {}
-    notifications = null
-  }
-
-  if (!notifications) {
-    const listeners = new Set()
-    const channel = supabase
-      .channel(`notifications:${myId}`)
-      .on('postgres_changes', {
-        event: '*', schema: 'public', table: 'notifications',
-        filter: `recipient_id=eq.${myId}`,
-      }, (payload) => {
-        // Копия списка: обработчик может отписаться прямо изнутри. Упавший
-        // слушатель не должен лишить события остальных.
-        for (const fn of [...listeners]) { try { fn?.(payload) } catch {} }
-      })
-      .subscribe()
-    notifications = { userId: myId, channel, listeners }
-  }
-
-  const hub = notifications
-  hub.listeners.add(onChange)
-  // Канал живёт до смены аккаунта, а не до последнего отписавшегося. Снимать и
-  // заводить его заново на каждый уход с вкладки — лишний join на ровном месте,
-  // а на быстром пере-монтировании (StrictMode в разработке) ещё и гонка с
-  // removeChannel, из которой вылезает то же самое исключение.
-  return () => { hub.listeners.delete(onChange) }
+  return realtime.subscribe(
+    `notifications:${myId}`,
+    (channel, emit) => channel.on('postgres_changes', {
+      event: '*', schema: 'public', table: 'notifications',
+      filter: `recipient_id=eq.${myId}`,
+    }, emit),
+    onChange,
+  )
 }
 
 // ---------------- Посты ----------------

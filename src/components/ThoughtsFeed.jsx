@@ -20,10 +20,16 @@ import {
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { Avatar } from './FriendsScreen.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
-import { visibilityLabel, VISIBILITY, DEFAULT_VISIBILITY } from '../lib/relationship.js'
+import { visibilityLabel, VISIBILITY, DEFAULT_VISIBILITY, canViewPost } from '../lib/relationship.js'
 import { setPostVisibility } from '../lib/social.js'
+import { predictReaction, applyServerReaction } from '../lib/reactions.js'
 
 const MAX_TEXT = 2000
+// Зеркало ограничения в базе: post_comments.text проверяется check-констрейнтом
+// на 1..1000 символов. Показать предел до отправки честнее, чем принять ввод и
+// вернуть отказ.
+const MAX_COMMENT = 1000
+const COMMENT_PAGE = 30
 
 export function timeAgo(iso) {
   const t = Date.parse(iso)
@@ -154,21 +160,59 @@ export function Comments({ post, myId, isPostOwner, onCountChange }) {
   // выглядеть как чужой безымянный.
   const { profile } = useStore()
   const [items, setItems] = useState(null)
+  const [cursor, setCursor] = useState(null)      // на более ранние ответы
+  const [loadingMore, setLoadingMore] = useState(false)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [loadErr, setLoadErr] = useState(null)
+
+  const load = useCallback(async () => {
+    setLoadErr(null)
+    try {
+      const res = await listPostComments(post.id, { limit: COMMENT_PAGE })
+      setItems(res.items)
+      setCursor(res.cursor)
+    } catch (e) {
+      // Пустая ветка и не загрузившаяся ветка выглядели одинаково — «Ответов
+      // пока нет». Это утверждение, а мы его не знаем.
+      setItems([])
+      setLoadErr(e.message || 'Не удалось загрузить ответы')
+    }
+  }, [post.id])
 
   useEffect(() => {
     let cancelled = false
-    listPostComments(post.id)
-      .then((rows) => { if (!cancelled) setItems(rows) })
-      .catch(() => { if (!cancelled) setItems([]) })
+    setItems(null)
+    ;(async () => { if (!cancelled) await load() })()
     return () => { cancelled = true }
-  }, [post.id])
+  }, [load])
+
+  const loadMore = async () => {
+    if (!cursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const res = await listPostComments(post.id, { limit: COMMENT_PAGE, cursor })
+      // Более ранние встают НАВЕРХ: ветка читается сверху вниз.
+      setItems((prev) => {
+        const seen = new Set((prev || []).map((c) => c.id))
+        return [...res.items.filter((c) => !seen.has(c.id)), ...(prev || [])]
+      })
+      setCursor(res.cursor)
+    } catch (e) {
+      setLoadErr(e.message || 'Не удалось догрузить')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const send = async () => {
+    // Enter отправлял ответ, не спрашивая, не летит ли предыдущий: удержанный
+    // Enter или быстрый двойной ввод давали два одинаковых ответа.
+    if (busy) return
     const body = text.trim()
     if (!body) return
+    if (body.length > MAX_COMMENT) { setErr(`Не длиннее ${MAX_COMMENT} символов`); return }
     setBusy(true)
     setErr(null)
     const res = await addPostComment({ postId: post.id, userId: myId, text: body })
@@ -193,25 +237,64 @@ export function Comments({ post, myId, isPostOwner, onCountChange }) {
   return (
     <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
       {items === null ? (
-        <p className="muted" style={{ fontSize: 13 }}>Загрузка…</p>
+        <div>
+          {[0, 1].map((i) => (
+            <div key={i} className="row gap10" style={{ alignItems: 'center', marginBottom: 10 }}>
+              <div className="skel" style={{ width: 28, height: 28, borderRadius: '50%', flex: '0 0 auto' }} />
+              <div style={{ flex: 1 }}>
+                <div className="skel" style={{ width: '35%', height: 10, borderRadius: 5, marginBottom: 6 }} />
+                <div className="skel" style={{ width: '72%', height: 12, borderRadius: 6 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : loadErr && items.length === 0 ? (
+        <div className="row gap8" style={{ alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: 'var(--danger)' }}>{loadErr}</span>
+          <button style={{ fontSize: 13, color: 'var(--primary-strong)', fontWeight: 600 }} onClick={load}>
+            Повторить
+          </button>
+        </div>
       ) : items.length === 0 ? (
         <p className="muted" style={{ fontSize: 13 }}>Ответов пока нет.</p>
       ) : (
-        items.map((c) => (
-          <div key={c.id} className="row gap10" style={{ alignItems: 'flex-start', marginBottom: 10 }}>
-            <Avatar src={c.author_avatar} name={c.author_name} size={28} />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="row gap8" style={{ alignItems: 'baseline' }}>
-                <span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.author_name || 'Пользователь'}</span>
-                <span className="muted" style={{ fontSize: 11 }}>{timeAgo(c.created_at)}</span>
+        <>
+          {cursor && (
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              style={{
+                fontSize: 13, color: 'var(--primary-strong)', fontWeight: 600,
+                marginBottom: 10, minHeight: 32,
+              }}
+            >
+              {loadingMore ? 'Загружаем…' : 'Показать более ранние'}
+            </button>
+          )}
+          {items.map((c) => (
+            <div key={c.id} className="row gap10" style={{ alignItems: 'flex-start', marginBottom: 10 }}>
+              <Avatar src={c.author_avatar} name={c.author_name || c.author_username} size={28} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="row gap8" style={{ alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 620 }}>
+                    {c.author_name || c.author_username || 'Пользователь'}
+                  </span>
+                  <span className="muted" style={{ fontSize: 11 }}>{timeAgo(c.created_at)}</span>
+                </div>
+                <div style={{ fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{c.text}</div>
               </div>
-              <div style={{ fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{c.text}</div>
+              {(c.user_id === myId || isPostOwner) && (
+                <button
+                  style={{ fontSize: 12, color: 'var(--ink-3)', flex: '0 0 auto', width: 32, height: 32 }}
+                  onClick={() => remove(c.id)}
+                  aria-label="Удалить ответ"
+                >
+                  ✕
+                </button>
+              )}
             </div>
-            {(c.user_id === myId || isPostOwner) && (
-              <button style={{ fontSize: 12, color: 'var(--ink-3)', flex: '0 0 auto' }} onClick={() => remove(c.id)} aria-label="Удалить ответ">✕</button>
-            )}
-          </div>
-        ))
+          ))}
+        </>
       )}
 
       {myId && (
@@ -220,12 +303,19 @@ export function Comments({ post, myId, isPostOwner, onCountChange }) {
             className="input"
             placeholder="Ответить…"
             value={text}
+            maxLength={MAX_COMMENT}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') send() }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send() } }}
             style={{ height: 42, fontSize: 14, flex: 1 }}
           />
-          <button className="btn" style={{ width: 'auto', height: 42, padding: '0 16px', fontSize: 14, flex: '0 0 auto' }} disabled={busy || !text.trim()} onClick={send}>
-            →
+          <button
+            className="btn"
+            style={{ width: 'auto', height: 42, padding: '0 16px', fontSize: 14, flex: '0 0 auto' }}
+            disabled={busy || !text.trim()}
+            onClick={send}
+            aria-label="Отправить ответ"
+          >
+            {busy ? '…' : '→'}
           </button>
         </div>
       )}
@@ -242,14 +332,22 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
   const [open, setOpen] = useState(false)
   const [menu, setMenu] = useState(false)
   const [err, setErr] = useState(null)
+  const [reacting, setReacting] = useState(false)
 
+  // Реакция — оптимистично. Кнопка перекрашивается в момент нажатия, а не
+  // после ответа сервера: раньше человек на медленной сети нажимал второй раз,
+  // решив, что промахнулся, — и вторым нажатием СНИМАЛ то, что только что
+  // поставил. Ответ сервера перезаписывает предсказание, ошибка — откатывает.
   const react = async (emoji) => {
+    if (reacting) return
     setErr(null)
+    setReacting(true)
+    const before = post
+    onChange(predictReaction(post, emoji))
     const res = await togglePostReaction(post.id, emoji)
-    if (res.error) { setErr(res.error); return }
-    if (res.ok) {
-      onChange({ ...post, carrots: res.ok.carrots, broccoli: res.ok.broccoli, my_reaction: res.ok.mine })
-    }
+    setReacting(false)
+    if (res.error) { onChange(before); setErr(res.error); return }
+    if (res.ok) onChange(applyServerReaction(before, res.ok))
   }
 
   const btn = (emoji, count, label) => {
@@ -258,10 +356,13 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
       <button
         onClick={() => react(emoji)}
         aria-label={label}
+        aria-pressed={mine}
         title={label}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
-          height: 34, padding: '0 12px', borderRadius: 999,
+          // 38 вместо 34: нижняя граница удобной сенсорной цели. Реакция —
+          // самое частое действие в ленте, и промахиваться по ней не должно.
+          height: 38, padding: '0 14px', borderRadius: 999,
           border: `1.5px solid ${mine ? 'var(--primary)' : 'var(--border)'}`,
           background: mine ? 'var(--primary-weak)' : 'var(--surface-2)',
           color: mine ? 'var(--primary-strong)' : 'var(--ink-2)',
@@ -330,8 +431,10 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
         {btn('🥦', post.broccoli, 'Не моё')}
         <button
           onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={open ? 'Скрыть ответы' : 'Показать ответы'}
           style={{
-            display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px',
+            display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 14px',
             borderRadius: 999, border: '1.5px solid var(--border)', background: 'var(--surface-2)',
             color: 'var(--ink-2)', fontSize: 14, fontWeight: 600,
           }}
@@ -356,7 +459,7 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
 }
 
 // ── Лента ─────────────────────────────────────────────────────────────────────
-export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorAvatar }) {
+export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorAvatar, rel = null }) {
   const { user, supabaseEnabled } = useStore()
   const myId = user?.id || ''
 
@@ -387,6 +490,21 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
     if (res.error) { setErr(res.error); return }
     setPosts((prev) => (prev || []).filter((p) => p.id !== post.id))
   }
+
+  // Пустая лента на чужом профиле означает одно из двух: человек ничего не
+  // писал ИЛИ написанное адресовано более узкому кругу, чем тот, в котором мы
+  // состоим. Сервер эти случаи не различает и не должен — он просто ничего не
+  // отдаёт. Но говорить «Пока ни одной мысли» там, где на самом деле «есть, но
+  // не для вас», — значит утверждать про человека неправду.
+  //
+  // Матрица доступа даёт достаточно, чтобы сказать честно: если мы даже не
+  // подписаны, часть записей мы бы не увидели в любом случае.
+  const hiddenHint = !rel ? null
+    : !canViewPost('followers', rel)
+      ? 'Пока ни одной мысли — или они видны только подписчикам.'
+      : !canViewPost('friends', rel)
+        ? 'Пока ни одной мысли — или они видны только друзьям.'
+        : null
 
   // Без аккаунта мысли не существуют: они живут в облаке и адресованы друзьям.
   if (!supabaseEnabled || !myId) {
@@ -419,10 +537,10 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
         <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
       ) : posts.length === 0 ? (
         <div className="card">
-          <p className="muted" style={{ fontSize: 14 }}>
+          <p className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>
             {isOwnProfile
               ? 'Здесь появятся ваши мысли — фото и заметки, которые видят друзья.'
-              : 'Пока ни одной мысли.'}
+              : hiddenHint || 'Пока ни одной мысли.'}
           </p>
         </div>
       ) : (

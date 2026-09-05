@@ -6,6 +6,7 @@ import ChatView from './ChatView.jsx'
 import UserSearch from './UserSearch.jsx'
 import PublicProfile from './PublicProfile.jsx'
 import { unfollow } from '../lib/social.js'
+import ConfirmDialog from './ConfirmDialog.jsx'
 
 // Разделы вкладки.
 //
@@ -135,6 +136,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
   const [dropUp, setDropUp] = useState(false)    // раскрывать меню вверх
   const [menuErr, setMenuErr] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
+  const [confirmRemove, setConfirmRemove] = useState(null)
   const [view, setView] = useState('friends')
   const [profileUser, setProfileUser] = useState(null)
   const [pinned, setPinned] = useState(getPinned)
@@ -290,11 +292,19 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
 
   // «Удалить из друзей» = отписаться. Дружба — производная от взаимной
   // подписки, отдельной строки, которую можно было бы удалить, у клиента нет.
-  const handleRemove = async (friendId) => {
+  //
+  // Спрашиваем подтверждение. Действие необратимо в том смысле, который здесь
+  // важнее технического: вернуть дружбу односторонним нажатием нельзя — нужно
+  // подписаться заново И ДОЖДАТЬСЯ, пока человек подпишется в ответ. Вместе с
+  // дружбой уходят переписка и доступ к дневнику. Раньше это происходило от
+  // одного касания пункта меню, соседнего с безобидным «Заглушить».
+  const handleRemove = async (friend) => {
     setOpenMenu(null)
-    await unfollow(myId, friendId)
-    setPinned(forgetPinned(friendId))
-    setMuted(forgetMutedFriend(friendId))
+    setConfirmRemove(null)
+    const res = await unfollow(myId, friend.id)
+    if (res?.error) { setLoadErr(res.error); return }
+    setPinned(forgetPinned(friend.id))
+    setMuted(forgetMutedFriend(friend.id))
     reload()
   }
 
@@ -433,7 +443,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
                 dropUp={dropUp}
                 onPin={() => handlePin(f.id)}
                 onMute={() => handleMute(f.id)}
-                onRemove={() => handleRemove(f.id)}
+                onRemove={() => { setOpenMenu(null); setConfirmRemove(f) }}
                 onClose={() => setOpenMenu(null)}
               />
             )}
@@ -455,6 +465,14 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
             setProfileUser(null)
             setChatFriend(peer)
           }}
+        />
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          text={`Удалить ${confirmRemove.name || 'этого человека'} из друзей? Вы отпишетесь, переписка и дневник питания станут недоступны. Чтобы вернуть дружбу, придётся подписаться заново и дождаться ответной подписки.`}
+          onYes={() => handleRemove(confirmRemove)}
+          onNo={() => setConfirmRemove(null)}
         />
       )}
 
