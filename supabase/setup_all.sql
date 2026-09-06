@@ -5771,6 +5771,26 @@ create policy "presence select self or friends" on public.presence
   );
 
 -- 5.2. Имя и аватар друга (используется пушем о новом сообщении).
+-- ПОЧЕМУ ЗДЕСЬ DROP, А НЕ ПРОСТО CREATE OR REPLACE.
+--
+-- У функции, возвращающей таблицу, набор OUT-параметров — часть её типа, и
+-- create or replace менять его не умеет:
+--     42P13: cannot change return type of existing function
+--     DETAIL: Row type defined by OUT parameters is different.
+-- Причём достаточно расхождения в ОДНОМ имени или типе колонки.
+--
+-- Знать заранее, какой формы функция лежит в конкретной базе, нельзя: историю
+-- этого проекта накатывали по-разному — отдельными миграциями, склеенным
+-- setup_all.sql (который какое-то время был испорчен) и правками из редактора.
+-- Поэтому не полагаемся на совпадение формы, а снимаем функцию и создаём
+-- заново. Права выдаются тут же, следом за созданием, — drop их забирает.
+--
+-- Безопасно: все функции ниже вызываются только клиентом через RPC. На них не
+-- ссылается ни одна политика и ни одно представление — в политиках живут
+-- is_friend_with, is_blocked_between и can_view_post, а их этот файл не трогает.
+
+drop function if exists public.friend_briefs(uuid[]);
+
 create or replace function public.friend_briefs(p_user_ids uuid[])
 returns table (user_id uuid, name text, avatar text)
 language sql
@@ -5796,6 +5816,8 @@ grant execute on function public.friend_briefs(uuid[]) to authenticated;
 --
 -- Добавлена и проверка блокировки на владельца списка: без неё человек,
 -- который меня заблокировал, оставался для меня перечислимым — см. п. 2 шапки.
+drop function if exists public.list_friends(uuid, int, int);
+
 create or replace function public.list_friends(
   p_user_id uuid, p_limit int default 100, p_offset int default 0
 )
@@ -5852,6 +5874,8 @@ create policy "follows select own" on public.follows
 
 -- 5.4. Подписчики и подписки — та же проверка «а можно ли смотреть на этого
 -- человека вообще».
+drop function if exists public.list_followers(uuid, int, int);
+
 create or replace function public.list_followers(
   p_user_id uuid, p_limit int default 50, p_offset int default 0
 )
@@ -5871,6 +5895,8 @@ as $$
   limit least(greatest(coalesce(p_limit, 50), 1), 50)
   offset greatest(coalesce(p_offset, 0), 0);
 $$;
+
+drop function if exists public.list_following(uuid, int, int);
 
 create or replace function public.list_following(
   p_user_id uuid, p_limit int default 50, p_offset int default 0
@@ -5898,6 +5924,8 @@ grant execute on function public.list_followers(uuid, int, int) to authenticated
 grant execute on function public.list_following(uuid, int, int) to authenticated;
 
 -- 5.5. Профиль со счётчиками. Друзья считаются по взаимным подпискам.
+drop function if exists public.user_profile(uuid);
+
 create or replace function public.user_profile(p_user_id uuid)
 returns table (
   user_id         uuid,
@@ -5952,6 +5980,8 @@ grant execute on function public.user_profile(uuid) to authenticated;
 --
 -- Набор колонок повторяет get_relationship, чтобы клиент разбирал ответ той
 -- же функцией и не завёл вторую трактовку одних и тех же флагов.
+drop function if exists public.relationships_with(uuid[]);
+
 create or replace function public.relationships_with(p_user_ids uuid[])
 returns table (
   user_id       uuid,
@@ -6025,7 +6055,11 @@ grant execute on function public.relationships_with(uuid[]) to authenticated;
 --
 -- Набор колонок меняется, поэтому нужен DROP: create or replace на смену
 -- OUT-параметров отвечает 42P13.
+-- Снимаем ОБЕ возможные формы: старую двухаргументную и новую — на случай,
+-- если предыдущий прогон этого файла оборвался на более позднем шаге и
+-- четырёхаргументная версия уже успела появиться.
 drop function if exists public.list_post_comments(uuid, int);
+drop function if exists public.list_post_comments(uuid, int, timestamptz, uuid);
 
 create or replace function public.list_post_comments(
   p_post_id   uuid,
@@ -6096,6 +6130,8 @@ create policy "post comments select" on public.post_comments
 -- учитывает заблокированных; из круга ленты убран union с friends — после
 -- смены определения друзья и так подмножество подписок, и лишняя ветка
 -- union'а только сбивала планировщик.
+drop function if exists public.list_feed(int, timestamptz, uuid);
+
 create or replace function public.list_feed(
   p_limit     int default 20,
   p_before_at timestamptz default null,
@@ -6173,6 +6209,8 @@ revoke all on function public.list_feed(int, timestamptz, uuid) from public, ano
 grant execute on function public.list_feed(int, timestamptz, uuid) to authenticated;
 
 -- Посты одного человека — тот же счётчик ответов без заблокированных.
+drop function if exists public.list_posts(uuid, int, timestamptz);
+
 create or replace function public.list_posts(
   p_user_id uuid,
   p_limit   int default 20,
@@ -6573,6 +6611,8 @@ select set_config('eataps.trusted_profile_write', 'off', false);
 -- Условие отбора не меняется (ник, с начала строки, от трёх символов) —
 -- меняется только порядок. Человек, которого я ищу по трём буквам, чаще всего
 -- тот, на кого я уже подписан или кто подписан на меня.
+drop function if exists public.search_users(text, int);
+
 create or replace function public.search_users(p_query text, p_limit int default 20)
 returns table (
   user_id      uuid,
@@ -6654,6 +6694,8 @@ end $$;
 -- Функция намеренно SECURITY INVOKER (по умолчанию): вставку по-прежнему
 -- проверяет политика messages — дружба и отсутствие блокировки. Дублировать
 -- эти условия внутри значило бы завести второе место, где они могут разойтись.
+drop function if exists public.send_message(uuid, text, text, jsonb, uuid, jsonb, text, uuid);
+
 create or replace function public.send_message(
   p_recipient      uuid,
   p_text           text default null,
@@ -6749,6 +6791,8 @@ grant execute on function public.send_message(uuid, text, text, jsonb, uuid, jso
 -- виде лежит индекс messages_pair_idx, и запрос ложится на него целиком.
 -- Форма «(sender=a and recipient=b) or (sender=b and recipient=a)», которой
 -- пользовался клиент, этим индексом воспользоваться не может.
+drop function if exists public.list_messages(uuid, int, timestamptz, uuid);
+
 create or replace function public.list_messages(
   p_peer      uuid,
   p_limit     int default 40,
@@ -6797,6 +6841,8 @@ grant execute on function public.list_messages(uuid, int, timestamptz, uuid) to 
 -- messages_sender_time_idx и messages_recipient_idx каждая.
 create index if not exists messages_sender_time_idx
   on public.messages (sender, created_at desc);
+
+drop function if exists public.list_conversations(int);
 
 create or replace function public.list_conversations(p_limit int default 100)
 returns table (
