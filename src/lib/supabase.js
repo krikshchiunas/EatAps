@@ -343,7 +343,7 @@ export async function createPost({ userId, text, imageUrl, visibility = DEFAULT_
     delete payload.visibility
     ;({ data, error } = await supabase.from('posts').insert(payload).select('*').single())
   }
-  if (error) return { error: normalizeError(error).message }
+  if (error) { log.error('createPost', 'отказ сервера', error); return { error: normalizeError(error).message } }
   return { ok: { ...data, carrots: 0, broccoli: 0, my_reaction: null, comments_count: 0 } }
 }
 
@@ -355,13 +355,14 @@ export async function updatePost(postId, { text, imageUrl }) {
   }
   if (!payload.text && !payload.image_url) return { error: 'Пустая мысль' }
   const { data, error } = await supabase.from('posts').update(payload).eq('id', postId).select('*').single()
-  if (error) return { error: normalizeError(error).message }
+  if (error) { log.error('updatePost', 'отказ сервера', error); return { error: normalizeError(error).message } }
   return { ok: data }
 }
 
 export async function deletePost(postId) {
   if (!supabase) return { error: 'Нет подключения' }
   const { error } = await supabase.from('posts').delete().eq('id', postId)
+  if (error) log.error('deletePost', 'отказ сервера', error)
   return error ? { error: normalizeError(error).message } : { ok: true }
 }
 
@@ -374,7 +375,7 @@ export async function togglePostReaction(postId, reaction) {
     p_post_id: postId,
     p_reaction: reaction,
   })
-  if (error) return { error: normalizeError(error).message }
+  if (error) { log.error('togglePostReaction', 'отказ сервера', error); return { error: normalizeError(error).message } }
   const row = Array.isArray(data) ? data[0] : data
   return { ok: row || null }
 }
@@ -416,13 +417,14 @@ export async function addPostComment({ postId, userId, text }) {
     .insert({ post_id: postId, user_id: userId, text: body })
     .select('id, post_id, user_id, text, created_at')
     .single()
-  if (error) return { error: normalizeError(error).message }
+  if (error) { log.error('addPostComment', 'отказ сервера', error); return { error: normalizeError(error).message } }
   return { ok: data }
 }
 
 export async function deletePostComment(commentId) {
   if (!supabase) return { error: 'Нет подключения' }
   const { error } = await supabase.from('post_comments').delete().eq('id', commentId)
+  if (error) log.error('deletePostComment', 'отказ сервера', error)
   return error ? { error: normalizeError(error).message } : { ok: true }
 }
 
@@ -611,7 +613,7 @@ export function subscribeToSentUpdates(myId, friendId, onUpdate) {
 export async function toggleMessageReaction(messageId, emoji = '🥕') {
   if (!supabase) return { error: 'Нет подключения' }
   const { data, error } = await supabase.rpc('toggle_message_reaction', { p_message_id: messageId, p_emoji: emoji })
-  if (error) return { error: normalizeError(error).message }
+  if (error) { log.error('toggleMessageReaction', 'отказ сервера', error); return { error: normalizeError(error).message } }
   return { ok: data }
 }
 
@@ -652,7 +654,7 @@ export async function sendChatMessage({
   if (error && isMissingRelation(error)) return legacySendChatMessage({
     recipient, text: body, imageUrl, mealRef, replyTo, replySnapshot, forwardedName,
   })
-  if (error) return { error: normalizeError(error).message }
+  if (error) { log.error('sendMessage', 'отказ сервера', error); return { error: normalizeError(error).message } }
   const row = Array.isArray(data) ? data[0] : data
   // reactions приходит из базы как NULL, пока на сообщение никто не реагировал.
   // Спред `{ reactions: {}, ...row }` затирал бы значение по умолчанию этим
@@ -685,7 +687,7 @@ async function legacySendChatMessage({ recipient, text, imageUrl, mealRef, reply
     ;({ data, error } = await supabase.from('messages').insert(payload).select(MSG_COLS_LEGACY).single())
     if (data) data = { ...data, reactions: {} }
   }
-  if (error) return { error: normalizeError(error).message }
+  if (error) { log.error('sendMessage/legacy', 'отказ сервера', error); return { error: normalizeError(error).message } }
   return { ok: data }
 }
 

@@ -54,9 +54,27 @@ export const log = {
   sync: (event, data) => emit('sync', event, data),
   rt: (event, data) => emit('realtime', event, data),
   // Настоящие ошибки видно всегда — но тоже без секретов и без сырых объектов.
+  //
+  // Печатаем ВСЕ диагностические поля ответа PostgREST, а не одно из двух.
+  // Прежний вариант `err?.code || err?.message` показывал что-то одно, и по
+  // нему нельзя было отличить «нет такой функции» от «сработало ограничение
+  // частоты»: наружу человек видел одинаковое «Что-то пошло не так», а в
+  // консоли лежало столь же бессодержательное «23514». Ровно из-за этого
+  // отказ отправки в чат и отказ подписки выглядели одинаково и не
+  // диагностировались вовсе.
+  //
+  // Секретов в этих полях нет по построению: code/message/details/hint —
+  // диагностика самого Postgres. Имена таблиц туда попадают, но это консоль
+  // разработчика, а не текст для человека: наружу по-прежнему уходит только
+  // то, что вернул normalizeError.
   error: (scope, event, err) => {
+    const info = {}
+    for (const k of ['code', 'message', 'details', 'hint', 'status']) {
+      const v = err?.[k]
+      if (v != null && v !== '') info[k] = typeof v === 'string' && v.length > 300 ? `${v.slice(0, 300)}…` : v
+    }
     // eslint-disable-next-line no-console
-    console.warn(`[eataps:${scope}] ${event}`, err?.code || err?.message || 'ошибка')
+    console.warn(`[eataps:${scope}] ${event}`, Object.keys(info).length ? info : (err ?? 'ошибка'))
   },
   enabled,
 }

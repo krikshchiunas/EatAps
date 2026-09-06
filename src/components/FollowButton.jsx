@@ -42,7 +42,16 @@ export default function FollowButton({ myId, userId, rel, onChange, size = 'norm
   const danger = action.tone === 'danger'
 
   return (
-    <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+    // maxWidth обязателен. Кнопка живёт в строке списка рядом с именем, которое
+    // растягивается на остаток (flex: 1). Текст ошибки под кнопкой ничем не был
+    // ограничен, поэтому «Что-то пошло не так. Попробуйте ещё раз» растягивало
+    // эту колонку на пол-экрана, а имя со ником сжимались до «ino…» и «inout…».
+    // Ошибка о подписке не должна ломать строку человека, к которому она
+    // относится: ограничиваем ширину и разрешаем перенос.
+    <div style={{
+      display: 'inline-flex', flexDirection: 'column', alignItems: 'stretch',
+      gap: 4, flex: '0 0 auto', maxWidth: 170,
+    }}>
       <button
         onClick={run}
         disabled={busy}
@@ -58,7 +67,17 @@ export default function FollowButton({ myId, userId, rel, onChange, size = 'norm
       >
         {busy ? '…' : action.label}
       </button>
-      {err && <span style={{ fontSize: 11.5, color: 'var(--danger)' }}>{err}</span>}
+      {err && (
+        <span
+          role="alert"
+          style={{
+            fontSize: 11.5, color: 'var(--danger)', lineHeight: 1.3,
+            whiteSpace: 'normal', wordBreak: 'break-word', textAlign: 'center',
+          }}
+        >
+          {err}
+        </span>
+      )}
     </div>
   )
 }

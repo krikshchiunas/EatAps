@@ -15,6 +15,7 @@ import { supabase, realtime } from './supabase.js'
 import { normalizeError } from './authErrors.js'
 import { toRelationship, EMPTY_RELATIONSHIP } from './relationship.js'
 import { isMissingColumn } from './pgErrors.js'
+import { log } from './log.js'
 
 // «Миграция ещё не прогнана»: функции или таблицы нет. Это не ошибка
 // приложения — раздел просто недоступен, и красный текст тут не нужен.
@@ -24,7 +25,17 @@ export function isMissingRelation(error) {
   return code === '42883' || code === '42P01' || code === 'PGRST202' || code === 'PGRST205'
 }
 
-const fail = (error) => ({ error: normalizeError(error).message })
+// Единая точка отказа для всего социального слоя.
+//
+// Наружу уходит человеческий текст, В КОНСОЛЬ — сырой ответ базы. Раньше здесь
+// была только первая половина, и это делало любой отказ неотлаживаемым:
+// «Что-то пошло не так» одинаково означало и сработавшее ограничение частоты,
+// и непрогнанную миграцию, и упавший триггер. Понять, что именно произошло,
+// было нельзя ни человеку, ни разработчику — сырую ошибку никто не сохранял.
+const fail = (error, where = 'social') => {
+  log.error(where, 'отказ сервера', error)
+  return { error: normalizeError(error).message }
+}
 
 // ---------------- Отношение ----------------
 
@@ -53,7 +64,7 @@ export async function follow(myId, targetId) {
     .insert({ follower_id: myId, following_id: targetId })
   // Повторное нажатие по уже существующей подписке — не ошибка для человека:
   // состояние ровно то, которого он добивался.
-  if (error && error.code !== '23505') return fail(error)
+  if (error && error.code !== '23505') return fail(error, 'follow')
   return { ok: true }
 }
 
@@ -64,7 +75,7 @@ export async function unfollow(myId, targetId) {
     .delete()
     .eq('follower_id', myId)
     .eq('following_id', targetId)
-  return error ? fail(error) : { ok: true }
+  return error ? fail(error, 'unfollow') : { ok: true }
 }
 
 // Убрать чужую подписку на себя — без блокировки. Политика follows разрешает
@@ -76,7 +87,7 @@ export async function removeFollower(myId, followerId) {
     .delete()
     .eq('follower_id', followerId)
     .eq('following_id', myId)
-  return error ? fail(error) : { ok: true }
+  return error ? fail(error, 'removeFollower') : { ok: true }
 }
 
 export async function listFollowers(userId, { limit = 50, offset = 0 } = {}) {
@@ -105,7 +116,7 @@ export async function listFollowing(userId, { limit = 50, offset = 0 } = {}) {
 export async function block(myId, targetId) {
   if (!supabase) return { error: 'Нет подключения к серверу' }
   const { error } = await supabase.from('blocks').insert({ blocker_id: myId, blocked_id: targetId })
-  if (error && error.code !== '23505') return fail(error)
+  if (error && error.code !== '23505') return fail(error, 'block')
   return { ok: true }
 }
 
@@ -113,7 +124,7 @@ export async function unblock(myId, targetId) {
   if (!supabase) return { error: 'Нет подключения к серверу' }
   const { error } = await supabase.from('blocks')
     .delete().eq('blocker_id', myId).eq('blocked_id', targetId)
-  return error ? fail(error) : { ok: true }
+  return error ? fail(error, 'unblock') : { ok: true }
 }
 
 // ---------------- Профили и поиск ----------------
@@ -185,7 +196,7 @@ export async function setUsername(username) {
     // и менять его чаще раза в сутки нельзя (см. set_username в миграции
     // 2026-09-05). Сообщение должно называть причину, а не «что-то пошло не так».
     if (error.code === '54000') return { error: 'Ник можно менять не чаще раза в сутки' }
-    return fail(error)
+    return fail(error, 'setUsername')
   }
   return { ok: data }
 }
@@ -284,5 +295,5 @@ export async function setPostVisibility(postId, visibility) {
   if (!supabase) return { error: 'Нет подключения к серверу' }
   const { error } = await supabase.from('posts').update({ visibility }).eq('id', postId)
   if (error && isMissingColumn(error)) return { ok: true, unsupported: true }
-  return error ? fail(error) : { ok: true }
+  return error ? fail(error, 'setPostVisibility') : { ok: true }
 }
