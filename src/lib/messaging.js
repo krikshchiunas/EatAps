@@ -32,6 +32,7 @@ import { supabase, realtime } from './supabase.js'
 import { normalizeError } from './authErrors.js'
 import { isMissingRelation } from './social.js'
 import { log } from './log.js'
+import { newId } from './uuid.js'
 import {
   toConversation, toMessage, toTotals, EMPTY_TOTALS,
   QUICK_REACTIONS, DOUBLE_TAP_REACTION, MUTE_OPTIONS,
@@ -295,7 +296,11 @@ export async function uploadMedia({ conversationId, userId, file, kind = 'image'
   if (file.size > 25 * 1024 * 1024) return { error: 'Файл больше 25 МБ' }
 
   const ext = (file.name?.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin'
-  const path = `${conversationId}/${userId}/${crypto.randomUUID()}.${ext}`
+  // newId, а не crypto.randomUUID: последний работает только в защищённом
+  // контексте, и открытое с телефона по http://192.168.x.x приложение падало
+  // бы прямо в момент отправки вложения. Тот же класс ошибки уже ловили с
+  // Notification — см. uuid.js.
+  const path = `${conversationId}/${userId}/${newId()}.${ext}`
 
   const { error } = await supabase.storage.from('dm-media').upload(path, file, {
     contentType: file.type || 'application/octet-stream',
@@ -350,7 +355,24 @@ export function subscribeToInbox(myId, onChange) {
     }, emit),
     onChange,
   )
-  return () => { offMember(); offIncoming() }
+  // ГРУППОВОЕ СООБЩЕНИЕ ДВУМЯ ПОДПИСКАМИ ВЫШЕ НЕ ЛОВИТСЯ.
+  //
+  // У него нет получателя (`recipient is null`) — фильтр `recipient=eq.me`
+  // его не видит; строку участия оно тоже не трогает. То есть список диалогов
+  // и бейдж обновлялись бы только при следующем открытии экрана: человеку
+  // написали в группу, а он об этом не узнал.
+  //
+  // Сигналом служит `conversations.last_message_at`: его обновляет каждая
+  // отправка. Фильтра нет и не нужно — политика `conversations select member`
+  // применяется к realtime, и чужие диалоги до нас не доходят.
+  const offConv = realtime.subscribe(
+    `conversations:${myId}`,
+    (channel, emit) => channel.on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'conversations',
+    }, emit),
+    onChange,
+  )
+  return () => { offMember(); offIncoming(); offConv() }
 }
 
 // События одного диалога: новые сообщения, реакции, отзыв. Фильтр по

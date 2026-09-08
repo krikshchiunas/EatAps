@@ -27,6 +27,7 @@ import { normalizeError } from './authErrors.js'
 import { toRelationship, EMPTY_RELATIONSHIP } from './relationship.js'
 import { isMissingColumn } from './pgErrors.js'
 import { log } from './log.js'
+import { setMutedMessageUsers } from './notifications.js'
 
 // «Миграция ещё не прогнана»: функции или таблицы нет. Это не ошибка
 // приложения — раздел просто недоступен, и красный текст тут не нужен.
@@ -194,8 +195,28 @@ export function setRestricted(targetId, on) {
 
 // Заглушение НИ НА ЧТО не влияет, кроме того, что показывают мне: подписка
 // цела, сообщения доходят, права не меняются.
-export function setMute(targetId, { posts = false, messages = false } = {}) {
-  return call('set_user_mute', { p_user: targetId, p_posts: posts, p_messages: messages }, 'setMute')
+//
+// После записи обновляем КЭШ заглушённых. Решение «показывать ли пуш»
+// принимается синхронно, в обработчике входящего сообщения, — ходить за
+// списком в базу в этот момент уже поздно. Обновляем здесь, в единственной
+// точке, где заглушения меняются: иначе человек заглушил бы собеседника и
+// продолжал получать от него уведомления до перезагрузки приложения.
+export async function setMute(targetId, { posts = false, messages = false } = {}) {
+  const res = await call('set_user_mute', { p_user: targetId, p_posts: posts, p_messages: messages }, 'setMute')
+  if (!res.error) await refreshMuteCache()
+  return res
+}
+
+// Список заглушённых сообщений → кэш в notifications.js. Отдельной функцией,
+// потому что его же зовёт приложение при входе.
+export async function refreshMuteCache() {
+  try {
+    const rows = await listRelation('muted')
+    setMutedMessageUsers(rows.filter((r) => r.mute_messages).map((r) => r.user_id))
+  } catch {
+    // Не приехал — оставляем прежний кэш: он честнее пустого, при котором
+    // заглушённые снова начали бы звенеть.
+  }
 }
 
 // ---------------- Близкие друзья и поимённый доступ ----------------
@@ -223,11 +244,17 @@ export function listRelation(kind, { limit = 100, offset = 0 } = {}) {
 
 // Все настройки одним запросом: шесть переключателей на экране не должны
 // стоить шести обращений к базе.
+// Возвращает { settings } либо { unavailable: true }. Различать обязательно:
+// «настройки ещё грузятся» и «раздела в базе нет» выглядели одинаково —
+// вечным «Загрузка…», из которого человеку некуда деться.
 export async function getPrivacy() {
-  if (!supabase) return null
+  if (!supabase) return { unavailable: true }
   const { data, error } = await supabase.rpc('my_privacy')
-  if (error) { if (isMissingRelation(error)) return null; throw error }
-  return (Array.isArray(data) ? data[0] : data) || null
+  if (error) {
+    if (isMissingRelation(error)) return { unavailable: true }
+    throw error
+  }
+  return { settings: (Array.isArray(data) ? data[0] : data) || null }
 }
 
 export function setAccountPrivacy(isPrivate) {

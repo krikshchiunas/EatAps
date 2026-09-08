@@ -53,7 +53,10 @@ export const RELATION_SCREENS = {
     action: 'Вернуть',
     canAdd: true,
     addLabel: 'Заглушить человека',
-    set: (id, on) => setMute(id, { posts: on, messages: false }),
+    // messages берём из текущей строки, а не подставляем false: иначе
+    // добавление человека в этот список молча снимало бы заглушение его
+    // СООБЩЕНИЙ, о котором здесь речи не идёт.
+    set: (id, on, row) => setMute(id, { posts: on, messages: Boolean(row?.mute_messages) }),
   },
   diary_access: {
     title: 'Доступ к дневнику',
@@ -87,7 +90,7 @@ export default function RelationListScreen({ kind, onClose, onOpenProfile }) {
   const remove = async (person) => {
     const prev = people
     setPeople((list) => (list || []).filter((p) => p.user_id !== person.user_id))
-    const res = await cfg.set(person.user_id, false)
+    const res = await cfg.set(person.user_id, false, person)
     if (res?.error) { setErr(res.error); setPeople(prev) }
   }
 

@@ -26,7 +26,7 @@ import { useStore } from '../../store.jsx'
 import {
   listMessages, sendMessage, markRead, subscribeToConversation, createTypingChannel,
   unsendMessage, deleteMessageForMe, setReaction, conversationInfo, conversationMembers,
-  acceptRequest, declineRequest, uploadMedia, DOUBLE_TAP_REACTION,
+  acceptRequest, declineRequest, uploadMedia, toMessage, DOUBLE_TAP_REACTION,
 } from '../../lib/messaging.js'
 import { block } from '../../lib/social.js'
 import { watchPresence, fetchLastSeen, uploadChatImage } from '../../lib/supabase.js'
@@ -59,9 +59,21 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
   const myName = profile?.name || 'Вы'
 
   const convId = conversation.id
-  const isGroup = conversation.kind === 'group'
-  const peerId = conversation.peerId || null
-  const [title, setTitle] = useState(conversation.title || (isGroup ? 'Группа' : 'Диалог'))
+  // Диалог могли открыть, зная только его id: из уведомления о группе или из
+  // поиска по сообщениям. Тогда всё остальное — тип, название, собеседник,
+  // число участников — приходит с сервера, а переданное вызывающим служит
+  // лишь первым кадром, чтобы шапка не была пустой.
+  //
+  // Раньше `kind`, `peerId` и `membersCount` брались только из пропа, и
+  // групповой чат, открытый из уведомления, показывал в шапке « участников»
+  // с пустым числом, а личный, открытый из поиска, — «Диалог» вместо имени.
+  const [info, setInfo] = useState(null)
+  const kind = info?.kind || conversation.kind || 'direct'
+  const isGroup = kind === 'group'
+  const peerId = info?.peer_id ?? conversation.peerId ?? null
+  const membersCount = info?.members_count ?? conversation.membersCount ?? 0
+  const [title, setTitle] = useState(conversation.title || (conversation.kind === 'group' ? 'Группа' : 'Диалог'))
+  const [avatarUrl, setAvatarUrl] = useState(conversation.avatarUrl || null)
   const [state, setState] = useState(conversation.state || 'accepted')
 
   const [messages, setMessages] = useState([])
@@ -212,15 +224,19 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
     return () => { alive = false }
   }, [convId, isGroup])
 
-  // Актуальные название и состояние диалога: он мог быть открыт из
-  // уведомления, где известен только id.
+  // Актуальные сведения о диалоге. Ответ перезаписывает то, что угадал
+  // вызывающий: он мог не знать ни типа диалога, ни имени собеседника.
   useEffect(() => {
     let alive = true
     conversationInfo(convId)
       .then((i) => {
         if (!alive || !i) return
+        setInfo(i)
         setState(i.my_state || 'accepted')
-        if (i.kind === 'group') setTitle(i.title || 'Группа')
+        setTitle(i.kind === 'group'
+          ? (i.title || 'Группа')
+          : (i.peer_name || i.peer_username || 'Диалог'))
+        setAvatarUrl(i.kind === 'group' ? i.avatar_url : i.peer_avatar)
       })
       .catch(() => {})
     return () => { alive = false }
@@ -246,8 +262,15 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
 
     const load = async () => {
       try {
-        const { items, cursor } = await listMessages(convId, { limit: PAGE })
+        const { items, cursor, unavailable } = await listMessages(convId, { limit: PAGE })
         if (cancelled) return
+        // «Раздела нет в базе» — не «сообщений пока нет». Заглушка «Напишите
+        // первым» здесь уверяла бы, что переписки не существует.
+        if (unavailable) {
+          setLoadErr('Переписка пока недоступна — база ещё не обновлена')
+          setLoading(false)
+          return
+        }
         setMessages((cur) => mergeMessages(cur, items))
         setOlderCursor(cursor)
         setLoading(false)
@@ -266,13 +289,16 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
       if (!m) return
       if (eventType === 'INSERT') {
         if (m.sender !== myId) markRead(convId)
-        setMessages((cur) => mergeMessages(cur, [m]))
+        // toMessage обязателен: из postgres_changes строка приходит сырой, и
+        // reactions в ней null, пока никто не реагировал. Слитый в список
+        // null затирал бы {} у уже осевшего сообщения.
+        setMessages((cur) => mergeMessages(cur, [toMessage(m)]))
         if (atBottomRef.current) requestAnimationFrame(() => pinBottom(true))
         else setShowJump(true)
         onChanged?.()
       } else if (eventType === 'UPDATE') {
         // Реакция, прочтение или отзыв — приезжает одной и той же строкой.
-        setMessages((cur) => cur.map((x) => (x.id === m.id ? { ...x, ...m, reactions: m.reactions || {} } : x)))
+        setMessages((cur) => cur.map((x) => (x.id === m.id ? { ...x, ...toMessage(m) } : x)))
       }
     })
 
@@ -326,6 +352,12 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
   const typingRef = useRef({ sendTyping: () => {} })
   const sendTyping = useCallback((t) => typingRef.current.sendTyping(t, myName), [myName])
 
+  // Карточки участников читаем ЧЕРЕЗ REF, а не из замыкания: иначе загрузка
+  // состава группы попадала бы в зависимости эффекта, канал пересоздавался бы
+  // в этот момент, и индикатор «печатает» сбрасывался на ровном месте.
+  const peopleRef = useRef(people)
+  peopleRef.current = people
+
   useEffect(() => {
     let hideTimer = null   // страховка: собеседник свернул вкладку
     let graceTimer = null  // пауза перед скрытием
@@ -333,7 +365,7 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
       clearTimeout(graceTimer)
       clearTimeout(hideTimer)
       if (typing) {
-        setTypingWho(name || people[from]?.display_name || 'Собеседник')
+        setTypingWho(name || peopleRef.current[from]?.display_name || 'Собеседник')
         hideTimer = setTimeout(() => setTypingWho(null), 5000)
       } else {
         // Между словами прилетает false. Без паузы пузырь мигал бы, каждый
@@ -346,7 +378,7 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
       clearTimeout(hideTimer); clearTimeout(graceTimer)
       ch.unsubscribe(); setTypingWho(null)
     }
-  }, [convId, myId, people])
+  }, [convId, myId])
 
   // Прокрутка — только в момент ПОЯВЛЕНИЯ индикатора и только плавная.
   const prevTypingRef = useRef(false)
@@ -692,7 +724,7 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
             aria-label={peerId ? 'Открыть профиль' : 'Сведения о группе'}
           >
             <span className={`chat-peer-ava${peerOnline ? ' online' : ''}`}>
-              <Avatar src={conversation.avatarUrl} name={title} size={40} />
+              <Avatar src={avatarUrl} name={title} size={40} />
             </span>
             <span className="chat-peer-meta">
               <span className="chat-peer-name">{title}</span>
@@ -700,7 +732,9 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
               {typingWho ? (
                 <span className="chat-peer-sub typing">{isGroup ? `${typingWho} печатает…` : 'печатает…'}</span>
               ) : isGroup ? (
-                <span className="chat-peer-sub">{conversation.membersCount || ''} участников</span>
+                <span className="chat-peer-sub">
+                  {membersCount > 0 ? `${membersCount} участников` : 'Сведения о группе'}
+                </span>
               ) : peerOnline ? (
                 <span className="chat-peer-sub online">в сети</span>
               ) : peerLastSeen ? (

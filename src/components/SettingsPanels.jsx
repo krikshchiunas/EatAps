@@ -17,7 +17,6 @@ import { ACTIVITY, GOALS } from '../lib/nutrition.js'
 import { deleteAccount } from '../lib/supabase.js'
 import {
   notificationsSupported, notificationPermission, requestNotificationPermission,
-  setMutedMessageUsers,
 } from '../lib/notifications.js'
 import { normalizeError } from '../lib/authErrors.js'
 import { listRelation, setMute } from '../lib/social.js'
@@ -359,11 +358,9 @@ export function NotificationsPanel({ onClose }) {
     if (!user?.id) { setMuted([]); return }
     try {
       const rows = await listRelation('muted')
-      const onlyMessages = rows.filter((r) => r.mute_messages)
-      setMuted(onlyMessages)
-      // Кэш для обработчика входящих: решение «показывать пуш» принимается
-      // синхронно, и ходить за списком в этот момент уже поздно.
-      setMutedMessageUsers(onlyMessages.map((r) => r.user_id))
+      // Кэш обновлять здесь не нужно: его ведёт setMute — единственная точка,
+      // где заглушения меняются.
+      setMuted(rows.filter((r) => r.mute_messages))
     } catch { setMuted([]) }
   }, [user?.id])
 

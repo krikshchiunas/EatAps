@@ -13,7 +13,7 @@
 // отзыва — подтверждение: перепутать их значит либо оставить у чужого
 // человека то, что хотел стереть, либо стереть у себя то, что хотел стереть
 // у всех.
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useSheetDrag } from '../../lib/useSheetDrag.js'
 import { ICONS } from '../social/ActionSheet.jsx'
 import ConfirmDialog from '../ConfirmDialog.jsx'
@@ -46,9 +46,19 @@ export default function MessageActions({
   onClose, onReply, onCopy, onForward, onReact,
   onUnsend, onDeleteForMe, onRetry,
 }) {
-  const { sheetProps, backdropProps, close } = useSheetDrag(onClose, { openMs: 190 })
   const [confirmUnsend, setConfirmUnsend] = useState(false)
   const [report, setReport] = useState(false)
+
+  // useSheetDrag сообщает о закрытии ПОСЛЕ анимации выезда — через 200–400 мс.
+  // Пункт «Отозвать» успевал показать подтверждение, а запоздавший onClose
+  // размонтировал вместе со шторкой и его: диалог мигал и исчезал, сообщение
+  // оставалось на месте. Флаг гасит опоздавшее закрытие.
+  const handedOff = useRef(false)
+  const handOff = (fn) => { handedOff.current = true; fn() }
+  const { sheetProps, backdropProps, close } = useSheetDrag(
+    () => { if (!handedOff.current) onClose() },
+    { openMs: 190 },
+  )
 
   const myReaction = (m.reactions || {})[myId] || null
   const failed = m.status === 'failed'
@@ -67,7 +77,7 @@ export default function MessageActions({
         hint: 'Исчезнет и у собеседника',
         icon: ICONS.unsend,
         danger: true,
-        run: () => setConfirmUnsend(true),
+        run: () => handOff(() => setConfirmUnsend(true)),
       }
       : null,
     {
@@ -79,7 +89,7 @@ export default function MessageActions({
       run: onDeleteForMe,
     },
     !mine && !unsent
-      ? { key: 'report', label: 'Пожаловаться', icon: ICONS.report, danger: true, run: () => setReport(true) }
+      ? { key: 'report', label: 'Пожаловаться', icon: ICONS.report, danger: true, run: () => handOff(() => setReport(true)) }
       : null,
   ].filter(Boolean)
 

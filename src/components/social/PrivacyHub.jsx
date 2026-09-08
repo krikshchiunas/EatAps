@@ -59,14 +59,20 @@ function ChoiceRow({ label, hint, checked, onClick }) {
 export default function PrivacyHub({ onClose, onOpenProfile }) {
   const { user, supabaseEnabled } = useStore()
   const [p, setP] = useState(null)
+  const [unavailable, setUnavailable] = useState(false)
   const [err, setErr] = useState(null)
   const [panel, setPanel] = useState(null)   // 'messages' | 'diary'
   const [list, setList] = useState(null)     // ключ RelationListScreen
 
   const load = useCallback(async () => {
     if (!supabaseEnabled || !user?.id) { setP(null); return }
-    try { setP(await getPrivacy()) }
-    catch (e) { setErr(e.message || 'Не удалось загрузить настройки') }
+    try {
+      const res = await getPrivacy()
+      setUnavailable(Boolean(res.unavailable))
+      setP(res.settings || null)
+    } catch (e) {
+      setErr(e.message || 'Не удалось загрузить настройки')
+    }
   }, [supabaseEnabled, user?.id])
 
   useEffect(() => { load() }, [load])
@@ -86,6 +92,18 @@ export default function PrivacyHub({ onClose, onOpenProfile }) {
       <Panel title="Приватность" onClose={onClose}>
         <Group title="Нужен аккаунт">
           <Row label="Войдите, чтобы настроить приватность" chevron={false} />
+        </Group>
+      </Panel>
+    )
+  }
+
+  // Раздел недоступен — говорим прямо. Вечное «Загрузка…» здесь означало бы,
+  // что человек ждёт того, чего не будет.
+  if (unavailable) {
+    return (
+      <Panel title="Приватность" onClose={onClose}>
+        <Group title="Раздел недоступен" note="База ещё не обновлена. Настройки появятся после обновления сервера.">
+          <Row label="Попробовать снова" onClick={load} />
         </Group>
       </Panel>
     )

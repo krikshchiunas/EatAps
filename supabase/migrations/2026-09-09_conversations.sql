@@ -1101,6 +1101,19 @@ as $$
   mem as (
     select m.cleared_at from public.conversation_members m, me
     where m.conversation_id = p_conversation and m.user_id = me.uid and m.left_at is null
+      -- Блокировка проверяется ЗДЕСЬ, а не только политикой messages.
+      --
+      -- Функция SECURITY DEFINER, то есть RLS её не касается: без этой строки
+      -- заблокированный человек, у которого сохранился id диалога, читал бы всю
+      -- историю через RPC, хотя прямой select из messages ему уже ничего не
+      -- отдаёт. Два разных ответа на один вопрос — это и есть дыра.
+      and not exists (
+        select 1 from public.conversations c
+        where c.id = p_conversation and c.kind = 'direct'
+          and public.is_blocked_between(
+                case when c.pair_low = me.uid then c.pair_high else c.pair_low end,
+                me.uid)
+      )
   )
   select
     x.id, x.conversation_id, x.sender, x.recipient,
@@ -1691,6 +1704,13 @@ returns table (
   archived      boolean,
   muted_until   timestamptz,
   peer_id       uuid,
+  -- Карточка собеседника приезжает здесь же. Диалог можно открыть, зная
+  -- только его id — из уведомления о группе или из поиска по сообщениям, — и
+  -- тогда имени взять больше неоткуда: заголовок «Диалог» вместо имени
+  -- человека выглядит как поломка.
+  peer_username text,
+  peer_name     text,
+  peer_avatar   text,
   members_count int,
   media_count   int
 )
@@ -1702,8 +1722,7 @@ as $$
   select
     c.id, c.kind, c.title, c.avatar_url, c.created_by, c.created_at,
     m.role, m.state, m.archived, m.muted_until,
-    case when c.kind = 'direct'
-         then case when c.pair_low = auth.uid() then c.pair_high else c.pair_low end end,
+    pp.user_id, pp.username, pp.display_name, pp.avatar_url,
     (select count(*)::int from public.conversation_members x
       where x.conversation_id = c.id and x.left_at is null),
     (select count(*)::int from public.messages x
@@ -1712,6 +1731,9 @@ as $$
   from public.conversations c
   join public.conversation_members m
     on m.conversation_id = c.id and m.user_id = auth.uid() and m.left_at is null
+  left join public.profiles pp
+    on c.kind = 'direct'
+   and pp.user_id = case when c.pair_low = auth.uid() then c.pair_high else c.pair_low end
   where c.id = p_conversation;
 $$;
 
@@ -2034,6 +2056,15 @@ as $$
     and x.unsent_at is null
     and (x.image_url is not null or x.media is not null)
     and (m.cleared_at is null or x.created_at > m.cleared_at)
+    -- Та же проверка блокировки, что и в list_conversation_messages: обе
+    -- функции SECURITY DEFINER, и RLS их не прикрывает.
+    and not exists (
+      select 1 from public.conversations c
+      where c.id = p_conversation and c.kind = 'direct'
+        and public.is_blocked_between(
+              case when c.pair_low = auth.uid() then c.pair_high else c.pair_low end,
+              auth.uid())
+    )
     and not exists (
       select 1 from public.message_deletions d
       where d.message_id = x.id and d.user_id = auth.uid()
@@ -2085,6 +2116,10 @@ as $$
     and x.text ilike '%' || q.v || '%'
     and (p_conversation is null or x.conversation_id = p_conversation)
     and (m.cleared_at is null or x.created_at > m.cleared_at)
+    -- Поиск не должен становиться обходным путём к переписке, закрытой
+    -- блокировкой: без этой строки он находил бы её текст.
+    and not (c.kind = 'direct' and public.is_blocked_between(
+      case when c.pair_low = auth.uid() then c.pair_high else c.pair_low end, auth.uid()))
   order by x.created_at desc
   limit least(greatest(coalesce(p_limit, 40), 1), 60);
 $$;

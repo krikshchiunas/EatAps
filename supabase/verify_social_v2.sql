@@ -51,13 +51,19 @@ with checks(порядок, проверка, ok, деталь) as (
     coalesce((select count(*) filter (where is_private)::text || ' закрытых из '
               || count(*)::text from public.profiles), '—')
 
-  union all select 11, 'миграция НЕ закрыла ничей аккаунт задним числом',
-    -- Закрытие — осознанное действие владельца. Если сразу после прогона
-    -- закрытых окажется много, значит колонка добавлена с неверным default.
-    (select coalesce(bool_or(is_private), false) = false
-       from public.profiles where created_at < now() - interval '1 day'
-       limit 1) is not false,
-    coalesce((select count(*)::text || ' закрытых' from public.profiles where is_private), '0')
+  -- ⚠ Проверяем НЕ «сколько закрытых аккаунтов» — это законное решение
+  -- владельца, и любое их число нормально. Проверяем то, что действительно
+  -- может сломать миграция: значение по умолчанию. Оно обязано быть false,
+  -- иначе следующий заведённый аккаунт окажется закрытым, ничего об этом не
+  -- зная.
+  union all select 11, 'новые аккаунты заводятся ОТКРЫТЫМИ',
+    coalesce((
+      select column_default like '%false%'
+      from information_schema.columns
+      where table_schema='public' and table_name='profiles' and column_name='is_private'
+    ), false),
+    coalesce((select count(*) filter (where is_private)::text || ' закрыли аккаунт сами'
+              from public.profiles), '—')
 
   union all select 12, 'права на переписку по трём категориям заведены',
     (select count(*) from information_schema.columns

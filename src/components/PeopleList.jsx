@@ -103,6 +103,11 @@ export default function PeopleList({
 }) {
   const [rels, setRels] = useState({})
   const [query, setQuery] = useState('')
+  // Счётчик перезагрузок отношений. Действие из меню (отписка, заглушение,
+  // блокировка) меняет отношение НА СЕРВЕРЕ, и без пересчёта кнопка в строке
+  // продолжала показывать прежнее состояние: человек отписался, а строка
+  // по-прежнему говорила «Вы подписаны», и второе нажатие подписывало обратно.
+  const [relNonce, setRelNonce] = useState(0)
   const sentinel = useRef(null)
 
   useEffect(() => {
@@ -121,7 +126,7 @@ export default function PeopleList({
       }
     })()
     return () => { alive = false }
-  }, [people, myId])
+  }, [people, myId, relNonce])
 
   // Бесконечная прокрутка. Кнопка «Показать ещё» осталась бы запасным путём,
   // но на телефоне долистывать и нажимать — лишнее движение.
@@ -197,7 +202,7 @@ export default function PeopleList({
           showFollow={showFollow}
           actions={actions}
           context={context}
-          onRefresh={onRefresh}
+          onRefresh={() => { setRelNonce((n) => n + 1); onRefresh?.() }}
         />
       ))}
 

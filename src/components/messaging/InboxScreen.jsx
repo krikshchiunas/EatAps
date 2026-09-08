@@ -64,6 +64,7 @@ export default function InboxScreen({
   const [loadingMore, setLoadingMore] = useState(false)
   const [archived, setArchived] = useState(false)
   const [err, setErr] = useState(null)
+  const [unavailable, setUnavailable] = useState(false)
   const [menu, setMenu] = useState(null)
   const [confirm, setConfirm] = useState(null)
   const [report, setReport] = useState(null)
@@ -76,7 +77,9 @@ export default function InboxScreen({
       const res = await listConversations({ archived, limit: PAGE })
       setItems(res.items)
       setCursor(res.cursor)
-      if (res.unavailable) setErr(null)
+      // «Раздела нет в базе» и «переписок нет» — разные вещи, и говорить о
+      // втором, когда верно первое, значит утверждать неправду.
+      setUnavailable(Boolean(res.unavailable))
     } catch (e) {
       setErr(e.message || 'Не удалось загрузить переписки')
       setItems([])
@@ -117,6 +120,11 @@ export default function InboxScreen({
     return () => io.disconnect()
   }, [cursor, loadMore])
 
+  // Пункт меню, открывающий подтверждение, обязан СНАЧАЛА снять меню — иначе
+  // запоздавший onClose шторки (200–400 мс на анимацию выезда) закроет и
+  // подтверждение вместе с ним.
+  const holdMenu = (dialog) => { setMenu(null); setConfirm(dialog) }
+
   const act = async (fn) => {
     setMenu(null)
     const res = await fn()
@@ -149,7 +157,7 @@ export default function InboxScreen({
         hint: 'Только у вас — у собеседника история останется',
         icon: ICONS.trash,
         danger: true,
-        run: () => setConfirm({
+        run: () => holdMenu({
           text: `Удалить переписку${c.title ? ` с «${c.title}»` : ''}? История исчезнет только у вас — у собеседника она останется.`,
           yes: () => act(() => clearConversation(c.id)),
         }),
@@ -159,7 +167,7 @@ export default function InboxScreen({
         label: 'Заблокировать',
         icon: ICONS.block,
         danger: true,
-        run: () => setConfirm({
+        run: () => holdMenu({
           text: `Заблокировать ${c.title || 'этого человека'}? Подписки в обе стороны будут удалены, писать он больше не сможет.`,
           yes: () => act(() => block(c.peerId)),
         }),
@@ -169,7 +177,7 @@ export default function InboxScreen({
         label: 'Пожаловаться',
         icon: ICONS.report,
         danger: true,
-        run: () => setReport(c),
+        run: () => { setMenu(null); setReport(c) },
       },
     ].filter(Boolean)
   }
@@ -239,7 +247,15 @@ export default function InboxScreen({
         </div>
       ))}
 
-      {items?.length === 0 && !err && (
+      {unavailable && (
+        <div className="card">
+          <p className="muted" style={{ fontSize: 15, lineHeight: 1.5 }}>
+            Переписка пока недоступна — база ещё не обновлена.
+          </p>
+        </div>
+      )}
+
+      {items?.length === 0 && !err && !unavailable && (
         <div className="card">
           <p className="muted" style={{ fontSize: 15, lineHeight: 1.5 }}>
             {archived
@@ -269,7 +285,11 @@ export default function InboxScreen({
         <ActionSheet
           title={menu.conv.title || 'Диалог'}
           items={menuItems(menu.conv)}
-          onClose={() => setMenu(null)}
+          /* Закрываем ТОЛЬКО если всё ещё показываем главное меню. Шторка
+             сообщает о закрытии через 200–400 мс после нажатия, и к этому
+             моменту пункт «Заглушить» уже открыл подменю — глухое
+             setMenu(null) закрыло бы его следом. */
+          onClose={() => setMenu((m) => (m?.mode === 'main' ? null : m))}
         />
       )}
 

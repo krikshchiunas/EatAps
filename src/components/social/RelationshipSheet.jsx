@@ -22,7 +22,7 @@
 // «Ограничить» намеренно без предупреждения о последствиях для собеседника:
 // ограниченный человек не должен ничего заметить, и текст вроде «он больше не
 // увидит, что вы в сети» в интерфейсе НЕ появляется у него — только у нас.
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import ActionSheet, { ICONS } from './ActionSheet.jsx'
 import ConfirmDialog from '../ConfirmDialog.jsx'
 import ReportSheet from './ReportSheet.jsx'
@@ -43,6 +43,23 @@ export default function RelationshipSheet({
   const [report, setReport] = useState(false)
   const [err, setErr] = useState(null)
 
+  // ЗАКРЫТИЕ ШТОРКИ НЕ ДОЛЖНО УНОСИТЬ ТО, ЧТО ОНА ОТКРЫЛА.
+  //
+  // useSheetDrag сообщает о закрытии не сразу, а ПОСЛЕ анимации выезда — через
+  // 200–400 мс. За это время нажатие уже успело показать подтверждение или
+  // форму жалобы, и запоздавший onClose размонтировал их вместе с этим
+  // компонентом: диалог «Заблокировать?» мигал четверть секунды и исчезал, не
+  // сделав ничего.
+  //
+  // Флаг «передали эстафету» гасит это опоздавшее закрытие. Дальше компонент
+  // закрывает себя сам — когда решение принято или отменено.
+  const handedOff = useRef(false)
+  const handOff = (fn) => { handedOff.current = true; fn() }
+  const closeSheet = () => { if (!handedOff.current) onClose() }
+
+  // Единственный путь действия: ошибка остаётся на экране, успех закрывает
+  // шторку. Разводить эти два исхода по вызывающим значило бы получить меню,
+  // которое в одном случае закрывается, а в другом нет.
   const run = async (fn) => {
     setErr(null)
     const res = await fn()
@@ -114,10 +131,10 @@ export default function RelationshipSheet({
       // разрывает связь в обе стороны по смыслу («вы больше не друзья»), и
       // случайное нажатие обходится дороже.
       run: () => (rel.mutualFollow
-        ? setConfirm({
+        ? handOff(() => setConfirm({
           text: `Отписаться от ${name}? Вы перестанете быть друзьями и видеть записи для друзей.`,
           yes: () => run(() => unfollow(userId)),
-        })
+        }))
         : run(() => unfollow(userId))),
     })
   } else if (!rel.blocked && !rel.blockedBy) {
@@ -138,10 +155,10 @@ export default function RelationshipSheet({
       label: 'Убрать из подписчиков',
       hint: 'Он не получит уведомления',
       icon: ICONS.removeUser,
-      run: () => setConfirm({
+      run: () => handOff(() => setConfirm({
         text: `Убрать ${name} из подписчиков? Он перестанет видеть ваши записи для подписчиков и не получит уведомления. Подписаться снова он сможет${rel.targetIsPrivate ? '' : ' в любой момент'}.`,
         yes: () => run(() => removeFollower(userId)),
-      }),
+      })),
     })
   }
 
@@ -152,10 +169,10 @@ export default function RelationshipSheet({
     danger: true,
     run: () => (rel.blocked
       ? run(() => unblock(userId))
-      : setConfirm({
+      : handOff(() => setConfirm({
         text: `Заблокировать ${name}? Подписки в обе стороны, запросы и общие списки будут удалены. Он не сможет вас найти, написать и увидеть ваши записи.`,
         yes: () => run(() => block(userId)),
-      })),
+      }))),
   })
 
   items.push({
@@ -163,7 +180,7 @@ export default function RelationshipSheet({
     label: 'Пожаловаться',
     icon: ICONS.report,
     danger: true,
-    run: () => setReport(true),
+    run: () => handOff(() => setReport(true)),
   })
 
   // Подтверждение и жалоба живут ПОВЕРХ шторки, поэтому саму шторку в этот
@@ -175,7 +192,20 @@ export default function RelationshipSheet({
         text={confirm.text}
         yesLabel="Подтвердить"
         noLabel="Отмена"
-        onYes={() => { const y = confirm.yes; setConfirm(null); onClose(); y() }}
+        // Сначала действие, потом закрытие. Наоборот было ошибкой: onClose
+        // размонтировал эту шторку, и отказ сервера (нет сети, сработал лимит
+        // частоты) уходил в setErr уже размонтированного компонента — то есть
+        // человек видел, как «Заблокировать» закрылось, и считал, что
+        // получилось, хотя не получилось ничего.
+        onYes={async () => {
+          const y = confirm.yes
+          setConfirm(null)
+          // Действие ДО закрытия: onChanged закроет меню сам при успехе, а
+          // при отказе сервера ошибка останется на экране. Закрыв заранее, мы
+          // потеряли бы её вместе с компонентом.
+          await y()
+          handedOff.current = false
+        }}
         onNo={() => { setConfirm(null); onClose() }}
       />
     )
@@ -198,7 +228,7 @@ export default function RelationshipSheet({
         title={name}
         subtitle={err || undefined}
         items={items}
-        onClose={onClose}
+        onClose={closeSheet}
       />
     </>
   )

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
 import { fetchUserBrief, startPresence, touchLastSeen } from './lib/supabase.js'
-import { subscribeToNotifications, subscribeToFollowRequests, listRelation } from './lib/social.js'
+import { subscribeToNotifications, subscribeToFollowRequests, refreshMuteCache } from './lib/social.js'
 import { unreadTotals, subscribeToInbox } from './lib/messaging.js'
 import {
   startScheduler, notifyIncomingMessage, notifySocialEvent,
@@ -135,16 +135,11 @@ export default function App() {
 
   // Заглушённые собеседники: список ведёт сервер, но решение «показывать
   // пуш» принимается синхронно в обработчике входящего — там ходить в базу
-  // уже поздно. Поэтому держим кэш и обновляем его при входе.
+  // уже поздно. Поэтому держим кэш; при входе он заполняется здесь, а дальше
+  // его обновляет сам setMute — в единственной точке, где заглушения меняются.
   useEffect(() => {
     if (!user?.id) { setMutedMessageUsers([]); return }
-    let alive = true
-    listRelation('muted')
-      .then((rows) => {
-        if (alive) setMutedMessageUsers(rows.filter((r) => r.mute_messages).map((r) => r.user_id))
-      })
-      .catch(() => {})
-    return () => { alive = false }
+    refreshMuteCache()
   }, [user?.id])
 
   // Социальные события: бейдж «Профиль» и пуш. Пуш шлём только на СВЕЖЕЕ
