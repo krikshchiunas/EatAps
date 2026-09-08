@@ -1,4 +1,4 @@
-const CACHE = 'eataps-v10'
+const CACHE = 'eataps-v11'
 // Стартовые ассеты ядра (entry-скрипт + css) подставляются при сборке скриптом
 // scripts/inject-precache.mjs вместо маркера ниже.
 const BUILD_ASSETS = /* __BUILD_ASSETS__ */ []
