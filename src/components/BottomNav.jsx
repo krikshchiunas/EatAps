@@ -57,7 +57,7 @@ export default function BottomNav({ tab, setTab, friendsUnread = 0, profileUnrea
         {friendsUnread > 0 && (
           <span className="nav-badge">{friendsUnread > 99 ? '99+' : friendsUnread}</span>
         )}
-        <span>Друзья</span>
+        <span>Общение</span>
       </button>
       <button className={tab === 'profile' ? 'on' : ''} onClick={() => setTab('profile')} style={{ position: 'relative' }}>
         {ICONS.profile}

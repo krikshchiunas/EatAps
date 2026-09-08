@@ -255,18 +255,37 @@ create policy "day comment delete" on public.day_comments
   for delete using (auth.uid() = author or auth.uid() = client);
 
 -- Профиль собеседника по id — имя и публичный ID для интерфейса тренера.
-create or replace function public.user_brief(p_user uuid)
-returns table (public_id text, name text)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select p.public_id, (s.state -> 'profile' ->> 'name')
-  from public.profiles p
-  left join public.app_state s on s.user_id = p.user_id
-  where p.user_id = p_user;
-$$;
-
-revoke all on function public.user_brief(uuid) from public, anon;
-grant execute on function public.user_brief(uuid) to authenticated;
+-- ⚠ ЭТА ВЕРСИЯ СОЗДАЁТСЯ ТОЛЬКО ПОКА ЖИВА КОЛОНКА public_id.
+--
+-- Колонку удаляет 2026-08-26_nickname_identity, а вместе с ней меняется и набор
+-- колонок этой функции: (public_id, name) → (username, name). Для повторного
+-- прогона setup_all.sql поверх уже мигрированной базы это две ошибки сразу:
+--   42P13 — create or replace не меняет набор OUT-параметров;
+--   42703 — тело на language sql проверяется при создании, а p.public_id нет.
+-- Поэтому старая редакция ставится под условием: на свежей базе она нужна как
+-- шаг истории, на мигрированной — пропускается, и в силе остаётся версия из
+-- 2026-08-26. Тот же приём, что у touch_last_seen в первой миграции.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute $fn$
+      create or replace function public.user_brief(p_user uuid)
+      returns table (public_id text, name text)
+      language sql
+      stable
+      security definer
+      set search_path = public
+      as $body$
+        select p.public_id, (s.state -> 'profile' ->> 'name')
+        from public.profiles p
+        left join public.app_state s on s.user_id = p.user_id
+        where p.user_id = p_user;
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.user_brief(uuid) from public, anon';
+    execute 'grant execute on function public.user_brief(uuid) to authenticated';
+  end if;
+end $$;

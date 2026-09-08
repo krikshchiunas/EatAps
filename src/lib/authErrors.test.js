@@ -72,3 +72,48 @@ test('ruAuthError остаётся совместимым со старым вы
   assert.equal(ruAuthError('Invalid login credentials'), 'Неверный email или пароль')
   assert.equal(typeof ruAuthError(''), 'string')
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Неопознанная ошибка обязана называть свой код.
+//
+// Повод конкретный: отказ подписки и отказ отправки в чат выглядели в
+// приложении одинаково — «Что-то пошло не так». Отличить их было нельзя ни по
+// скриншоту с телефона, ни по рассказу, а консоль на телефоне не открыть.
+// Пять символов SQLSTATE — единственное, что превращает такой отказ в
+// находимую причину.
+// ─────────────────────────────────────────────────────────────────────────────
+test('неопознанная ошибка показывает свой код', () => {
+  // XX000 — внутренняя ошибка Postgres: класс, который мы намеренно НЕ
+  // разбираем, потому что под ним может быть что угодно. Ровно такие и должны
+  // показывать код.
+  const r = normalizeError({ code: 'XX000', message: 'нечто, чего мы не разобрали' })
+  assert.match(r.message, /код XX000/)
+  assert.equal(r.category, ERR.UNKNOWN)
+})
+
+test('ошибка без кода не приписывает себе пустой код', () => {
+  const r = normalizeError({ message: 'совсем ничего не понятно' })
+  assert.equal(r.message, 'Что-то пошло не так. Попробуйте ещё раз')
+})
+
+// Разобранные ошибки код НЕ показывают: у них есть внятный текст, и техническая
+// приписка к нему только мешала бы.
+test('разобранные ошибки остаются без кода', () => {
+  assert.equal(normalizeError({ code: '54000', message: 'too many follows, try later' }).category, ERR.RATE_LIMIT)
+  assert.ok(!/код/.test(normalizeError({ code: '54000', message: 'too many follows, try later' }).message))
+  assert.ok(!/код/.test(normalizeError({ code: '42501', message: 'row-level security' }).message))
+})
+
+test('расхождение базы и фронтенда названо своими словами', () => {
+  for (const code of ['42883', '42P01', '42703', '42P10', 'PGRST202']) {
+    const r = normalizeError({ code, message: 'function does not exist' })
+    assert.equal(r.category, ERR.SERVER, `код ${code}`)
+    assert.match(r.message, /база обновляется/)
+  }
+})
+
+test('ограничение частоты больше не выглядит как неизвестный сбой', () => {
+  const r = normalizeError({ code: '54000', message: 'too many reactions, try later' })
+  assert.equal(r.category, ERR.RATE_LIMIT)
+  assert.match(r.message, /Слишком часто/)
+})

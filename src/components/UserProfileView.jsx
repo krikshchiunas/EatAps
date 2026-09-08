@@ -22,7 +22,7 @@ import { sumDay } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { groupDayByMeal, resolvedTime } from '../lib/meals.js'
 import { foodHabits } from '../lib/stats.js'
-import { Avatar } from './FriendsScreen.jsx'
+import { Avatar } from './Avatar.jsx'
 import ThoughtsFeed from './ThoughtsFeed.jsx'
 
 // Порядок вкладок: сначала то, что человек сказал сам («Мысли»), потом то, что

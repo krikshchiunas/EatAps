@@ -56,12 +56,16 @@ with checks(порядок, проверка, ok, деталь) as (
     ),
     coalesce((select string_agg(distinct visibility::text, ', ') from public.posts), 'постов нет')
 
-  union all select 8, 'тип post_visibility содержит все четыре уровня',
-    (select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid
-      where t.typname = 'post_visibility') = 4,
-    coalesce((select string_agg(e.enumlabel, ', ' order by e.enumsortorder)
-      from pg_enum e join pg_type t on t.oid = e.enumtypid
-      where t.typname='post_visibility'), 'типа нет')
+  -- С 2026-09-09 видимость записи — text с CHECK, а не enum: добавление
+  -- уровня (close_friends) через `alter type add value` не переживало прогон
+  -- setup_all.sql одной транзакцией.
+  union all select 8, 'видимость записи знает все пять уровней',
+    exists (
+      select 1 from pg_constraint
+      where conname = 'posts_visibility_known'
+        and pg_get_constraintdef(oid) like '%close_friends%'
+    ),
+    coalesce((select string_agg(distinct visibility, ', ') from public.posts), 'постов нет')
 
   union all select 9, 'старые посты переведены в followers',
     not exists (
@@ -71,11 +75,17 @@ with checks(порядок, проверка, ok, деталь) as (
     coalesce((select count(*)::text || ' постов мигрировано'
       from public.posts where visibility_migrated), '0')
 
-  union all select 10, 'дневник питания НЕ открыт подписчикам (friend_state требует дружбы)',
-    (select pg_get_functiondef(p.oid) like '%is_friend_with%'
-       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname='public' and p.proname='friend_state'),
-    'friend_state опирается на дружбу, а не на follows'
+  -- Круг дневника с 2026-09-07 задаёт владелец, а с 2026-09-09 к нему
+  -- добавились «близкие друзья» и поимённый список. Проверяем не конкретное
+  -- правило, а то, что решение принимает ОДНА функция и она же стоит в
+  -- политике: расхождение этих двух мест и было причиной прошлой поломки.
+  union all select 10, 'доступ к дневнику решает can_view_diary, и она же в политике',
+    exists (
+      select 1 from pg_policies
+      where schemaname='public' and tablename='app_state' and cmd='SELECT'
+        and qual like '%can_view_diary%'
+    ),
+    'политика app_state опирается на can_view_diary'
 
   -- ── 3. Уведомления: клиент не может их создавать ────────────────────────
   union all select 11, 'notifications: INSERT-политики НЕТ (клиент не пишет)',
@@ -129,17 +139,17 @@ with checks(порядок, проверка, ok, деталь) as (
     'нарушений: ' || (select count(*)::text from public.profiles
       where username is not null and username !~ '^[a-z0-9_]{3,20}$')
 
-  union all select 20, 'поиск людей идёт только по нику',
-    -- Отображаемое имя выпало из условия поиска: оно неуникально, и по нему
-    -- нельзя выбрать нужного человека. Проверяем, что display_name не
-    -- участвует в WHERE функции поиска.
+  -- Имя вернулось в условие поиска в 2026-09-09: оно по-прежнему не годится
+  -- как АДРЕС (неуникально), но человек ищет «Аня», а не «anya_k», и раньше
+  -- не находил ничего вовсе.
+  union all select 20, 'поиск людей ищет и по нику, и по имени',
     coalesce((
-      select pg_get_functiondef(p.oid) not like '%lower(p.display_name) like%'
-         and pg_get_functiondef(p.oid) like '%p.username like%'
+      select pg_get_functiondef(p.oid) like '%p.username like%'
+         and pg_get_functiondef(p.oid) like '%display_name%'
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname='public' and p.proname='search_users' limit 1
     ), false),
-    'search_users сопоставляет только username'
+    'search_users сопоставляет username и display_name'
 
   union all select 21, 'прямое чтение profiles ограничено владельцем',
     exists (select 1 from pg_policies
@@ -156,8 +166,8 @@ with checks(порядок, проверка, ok, деталь) as (
     exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='public' and p.proname='list_feed'), 'RPC'
 
-  union all select 24, 'search_users создан и требует 3+ символа',
-    (select pg_get_functiondef(p.oid) like '%char_length%>= 3%'
+  union all select 24, 'search_users создан и требует минимум символов',
+    (select pg_get_functiondef(p.oid) like '%char_length(q.v) >= 2%'
        or pg_get_functiondef(p.oid) like '%char_length(q.v) >= 3%'
        from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='public' and p.proname='search_users'),
@@ -217,11 +227,15 @@ with checks(порядок, проверка, ok, деталь) as (
     ), false),
     'прятать больше нечего: ник и так публичен, его отдаёт поиск'
 
-  union all select 31, 'сообщения по-прежнему только между друзьями',
+  -- Право писать перестало следовать из дружбы в 2026-09-07 и стало
+  -- трёхзначным в 2026-09-09. Проверяем, что политика спрашивает ту же
+  -- функцию, что и интерфейс: два определения права писать однажды уже
+  -- разошлись, и повторять это нельзя.
+  union all select 31, 'право писать решает can_message, и она же в политике',
     exists (select 1 from pg_policies
       where schemaname='public' and tablename='messages' and cmd='INSERT'
-        and with_check like '%is_friend_with%'),
-    'право переписки не перешло к подписчикам'
+        and with_check like '%can_message%'),
+    'политика messages insert опирается на can_message'
 )
 select
   порядок as "№",

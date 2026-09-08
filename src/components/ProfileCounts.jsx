@@ -31,7 +31,7 @@ export default function ProfileCounts({ card, tab, onPick, showThoughts = true }
     <div className="row" style={{ marginBottom: 16 }}>
       <Count label="Подписчики" value={card?.followers_count} active={tab === 'followers'} onClick={pick('followers')} />
       <Count label="Подписки"   value={card?.following_count} active={tab === 'following'} onClick={pick('following')} />
-      <Count label="Друзья"     value={card?.friends_count}   active={tab === 'friends'}   onClick={pick('friends')} />
+      <Count label="Взаимные"   value={card?.friends_count}   active={tab === 'friends'}   onClick={pick('friends')} />
       {showThoughts && (
         <Count label="Мысли" value={card?.posts_count} active={tab === 'thoughts'} onClick={pick('thoughts')} />
       )}

@@ -936,6 +936,10 @@ grant execute on function public.friend_state(uuid) to authenticated;
 
 drop policy if exists "read own public_id" on public.profiles;
 drop policy if exists "profiles select" on public.profiles;
+-- Снимаем и то имя, которое сейчас создаём: без этой строки повторный прогон
+-- setup_all.sql отвечает 42710 «policy already exists». Правило общее —
+-- create policy обязан быть под своим же drop policy if exists.
+drop policy if exists "profiles select own" on public.profiles;
 create policy "profiles select own" on public.profiles
   for select using (auth.uid() = user_id);
 
@@ -946,27 +950,47 @@ drop policy if exists "profiles update own" on public.profiles;
 create policy "profiles update own" on public.profiles
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
-create or replace function public.guard_profile_update()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
+-- ⚠ СОЗДАЁТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА public_id.
+--
+-- Эта редакция читает new.public_id. Тело plpgsql компилируется без разрешения
+-- имён, поэтому файл прогоняется без единой жалобы — а падает потом, на КАЖДОМ
+-- update по profiles, с 42703. Именно так оно и вышло на живой базе после
+-- 2026-08-26: ломались и смена ника, и сохранение состояния (см. разбор в
+-- 2026-09-05_social_hardening §11.1).
+--
+-- На мигрированной базе шаг пропускается: правильную версию функции всё равно
+-- создаёт 2026-09-05, и она же стоит в итоге.
+do $$
 begin
-  if new.user_id is distinct from old.user_id or new.public_id is distinct from old.public_id then
-    raise exception 'user_id and public_id are immutable';
-  end if;
-  -- Зеркальные поля клиент менять не может: их источник — app_state.
-  if auth.uid() is not null and (
-       new.display_name is distinct from old.display_name
-    or new.avatar_url   is distinct from old.avatar_url
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
   ) then
-    new.display_name := old.display_name;
-    new.avatar_url   := old.avatar_url;
+    execute $fn$
+      create or replace function public.guard_profile_update()
+      returns trigger
+      language plpgsql
+      security definer
+      set search_path = public
+      as $body$
+      begin
+        if new.user_id is distinct from old.user_id or new.public_id is distinct from old.public_id then
+          raise exception 'user_id and public_id are immutable';
+        end if;
+        -- Зеркальные поля клиент менять не может: их источник — app_state.
+        if auth.uid() is not null and (
+             new.display_name is distinct from old.display_name
+          or new.avatar_url   is distinct from old.avatar_url
+        ) then
+          new.display_name := old.display_name;
+          new.avatar_url   := old.avatar_url;
+        end if;
+        return new;
+      end;
+      $body$;
+    $fn$;
   end if;
-  return new;
-end;
-$$;
+end $$;
 
 drop trigger if exists profiles_update_guard on public.profiles;
 create trigger profiles_update_guard
@@ -1015,6 +1039,12 @@ grant execute on function public.set_username(text) to authenticated;
 -- на 500 человек весил бы больше десяти мегабайт. По той же причине у
 -- list_followers/list_following лимит 50, а не 100.
 
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.user_cards(uuid[]);
+
 create or replace function public.user_cards(p_user_ids uuid[])
 returns table (user_id uuid, username text, display_name text, avatar_url text)
 language sql
@@ -1040,6 +1070,12 @@ grant execute on function public.user_cards(uuid[]) to authenticated;
 -- friends/incoming/outgoing, а экран сам догадывался, какую кнопку рисовать.
 -- С появлением подписок и блокировок состояний стало восемь, и размазывать их
 -- по React-компонентам означало бы восемь мест, где можно разойтись.
+
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-07 (добавились can_message, conversation, can_view_diary), а
+-- create or replace сменить его не умеет — 42P13. На чистой базе не видно,
+-- ломается повторный прогон setup_all.sql поверх живой.
+drop function if exists public.get_relationship(uuid);
 
 create or replace function public.get_relationship(p_user_id uuid)
 returns table (
@@ -1096,6 +1132,12 @@ grant execute on function public.get_relationship(uuid) to authenticated;
 -- ─────────────────────────────────────────────────────────────────────────
 -- 16. Профиль пользователя со счётчиками
 -- ─────────────────────────────────────────────────────────────────────────
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.user_profile(uuid);
+
 create or replace function public.user_profile(p_user_id uuid)
 returns table (
   user_id         uuid,
@@ -1152,6 +1194,12 @@ grant execute on function public.user_profile(uuid) to authenticated;
 --
 -- Это смягчение, а не решение: при публичных профилях перебор всё равно
 -- возможен, просто дороже. См. шапку файла.
+
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.search_users(text, int);
 
 create or replace function public.search_users(p_query text, p_limit int default 20)
 returns table (
@@ -1250,6 +1298,12 @@ grant execute on function public.list_following(uuid, int, int) to authenticated
 -- Пагинация — keyset по (created_at, id), а не offset. На offset лента с
 -- дописываемым верхом показывает дубли: пока человек листает, сверху приезжают
 -- новые посты и сдвигают окно.
+
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.list_feed(int, timestamptz, uuid);
 
 create or replace function public.list_feed(
   p_limit     int default 20,
@@ -1409,6 +1463,12 @@ grant execute on function public.list_posts(uuid, int, timestamptz) to authentic
 -- ─────────────────────────────────────────────────────────────────────────
 -- 21. Чтение уведомлений
 -- ─────────────────────────────────────────────────────────────────────────
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.list_notifications(int, timestamptz);
+
 create or replace function public.list_notifications(
   p_limit int default 40, p_before timestamptz default null
 )
@@ -1538,27 +1598,46 @@ alter table public.notifications replica identity full;
 --
 -- Сигнатура и набор колонок не меняются, поэтому вызывающий код (на момент
 -- написания — отсутствующий) не ломается.
-create or replace function public.user_brief(p_user uuid)
-returns table (public_id text, name text)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select
-    case
-      when p_user = auth.uid() then p.public_id
-      when exists (
-        select 1 from public.coach_links cl
-        where cl.status = 'accepted' and cl.coach = auth.uid() and cl.client = p_user
-      ) then p.public_id
-      else null
-    end,
-    p.display_name
-  from public.profiles p
-  where p.user_id = p_user
-    and not public.is_blocked_between(p.user_id, auth.uid());
-$$;
-
-revoke all on function public.user_brief(uuid) from public, anon;
-grant execute on function public.user_brief(uuid) to authenticated;
+-- ⚠ ЭТА ВЕРСИЯ СОЗДАЁТСЯ ТОЛЬКО ПОКА ЖИВА КОЛОНКА public_id.
+--
+-- Колонку удаляет 2026-08-26_nickname_identity, а вместе с ней меняется и набор
+-- колонок этой функции: (public_id, name) → (username, name). Для повторного
+-- прогона setup_all.sql поверх уже мигрированной базы это две ошибки сразу:
+--   42P13 — create or replace не меняет набор OUT-параметров;
+--   42703 — тело на language sql проверяется при создании, а p.public_id нет.
+-- Поэтому старая редакция ставится под условием: на свежей базе она нужна как
+-- шаг истории, на мигрированной — пропускается, и в силе остаётся версия из
+-- 2026-08-26. Тот же приём, что у touch_last_seen в первой миграции.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute $fn$
+      create or replace function public.user_brief(p_user uuid)
+      returns table (public_id text, name text)
+      language sql
+      stable
+      security definer
+      set search_path = public
+      as $body$
+        select
+          case
+            when p_user = auth.uid() then p.public_id
+            when exists (
+              select 1 from public.coach_links cl
+              where cl.status = 'accepted' and cl.coach = auth.uid() and cl.client = p_user
+            ) then p.public_id
+            else null
+          end,
+          p.display_name
+        from public.profiles p
+        where p.user_id = p_user
+          and not public.is_blocked_between(p.user_id, auth.uid());
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.user_brief(uuid) from public, anon';
+    execute 'grant execute on function public.user_brief(uuid) to authenticated';
+  end if;
+end $$;

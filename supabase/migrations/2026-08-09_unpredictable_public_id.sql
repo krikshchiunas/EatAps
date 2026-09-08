@@ -102,20 +102,39 @@ $$;
 -- ─────────────────────────────────────────────────────────────────────────
 -- Если ввод не похож на публичный ID, normalize_public_id вернёт NULL, сравнение
 -- с NULL не даст ни одной строки, и функция честно ответит «не найдено».
-create or replace function public.find_user_by_public_id(p_public_id text)
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select user_id from public.profiles
-  where public_id = public.normalize_public_id(p_public_id)
-  limit 1;
-$$;
-
-revoke all on function public.find_user_by_public_id(text) from public, anon;
-grant execute on function public.find_user_by_public_id(text) to authenticated;
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute $fn$
+      create or replace function public.find_user_by_public_id(p_public_id text)
+      returns uuid
+      language sql
+      stable
+      security definer
+      set search_path = public
+      as $body$
+        select user_id from public.profiles
+        where public_id = public.normalize_public_id(p_public_id)
+        limit 1;
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.find_user_by_public_id(text) from public, anon';
+    execute 'grant execute on function public.find_user_by_public_id(text) to authenticated';
+  end if;
+end $$;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 4. Перевыдача уже существующих ID
@@ -129,18 +148,54 @@ grant execute on function public.find_user_by_public_id(text) to authenticated;
 -- но при 2^60 вариантах и десятках пользователей совпадение исключено
 -- практически, а если бы и случилось, уникальный индекс отклонил бы весь
 -- запрос и файл достаточно было бы прогнать ещё раз.
-update public.profiles
-set public_id = public.generate_public_id()
-where public_id !~ '^[0-9A-HJKMNP-TV-Z]{12}$';
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    update public.profiles
+    set public_id = public.generate_public_id()
+    where public_id !~ '^[0-9A-HJKMNP-TV-Z]{12}$';
+  end if;
+end $$;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 5. Формат закреплён на уровне базы
 -- ─────────────────────────────────────────────────────────────────────────
 -- Ставится ПОСЛЕ перевыдачи: до неё в таблице ещё лежат коды старого формата.
 -- Дальше ни один путь записи не сможет вернуть последовательный ID незаметно.
-alter table public.profiles drop constraint if exists profiles_public_id_format;
-alter table public.profiles add constraint profiles_public_id_format
-  check (public_id ~ '^[0-9A-HJKMNP-TV-Z]{12}$');
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute 'alter table public.profiles drop constraint if exists profiles_public_id_format';
+    execute 'alter table public.profiles add constraint profiles_public_id_format
+      check (public_id ~ ''^[0-9A-HJKMNP-TV-Z]{12}$'')';
+  end if;
+end $$;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 6. Последовательность больше не нужна

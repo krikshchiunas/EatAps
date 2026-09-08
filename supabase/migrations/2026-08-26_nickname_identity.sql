@@ -282,6 +282,12 @@ grant execute on function public.find_user_by_username(text) to authenticated;
 --
 -- Совпадение по-прежнему только С НАЧАЛА строки и от трёх символов: поиск
 -- подстрокой ('%a%') вернул бы почти всю базу по одной букве.
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.search_users(text, int);
+
 create or replace function public.search_users(p_query text, p_limit int default 20)
 returns table (
   user_id      uuid,
@@ -519,6 +525,12 @@ create trigger follows_sync_friendship_del
 -- про заявки теперь всегда false: заявок не существует. Признак дружбы
 -- считается из подписок, а не из материализованной строки, — по той же
 -- причине, что и в is_friend_with.
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-07 (добавились can_message, conversation, can_view_diary), а
+-- create or replace сменить его не умеет — 42P13. На чистой базе не видно,
+-- ломается повторный прогон setup_all.sql поверх живой.
+drop function if exists public.get_relationship(uuid);
+
 create or replace function public.get_relationship(p_user_id uuid)
 returns table (
   following                boolean,

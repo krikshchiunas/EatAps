@@ -17,8 +17,9 @@ import { lazyWithReload } from '../lib/lazyWithReload.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import {
   Group, Row,
-  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel, PromoPanel,
+  AccountPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel, PromoPanel,
 } from './SettingsPanels.jsx'
+import PrivacyHub from './social/PrivacyHub.jsx'
 import AITonePanel from './AITonePanel.jsx'
 import BodyPanel from './BodyPanel.jsx'
 import { profileTargets } from '../lib/body.js'
@@ -30,7 +31,7 @@ const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 // Экран тренера нужен меньшинству — не тянем его в стартовый бандл.
 const CoachScreen = lazyWithReload(() => import('./CoachScreen.jsx'))
 
-export default function SettingsScreen({ onClose, onOpenFriends }) {
+export default function SettingsScreen({ onClose, onOpenProfile }) {
   const { user, supabaseEnabled, theme, prefs, subscription, profile } = useStore()
   const [panel, setPanel] = useState(null) // 'account' | 'privacy' | ...
   const [authOpen, setAuthOpen] = useState(false)
@@ -63,7 +64,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       </Group>
 
       <Group title="Приватность">
-        <Row label="Кто что видит" onClick={() => setPanel('privacy')} />
+        <Row label="Аккаунт, общение, связи, дневник" onClick={() => setPanel('privacy')} />
       </Group>
 
       <Group title="Уведомления">
@@ -95,7 +96,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
 
       {panel === 'account' && <AccountPanel onClose={close} onOpenAuth={() => setAuthOpen(true)} />}
       {panel === 'body' && <BodyPanel onClose={close} />}
-      {panel === 'privacy' && <PrivacyPanel onClose={close} onOpenFriends={onOpenFriends} />}
+      {panel === 'privacy' && <PrivacyHub onClose={close} onOpenProfile={onOpenProfile} />}
       {panel === 'notifications' && <NotificationsPanel onClose={close} />}
       {panel === 'aiTone' && <AITonePanel onClose={close} />}
       {panel === 'promo' && <PromoPanel onClose={close} />}

@@ -65,3 +65,63 @@ test('счётчик непрочитанных считает по read_at', ()
   assert.equal(unreadCount([]), 0)
   assert.equal(unreadCount(null), 0)
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Новые типы социальной системы 2026-09-09
+// ─────────────────────────────────────────────────────────────────────────────
+import {
+  notificationActions, groupByTime, bucketOf, NOTIFICATION_GROUPS,
+} from './notificationModel.js'
+
+test('у каждого нового типа есть текст и он попадает в группу', () => {
+  const types = [
+    'FOLLOW_REQUEST', 'FOLLOW_ACCEPTED',
+    'MESSAGE_REQUEST', 'MESSAGE_REACTION', 'GROUP_INVITE',
+  ]
+  for (const t of types) {
+    const s = notificationText({ type: t, metadata: {} })
+    assert.ok(s && s !== 'новое событие', `нет текста для ${t}`)
+    assert.ok(NOTIFICATION_GROUPS.some((g) => g.types.includes(t)),
+      `${t} не попадает ни в одну группу и исчезнет из фильтров`)
+  }
+})
+
+// Просьба о подписке — единственное событие с решением прямо в списке:
+// заставлять человека идти в профиль ради «Принять» незачем.
+test('просьба о подписке несёт кнопки решения', () => {
+  const a = notificationActions({ type: 'FOLLOW_REQUEST' })
+  assert.deepEqual(a.map((x) => x.key), ['accept', 'decline'])
+  assert.deepEqual(notificationActions({ type: 'FOLLOW' }).map((x) => x.key), ['follow'])
+  assert.deepEqual(notificationActions({ type: 'POST_COMMENT' }), [])
+  assert.deepEqual(notificationActions(null), [])
+})
+
+test('событие переписки ведёт в диалог: личный по человеку, групповой по id', () => {
+  assert.deepEqual(
+    notificationTarget({ type: 'MESSAGE_REQUEST', entity_type: 'message', entity_id: 'u2', actor_id: 'u2' }),
+    { screen: 'chat', userId: 'u2' })
+  assert.deepEqual(
+    notificationTarget({ type: 'MESSAGE', entity_type: 'conversation', entity_id: 'c7', actor_id: 'u2' }),
+    { screen: 'chat', conversationId: 'c7' })
+  assert.deepEqual(
+    notificationTarget({ type: 'FOLLOW_REQUEST', actor_id: 'u5' }),
+    { screen: 'profile', userId: 'u5' })
+})
+
+test('разбивка по давности: сегодня / неделя / раньше', () => {
+  const now = Date.parse('2026-09-09T12:00:00Z')
+  assert.equal(bucketOf('2026-09-09T09:00:00Z', now), 'today')
+  assert.equal(bucketOf('2026-09-06T09:00:00Z', now), 'week')
+  assert.equal(bucketOf('2026-08-01T09:00:00Z', now), 'earlier')
+  assert.equal(bucketOf(null, now), 'earlier', 'без даты — в самый низ, а не в «сегодня»')
+
+  const g = groupByTime([
+    { created_at: '2026-09-09T09:00:00Z' },
+    { created_at: '2026-09-06T09:00:00Z' },
+    { created_at: '2026-08-01T09:00:00Z' },
+  ], now)
+  assert.equal(g.today.length, 1)
+  assert.equal(g.week.length, 1)
+  assert.equal(g.earlier.length, 1)
+  assert.equal(Object.values(groupByTime(null, now)).flat().length, 0)
+})

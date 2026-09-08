@@ -55,15 +55,17 @@ function writeMark(key, value) {
 }
 
 // ── Что именно человек разрешил показывать ───────────────────────────────────
-// Зеркало настроек из prefs. Модульная переменная, как activeChatUserId ниже:
+// Зеркало настроек из prefs. Модульная переменная, как activeConversation ниже:
 // решение «показывать или нет» принимается здесь, значит и знание о настройках
 // должно жить здесь, а не растекаться по вызывающим.
 //
-// Типов ровно три, потому что ровно три уведомления в приложении и существуют.
-// Заявок в друзья, реакций и ответов среди них нет — для них нет ни триггера,
-// ни доставки, поэтому переключателя для них не будет, пока не появится сама
-// функция: тумблер, который ничего не выключает, хуже его отсутствия.
-const notifPrefs = { lunch: true, deficit: true, messages: true }
+// Типов пять — по числу того, что приложение действительно умеет доставлять:
+// обед, недобор, сообщение, событие подписки и реакция на запись. Тумблера
+// для того, чего нет, здесь не будет: переключатель, который ничего не
+// выключает, хуже его отсутствия.
+const notifPrefs = {
+  lunch: true, deficit: true, messages: true, follows: true, reactions: true,
+}
 
 export function setNotificationPrefs(prefs) {
   // Значение по умолчанию — «включено»: у людей, которые ничего не настраивали,
@@ -71,6 +73,8 @@ export function setNotificationPrefs(prefs) {
   notifPrefs.lunch = prefs?.notifLunch !== false
   notifPrefs.deficit = prefs?.notifDeficit !== false
   notifPrefs.messages = prefs?.notifMessages !== false
+  notifPrefs.follows = prefs?.notifFollows !== false
+  notifPrefs.reactions = prefs?.notifReactions !== false
 }
 
 export function notificationsSupported() {
@@ -194,41 +198,51 @@ export function startScheduler(getState) {
   return () => clearInterval(id)
 }
 
-// Активный чат — ChatView.jsx проставляет id собеседника, когда открывает чат,
-// и сбрасывает при выходе. Мы подавляем пуш только если пришло сообщение от
-// того, с кем сейчас открыт диалог (тогда оно и так видно на экране).
-let activeChatUserId = null
-export function setActiveChat(userId) { activeChatUserId = userId || null }
+// Открытый прямо сейчас диалог. ChatScreen проставляет его id при открытии и
+// сбрасывает при выходе: пуш о сообщении, которое человек видит на экране, —
+// это шум. Держим и id диалога, и id собеседника: событие о личном сообщении
+// приходит по человеку, о групповом — по диалогу.
+let activeConversationId = null
+let activePeerId = null
+
+export function setActiveChat({ conversationId = null, peerId = null } = {}) {
+  activeConversationId = conversationId || null
+  activePeerId = peerId || null
+}
 
 // ── Заглушённые собеседники ──────────────────────────────────────────────────
-// Список живёт здесь, а не на экране друзей: читать его должен тот, кто решает
-// показывать пуш. Раньше он лежал в FriendsScreen и не читался вообще — кнопка
-// «Заглушить» меняла только иконку, а уведомления приходили как обычно.
-const MUTED_KEY = 'eataps:friends:muted'
+//
+// ИСТОЧНИК ИСТИНЫ — СЕРВЕР (таблица user_mutes). Раньше список лежал в
+// localStorage, и это была вторая, независимая система: заглушив человека на
+// телефоне, на ноутбуке вы продолжали получать от него уведомления, а сервер о
+// заглушении не знал вовсе и слал события в колокольчик.
+//
+// Здесь остаётся КЭШ этого списка: решение «показывать пуш» принимается
+// синхронно, в обработчике входящего сообщения, и ходить за ним в базу в этот
+// момент нельзя. Кэш переживает перезапуск через localStorage — иначе первые
+// секунды после старта приложение звенело бы от заглушённых.
+const MUTED_KEY = 'eataps:mutes:messages'
 
-export function getMutedFriends() {
+let mutedSet = new Set(readMutedCache())
+
+function readMutedCache() {
   try { return JSON.parse(localStorage.getItem(MUTED_KEY) || '[]') } catch { return [] }
 }
 
-export function isFriendMuted(userId) {
-  return !!userId && getMutedFriends().includes(userId)
+// Обновление кэша с сервера. Зовётся приложением при входе и при изменении
+// списка заглушённых.
+export function setMutedMessageUsers(ids) {
+  mutedSet = new Set((ids || []).filter(Boolean))
+  try { localStorage.setItem(MUTED_KEY, JSON.stringify([...mutedSet])) } catch {}
+  return [...mutedSet]
 }
 
-function writeMuted(next) {
-  try { localStorage.setItem(MUTED_KEY, JSON.stringify(next)) } catch {}
-  return next
+export function getMutedMessageUsers() {
+  return [...mutedSet]
 }
 
-// Переключить и вернуть новый список — вызывающему не нужно перечитывать.
-export function toggleFriendMuted(userId) {
-  const arr = getMutedFriends()
-  return writeMuted(arr.includes(userId) ? arr.filter((x) => x !== userId) : [...arr, userId])
-}
-
-// Друга удалили — забываем и его заглушение, иначе список копит id людей,
-// которых давно нет, и растёт без предела.
-export function forgetMutedFriend(userId) {
-  return writeMuted(getMutedFriends().filter((x) => x !== userId))
+export function isUserMuted(userId) {
+  return Boolean(userId) && mutedSet.has(userId)
 }
 
 // Русская плюрализация: 1 сообщение, 2 сообщения, 5 сообщений.
@@ -244,18 +258,58 @@ function pluralize(n, one, few, many) {
 // Пуш о новых сообщениях. Один тег на отправителя — при новом сообщении
 // уведомление обновляется, счётчик растёт, а не появляется отдельная плашка.
 // Заголовок всегда «EatAps», в теле — имя и число, иконка — аватарка отправителя.
-export function notifyIncomingMessage({ senderId, senderName, senderAvatar, unreadCount, messageId }) {
+export function notifyIncomingMessage({ senderId, senderName, senderAvatar, unreadCount, messageId, conversationId = null, groupTitle = null }) {
   // Та же ловушка, что и в планировщике: на iPhone вне установленного
   // приложения Notification не существует, и прямое обращение роняет обработчик
   // входящего сообщения.
   if (notificationPermission() !== 'granted') return
   if (!notifPrefs.messages) return
-  if (senderId && senderId === activeChatUserId) return
-  if (isFriendMuted(senderId)) return
+  if (senderId && senderId === activePeerId) return
+  if (conversationId && conversationId === activeConversationId) return
+  if (isUserMuted(senderId)) return
   const n = Math.max(1, Number(unreadCount) || 1)
   const name = (senderName && senderName.trim()) || 'Пользователь'
   const word = pluralize(n, 'сообщение', 'сообщения', 'сообщений')
-  const body = `${name} отправил вам ${n} ${word}`
-  const tag = senderId ? `eataps-chat-${senderId}` : `eataps-chat-${messageId || Date.now()}`
-  show('EatAps', body, tag, senderAvatar || null)
+  // В группе важнее, КУДА написали: «Аня в „Беговой клуб“» отличает три
+  // группы друг от друга, а просто «Аня» — нет.
+  const body = groupTitle
+    ? `${name} в «${groupTitle}»: ${n} ${word}`
+    : `${name} отправил вам ${n} ${word}`
+  const key = conversationId || senderId || messageId || Date.now()
+  show('EatAps', body, `eataps-chat-${key}`, senderAvatar || null)
+}
+
+// Пуш о социальном событии: подписка, просьба, реакция, ответ.
+//
+// Раньше их не было вовсе — уведомление появлялось только в колокольчике
+// внутри приложения. Тип события решает, каким переключателем он управляется:
+// «подписки» и «реакции» — разные вещи, и человек должен иметь возможность
+// выключить одно, не выключая другое.
+const SOCIAL_TEXT = {
+  FOLLOW:          (name) => `${name} подписался на вас`,
+  FOLLOW_REQUEST:  (name) => `${name} просится к вам в подписчики`,
+  FOLLOW_ACCEPTED: (name) => `${name} одобрил вашу заявку`,
+  FRIEND_ACCEPTED: (name) => `${name} подписался в ответ`,
+  POST_REACTION:   (name) => `${name} отреагировал на вашу мысль`,
+  POST_COMMENT:    (name) => `${name} ответил на вашу мысль`,
+  MESSAGE_REACTION:(name) => `${name} отреагировал на ваше сообщение`,
+}
+
+const SOCIAL_PREF = {
+  FOLLOW: 'follows', FOLLOW_REQUEST: 'follows', FOLLOW_ACCEPTED: 'follows',
+  FRIEND_ACCEPTED: 'follows',
+  POST_REACTION: 'reactions', POST_COMMENT: 'reactions', MESSAGE_REACTION: 'reactions',
+}
+
+export function notifySocialEvent({ type, actorId, actorName, actorAvatar }) {
+  if (notificationPermission() !== 'granted') return
+  const pref = SOCIAL_PREF[type]
+  if (!pref || !notifPrefs[pref]) return
+  if (isUserMuted(actorId)) return
+  const make = SOCIAL_TEXT[type]
+  if (!make) return
+  const name = (actorName && actorName.trim()) || 'Кто-то'
+  // Один тег на тип и человека: три подписки подряд не должны выстроиться в
+  // три плашки — обновляется одна.
+  show('EatAps', make(name), `eataps-social-${type}-${actorId || 'x'}`, actorAvatar || null)
 }

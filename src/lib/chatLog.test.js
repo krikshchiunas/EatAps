@@ -133,7 +133,7 @@ test('слияние не разделяет собеседников — это
   const withBoris = [{ id: 'b1', created_at: at(20), sender: 'boris' }]
   const merged = mergeMessages(withAnna, withBoris)
   assert.equal(merged.length, 2,
-    'mergeMessages складывает всё, что ей дали: ChatView обязан сбросить список при смене friend.id')
+    'mergeMessages складывает всё, что ей дали: экран чата обязан сбросить список при смене диалога')
 })
 
 test('после сброса остаётся только новая переписка', () => {

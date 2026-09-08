@@ -1,15 +1,26 @@
--- EatAps — Supabase schema
--- Run this once in your Supabase project: SQL Editor → paste → Run.
--- Safe to re-run: it only adds what's missing and replaces policies.
--- Local-first model: the whole app state is stored as one JSON blob per user.
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — ПЕРВАЯ миграция. Раньше файл назывался supabase/schema.sql, и это
+-- имя вводило в заблуждение: он описывает не текущее устройство базы, а её
+-- состояние на 2026-08-05. Значительная часть того, что здесь создаётся,
+-- ПОЗЖЕ ОТМЕНЯЕТСЯ следующими миграциями:
 --
--- ВАЖНО: сразу после этого файла выполните
---   supabase/migrations/2026-08-06_account_sync.sql
--- Он добавляет версионирование состояния (revision + compare-and-swap),
--- переносит «был(а) в сети» в отдельную таблицу presence и закрывает прямую
--- запись в app_state. Без него синхронизация между устройствами работает по
--- старой схеме «кто последний записал, тот и прав» и теряет чужие правки.
--- Порядок обязателен: schema.sql → migrations/2026-08-06_account_sync.sql.
+--   • profiles.public_id и четыре функции вокруг него удалены целиком
+--     (2026-08-26_nickname_identity) — единственный адрес человека теперь ник;
+--   • заявки в друзья (friendship insert/update/delete) демонтированы там же:
+--     дружба стала производной от взаимной подписки;
+--   • прямая запись в app_state отозвана (2026-08-06_account_sync) —
+--     единственный путь сохранения состояния это save_app_state();
+--   • app_state.last_seen заменён таблицей presence (там же);
+--   • select-политика app_state переписана трижды и в итоге считает права
+--     через is_friend_with (2026-09-05_social_hardening).
+--
+-- ⚠ ОТДЕЛЬНО ЭТОТ ФАЙЛ НЕ ЗАПУСКАЮТ. Он имеет смысл только как первый шаг
+--   полной цепочки. Для установки базы с нуля берут supabase/setup_all.sql —
+--   в нём этот файл и все миграции склеены в единственно верном порядке.
+--
+-- Что в базе на самом деле — supabase/docs/catalog.md (генерируется из
+-- исходников, врать не может). Зачем так — supabase/docs/README.md.
+-- ═══════════════════════════════════════════════════════════════════════════
 
 -- ---------------- Tables ----------------
 
@@ -217,27 +228,46 @@ create trigger on_auth_user_created
 -- Поиск UUID по публичному ID (для заявок в друзья; обходит RLS).
 -- Если ввод не похож на публичный ID, normalize_public_id вернёт NULL, сравнение
 -- с NULL не даст ни одной строки — функция честно ответит «не найдено».
-create or replace function public.find_user_by_public_id(p_public_id text)
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select user_id from public.profiles
-  where public_id = public.normalize_public_id(p_public_id)
-  limit 1;
-$$;
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute $fn$
+      create or replace function public.find_user_by_public_id(p_public_id text)
+      returns uuid
+      language sql
+      stable
+      security definer
+      set search_path = public
+      as $body$
+        select user_id from public.profiles
+        where public_id = public.normalize_public_id(p_public_id)
+        limit 1;
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.find_user_by_public_id(text) from public, anon';
+    execute 'grant execute on function public.find_user_by_public_id(text) to authenticated';
 
-revoke all on function public.find_user_by_public_id(text) from public, anon;
-grant execute on function public.find_user_by_public_id(text) to authenticated;
-
--- Бэкфилл: выдать ID существующим пользователям по порядку регистрации.
-insert into public.profiles (user_id, public_id)
-select id, public.generate_public_id()
-from auth.users
-where id not in (select user_id from public.profiles)
-order by created_at;
+    -- Бэкфилл: выдать ID существующим пользователям по порядку регистрации.
+    insert into public.profiles (user_id, public_id)
+    select id, public.generate_public_id()
+    from auth.users
+    where id not in (select user_id from public.profiles)
+    order by created_at;
+  end if;
+end $$;
 
 -- ---------------- Чат между друзьями ----------------
 -- Сообщения хранятся в отдельной таблице; фотографии — в бакете Storage.

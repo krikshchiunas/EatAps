@@ -16,11 +16,11 @@
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useStore } from '../store.jsx'
 import {
-  userProfile, listFollowers, listFollowing,
-  unreadNotificationCount, subscribeToNotifications,
+  userProfile, listFollowers, listFollowing, listMutuals, removeFollower,
+  unreadNotificationCount, subscribeToNotifications, subscribeToFollowRequests,
+  followRequestCount,
 } from '../lib/social.js'
-import { listFriends } from '../lib/supabase.js'
-import { removeFollower } from '../lib/social.js'
+import FollowRequestsScreen from './social/FollowRequestsScreen.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 import LazyBoundary from './LazyBoundary.jsx'
@@ -42,13 +42,13 @@ const ChallengesScreen = lazyWithReload(() => import('./ChallengesScreen.jsx'))
 const LIST_TITLE = {
   followers: 'Подписчики',
   following: 'Подписки',
-  friends: 'Друзья',
+  friends: 'Взаимные',
 }
 
 const LIST_EMPTY = {
   followers: 'На вас пока никто не подписан',
   following: 'Вы пока ни на кого не подписаны',
-  friends: 'Друзья появляются, когда вы подписаны друг на друга',
+  friends: 'Здесь те, с кем вы подписаны друг на друга',
 }
 
 // «События» — это и уведомления, и челленджи. Соревнование с друзьями — тоже
@@ -56,6 +56,7 @@ const LIST_EMPTY = {
 // место, где о событиях вообще идёт речь.
 const EVENT_TABS = [
   { key: 'feed',       label: 'Уведомления' },
+  { key: 'requests',   label: 'Запросы' },
   { key: 'challenges', label: 'Челленджи' },
 ]
 
@@ -82,6 +83,7 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
   const [eventsOpen, setEventsOpen] = useState(false)
   const [eventTab, setEventTab] = useState('feed')
   const [unreadEvents, setUnreadEvents] = useState(0)
+  const [followRequests, setFollowRequests] = useState(0)
   const [focusTab, setFocusTab] = useState(null)
 
   const uid = user?.id
@@ -100,14 +102,20 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
   // совпадать на всех устройствах и переживать перезаход. Та же самая функция
   // питает бейдж в нижней навигации — второй системы уведомлений нет.
   const refreshEvents = useCallback(async () => {
-    if (!uid) { setUnreadEvents(0); return }
+    if (!uid) { setUnreadEvents(0); setFollowRequests(0); return }
     try { setUnreadEvents(await unreadNotificationCount()) } catch { /* раздел недоступен */ }
+    try { setFollowRequests(await followRequestCount()) } catch { /* раздел недоступен */ }
   }, [uid])
 
   useEffect(() => {
-    if (!uid) { setUnreadEvents(0); return }
+    if (!uid) { setUnreadEvents(0); setFollowRequests(0); return }
     refreshEvents()
-    return subscribeToNotifications(uid, refreshEvents)
+    // Два потока событий, а не один: просьба о подписке лежит в отдельной
+    // таблице и в notifications приезжает отдельной строкой, но снятие
+    // просьбы (одобрили с другого устройства) видно только по follow_requests.
+    const offNotif = subscribeToNotifications(uid, refreshEvents)
+    const offReq = subscribeToFollowRequests(uid, refreshEvents)
+    return () => { offNotif(); offReq() }
   }, [uid, refreshEvents])
 
   // Список грузим только когда его открыли: на профиле их три, и тянуть все
@@ -121,11 +129,7 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
         const rows =
           list === 'followers' ? await listFollowers(uid) :
           list === 'following' ? await listFollowing(uid) :
-          // Друзья приходят в форме чата ({ id, name, avatar }), а PeopleList
-          // ждёт карточку профиля. Переводим здесь, а не заводим второй RPC.
-          (await listFriends(uid)).map((f) => ({
-            user_id: f.id, username: f.username, display_name: f.name, avatar_url: f.avatar,
-          }))
+          await listMutuals(uid)
         if (alive) setPeople(rows)
       } catch {
         if (alive) setPeople([])
@@ -161,13 +165,13 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
         <div className="row between" style={{ alignItems: 'center' }}>
           <span className="row gap8" style={{ alignItems: 'center', fontSize: 15, fontWeight: 600 }}>
             События
-            {unreadEvents > 0 && (
+            {(unreadEvents + followRequests) > 0 && (
               <span style={{
                 minWidth: 20, height: 20, borderRadius: 999,
                 background: 'var(--danger)', color: 'var(--on-danger)', fontSize: 11.5, fontWeight: 700,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px',
               }}>
-                {unreadEvents > 99 ? '99+' : unreadEvents}
+                {unreadEvents + followRequests > 99 ? '99+' : unreadEvents + followRequests}
               </span>
             )}
           </span>
@@ -218,9 +222,22 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
                 myId={uid}
                 onOpen={setOpenProfile}
                 empty={LIST_EMPTY[list]}
+                searchable
+                context={list === 'followers' ? 'followers' : 'profile'}
+                onRefresh={loadCard}
                 /* Убрать можно только СВОЕГО подписчика: в остальных списках
                    такой кнопки нет — там нечего убирать. */
-                onRemove={list === 'followers' ? setConfirmRemove : null}
+                actions={list === 'followers'
+                  ? (p) => (
+                    <button
+                      className="btn ghost"
+                      style={{ width: 'auto', height: 32, padding: '0 12px', fontSize: 13, flex: '0 0 auto', color: 'var(--ink-3)' }}
+                      onClick={() => setConfirmRemove(p)}
+                    >
+                      Убрать
+                    </button>
+                  )
+                  : null}
               />
             </div>
           )}
@@ -240,6 +257,16 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
                 {EVENT_TABS.map((t) => (
                   <button key={t.key} className={eventTab === t.key ? 'on' : ''} onClick={() => setEventTab(t.key)}>
                     {t.label}
+                    {t.key === 'requests' && followRequests > 0 && (
+                      <span style={{
+                        marginLeft: 6, minWidth: 18, height: 18, borderRadius: 999,
+                        background: 'var(--danger)', color: 'var(--on-danger)',
+                        fontSize: 11, fontWeight: 700, padding: '0 5px',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {followRequests > 99 ? '99+' : followRequests}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -253,14 +280,25 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
                     // пост всегда лежит в этом же профиле: закрываем события и
                     // открываем вкладку «Мысли», а не ищем его в ленте.
                     else if (t.screen === 'post') { close(); setFocusTab('thoughts') }
-                    // Переписка живёт во вкладке «Друзья» — туда и ведём, с
+                    // Переписка живёт во вкладке «Общение» — туда и ведём, с
                     // открытым диалогом. Второго чата в профиле не заводим.
+                    //
+                    // Личное событие адресовано СОБЕСЕДНИКОМ, групповое —
+                    // диалогом: у группы собеседника нет, и открывать её по
+                    // id человека было бы нечем.
                     else if (t.screen === 'chat') {
                       close()
-                      if (onOpenChat) onOpenChat(t.userId)
-                      else setOpenProfile(t.userId)
+                      if (onOpenChat) onOpenChat({ userId: t.userId, conversationId: t.conversationId })
+                      else if (t.userId) setOpenProfile(t.userId)
                     }
                   }}
+                />
+              )}
+
+              {eventTab === 'requests' && (
+                <FollowRequestsScreen
+                  onOpenProfile={(id) => { close(); setOpenProfile(id) }}
+                  onChanged={() => { refreshEvents(); loadCard() }}
                 />
               )}
 
@@ -291,7 +329,7 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
           onYes={async () => {
             const person = confirmRemove
             setConfirmRemove(null)
-            const res = await removeFollower(uid, person.user_id)
+            const res = await removeFollower(person.user_id)
             if (res?.error) return
             setPeople((prev) => (prev || []).filter((p) => p.user_id !== person.user_id))
             loadCard() // счётчик подписчиков уменьшился
@@ -305,7 +343,7 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
           {(close) => (
             <SettingsScreen
               onClose={close}
-              onOpenFriends={setTab ? () => { close(); setTab('friends') } : null}
+              onOpenProfile={(id) => { close(); setOpenProfile(id) }}
             />
           )}
         </PushScreen>

@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
-import { fetchUnreadCounts, subscribeToIncoming, fetchUserBrief, startPresence, touchLastSeen } from './lib/supabase.js'
-import { unreadNotificationCount, subscribeToNotifications } from './lib/social.js'
-import { startScheduler, notifyIncomingMessage, setNotificationPrefs } from './lib/notifications.js'
+import { fetchUserBrief, startPresence, touchLastSeen } from './lib/supabase.js'
+import { subscribeToNotifications, subscribeToFollowRequests, listRelation } from './lib/social.js'
+import { unreadTotals, subscribeToInbox } from './lib/messaging.js'
+import {
+  startScheduler, notifyIncomingMessage, notifySocialEvent,
+  setNotificationPrefs, setMutedMessageUsers,
+} from './lib/notifications.js'
 import { typeOfMealId } from './lib/meals.js'
 import Onboarding from './components/Onboarding.jsx'
 import AuthNotice from './components/AuthNotice.jsx'
@@ -39,10 +43,18 @@ export default function App() {
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
   const [clipboard, setClipboard] = useState(null)
-  const [unreadCounts, setUnreadCounts] = useState({})
-  const [unreadEvents, setUnreadEvents] = useState(0)
+  // Все бейджи одним запросом и из ОДНОГО источника — сервера. Раньше
+  // непрочитанные сообщения считались на клиенте по выборке за 30 дней, а
+  // события — отдельной функцией; две системы счёта неизбежно расходились, и
+  // на телефоне светился бейдж, которого на ноутбуке не было.
+  const [totals, setTotals] = useState({
+    messages: 0, messageRequests: 0, followRequests: 0, notifications: 0,
+  })
   // Диалог, который просит открыть «Профиль» (уведомление о сообщении). Чат
-  // живёт во вкладке «Друзья», поэтому переход идёт через App: id → вкладка.
+  // живёт во вкладке «Общение», поэтому переход идёт через App: адрес → вкладка.
+  //
+  // Адрес — это { userId } для личной переписки и { conversationId } для
+  // групповой: у группы собеседника нет, и открыть её по id человека нечем.
   const [chatWith, setChatWith] = useState(null)
 
   // Актуальный стор для планировщика (не пересоздаём таймер при каждом изменении).
@@ -60,9 +72,12 @@ export default function App() {
     return startScheduler(() => stateRef.current)
   }, [profile])
 
-  const refreshUnread = useCallback(async () => {
-    if (!user?.id) return
-    setUnreadCounts(await fetchUnreadCounts(user.id))
+  const refreshTotals = useCallback(async () => {
+    if (!user?.id) {
+      setTotals({ messages: 0, messageRequests: 0, followRequests: 0, notifications: 0 })
+      return
+    }
+    try { setTotals(await unreadTotals()) } catch { /* раздел недоступен */ }
   }, [user?.id])
 
   // Присутствие «онлайн» + отметка «был(а) в сети». Живут на уровне приложения,
@@ -90,17 +105,16 @@ export default function App() {
   useEffect(() => {
     if (!user?.id) return
     senderCache.current = new Map()
-    refreshUnread()
-    return subscribeToIncoming(user.id, async (payload) => {
+    refreshTotals()
+    return subscribeToInbox(user.id, async (payload) => {
       const row = payload?.new
-      if (!row?.sender || row.sender === user.id) {
-        refreshUnread()
-        return
-      }
+      // Счётчики обновляем на ЛЮБОЕ событие: смена состояния участия и
+      // прочтение с другого устройства меняют бейдж не меньше, чем новое
+      // сообщение.
+      const counts = await unreadTotals().catch(() => null)
+      if (counts) setTotals(counts)
 
-      // Свежий счётчик непрочитанных, чтобы в теле пуша была правильная цифра.
-      const counts = await fetchUnreadCounts(user.id)
-      setUnreadCounts(counts)
+      if (!row?.sender || row.sender === user.id || !row.text && !row.image_url && !row.media && !row.meal_ref) return
 
       let brief = senderCache.current.get(row.sender)
       if (!brief) {
@@ -112,28 +126,57 @@ export default function App() {
         senderId: row.sender,
         senderName: brief.name,
         senderAvatar: brief.avatar,
-        unreadCount: counts[row.sender] || 1,
+        unreadCount: counts?.messages || 1,
         messageId: row.id,
+        conversationId: row.conversation_id || null,
       })
     })
-  }, [user?.id, refreshUnread])
+  }, [user?.id, refreshTotals])
 
-  // Непрочитанные события — с сервера, как и сообщения. Считаются здесь ради
-  // бейджа в навигации; тот же самый счётчик показывает «Профиль → События».
-  // Второй системы уведомлений нет — оба читают unread_notification_count.
+  // Заглушённые собеседники: список ведёт сервер, но решение «показывать
+  // пуш» принимается синхронно в обработчике входящего — там ходить в базу
+  // уже поздно. Поэтому держим кэш и обновляем его при входе.
   useEffect(() => {
-    if (!user?.id) { setUnreadEvents(0); return }
-    const refresh = async () => {
-      try { setUnreadEvents(await unreadNotificationCount()) } catch { /* раздел недоступен */ }
-    }
-    refresh()
-    return subscribeToNotifications(user.id, refresh)
+    if (!user?.id) { setMutedMessageUsers([]); return }
+    let alive = true
+    listRelation('muted')
+      .then((rows) => {
+        if (alive) setMutedMessageUsers(rows.filter((r) => r.mute_messages).map((r) => r.user_id))
+      })
+      .catch(() => {})
+    return () => { alive = false }
   }, [user?.id])
 
-  // Бейджи разъехались вместе с разделами: сообщения остались во вкладке
-  // «Друзья», события переехали в «Профиль». Одна общая цифра теперь звала бы
-  // не туда, где лежит непрочитанное.
-  const unreadMessages = Object.values(unreadCounts).reduce((s, n) => s + n, 0)
+  // Социальные события: бейдж «Профиль» и пуш. Пуш шлём только на СВЕЖЕЕ
+  // событие (пришло по realtime), а не на каждый пересчёт: иначе перезаход в
+  // приложение звенел бы всей накопленной историей.
+  useEffect(() => {
+    if (!user?.id) return
+    const off = subscribeToNotifications(user.id, async (payload) => {
+      refreshTotals()
+      const row = payload?.new
+      if (payload?.eventType !== 'INSERT' || !row?.actor_id) return
+      let brief = senderCache.current.get(row.actor_id)
+      if (!brief) {
+        brief = (await fetchUserBrief(row.actor_id)) || {}
+        senderCache.current.set(row.actor_id, brief)
+      }
+      notifySocialEvent({
+        type: row.type,
+        actorId: row.actor_id,
+        actorName: brief.name,
+        actorAvatar: brief.avatar,
+      })
+    })
+    const offReq = subscribeToFollowRequests(user.id, refreshTotals)
+    return () => { off(); offReq() }
+  }, [user?.id, refreshTotals])
+
+  // Бейджи разъехались вместе с разделами: переписка во вкладке «Общение»,
+  // события и просьбы о подписке — в «Профиле». Одна общая цифра звала бы не
+  // туда, где лежит непрочитанное.
+  const unreadMessages = totals.messages + totals.messageRequests
+  const unreadEvents = totals.notifications + totals.followRequests
 
   // Ссылка «сброс пароля» из письма. Это отдельный режим, а не оверлей поверх
   // приложения: пока пароль не сменён, восстановительная сессия не считается
@@ -164,11 +207,11 @@ export default function App() {
     <div className="app">
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={(mealId, mealLabel) => setSheet({ mealId, mealLabel })} onOpenCalendar={() => setCalendarOpen(true)} onOpenStats={() => setStatsOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
       {tab === 'ai' && <AITab />}
-      {tab === 'feed' && <FeedTab onChatClosed={refreshUnread} />}
+      {tab === 'feed' && <FeedTab onChatClosed={refreshTotals} />}
       {tab === 'friends' && (
         <FriendsScreen
-          unreadCounts={unreadCounts}
-          onChatClosed={refreshUnread}
+          requestCount={totals.messageRequests}
+          onChanged={refreshTotals}
           setTab={setTab}
           openChatWith={chatWith}
           onChatOpened={() => setChatWith(null)}
@@ -177,7 +220,10 @@ export default function App() {
       {tab === 'profile' && (
         <ProfileScreen
           setTab={setTab}
-          onOpenChat={(userId) => { setChatWith(userId); setTab('friends') }}
+          onOpenChat={(target) => {
+            setChatWith(typeof target === 'string' ? { userId: target } : target)
+            setTab('friends')
+          }}
         />
       )}
 

@@ -354,6 +354,16 @@ create trigger post_comments_rate_limit
 -- это RPC, а не обычный select со связанными таблицами: связанный select
 -- вернул бы строки реакций, то есть поимённый список отреагировавших (см.
 -- политику в разделе 4). Проверка дружбы — внутри, как в friend_state.
+-- ⚠ DROP перед CREATE обязателен, и вот почему. Позже visibility добавит в
+-- возвращаемый набор ещё одну колонку (2026-08-25), а набор OUT-параметров —
+-- часть типа функции: create or replace сменить его не умеет и отвечает
+--   42P13: cannot change return type of existing function
+-- На чистой базе этого не видно — функции ещё нет. Ломался ПОВТОРНЫЙ прогон
+-- setup_all.sql поверх уже мигрированной базы: здесь пытались создать версию
+-- на десять колонок поверх живой на одиннадцать, и весь файл вставал на этой
+-- строке. Права выдаются заново сразу после создания — drop забирает их с собой.
+drop function if exists public.list_posts(uuid, int, timestamptz);
+
 create or replace function public.list_posts(
   p_user_id uuid,
   p_limit   int default 20,
@@ -410,6 +420,11 @@ grant execute on function public.list_posts(uuid, int, timestamptz) to authentic
 -- с кем он сам не дружит. Для ветки ответов это неизбежно (без имени ответ
 -- не имеет смысла), но это осознанный шаг, а не случайность: наружу уходят
 -- ровно имя и фото — те же два поля, что и в friend_briefs, и ничего больше.
+-- Тот же приём и по той же причине: 2026-09-05 добавит сюда курсор и ник автора.
+-- Здесь сигнатура ещё двухаргументная, поэтому без drop повторный прогон оставил
+-- бы рядом две перегрузки — и вызов стал бы неоднозначным для Postgres.
+drop function if exists public.list_post_comments(uuid, int);
+
 create or replace function public.list_post_comments(p_post_id uuid, p_limit int default 100)
 returns table (
   id            uuid,

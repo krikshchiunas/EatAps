@@ -6,7 +6,7 @@
 --   файл невыполнимым. Правьте ИСТОЧНИКИ (список ниже) и запускайте
 --       node scripts/build-setup-all.mjs
 --
--- Что это: schema.sql и все миграции, склеенные в правильном порядке.
+-- Что это: все миграции, склеенные в правильном порядке, от самой первой.
 -- Вставить целиком в Supabase → SQL Editor → Run. Одного прогона достаточно.
 --
 -- Безопасно для базы с данными. Файл идемпотентен целиком:
@@ -33,7 +33,7 @@
 -- supabase/verify_nickname.sql — все строки должны быть ✔.
 --
 -- Файл собран из этих источников, править нужно ИХ, а не копию:
---   supabase/schema.sql
+--   supabase/migrations/2026-08-05_initial.sql
 --   supabase/migrations/2026-08-06_account_sync.sql
 --   supabase/migrations/2026-08-07_friend_privacy.sql
 --   supabase/migrations/2026-08-08_hardening.sql
@@ -52,25 +52,40 @@
 --   supabase/migrations/2026-08-26_admin_subscriptions_writable.sql
 --   supabase/migrations/2026-08-28_profile_rework.sql
 --   supabase/migrations/2026-09-05_social_hardening.sql
+--   supabase/migrations/2026-09-07_open_messaging_and_diary_privacy.sql
+--   supabase/migrations/2026-09-08_notification_upsert_fix.sql
+--   supabase/migrations/2026-09-09_social_graph_v2.sql
+--   supabase/migrations/2026-09-09_conversations.sql
 -- ═══════════════════════════════════════════════════════════════════════════
 
 
 -- ###########################################################################
--- ИСТОЧНИК: supabase/schema.sql
+-- ИСТОЧНИК: supabase/migrations/2026-08-05_initial.sql
 -- ###########################################################################
 
--- EatAps — Supabase schema
--- Run this once in your Supabase project: SQL Editor → paste → Run.
--- Safe to re-run: it only adds what's missing and replaces policies.
--- Local-first model: the whole app state is stored as one JSON blob per user.
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — ПЕРВАЯ миграция. Раньше файл назывался supabase/schema.sql, и это
+-- имя вводило в заблуждение: он описывает не текущее устройство базы, а её
+-- состояние на 2026-08-05. Значительная часть того, что здесь создаётся,
+-- ПОЗЖЕ ОТМЕНЯЕТСЯ следующими миграциями:
 --
--- ВАЖНО: сразу после этого файла выполните
---   supabase/migrations/2026-08-06_account_sync.sql
--- Он добавляет версионирование состояния (revision + compare-and-swap),
--- переносит «был(а) в сети» в отдельную таблицу presence и закрывает прямую
--- запись в app_state. Без него синхронизация между устройствами работает по
--- старой схеме «кто последний записал, тот и прав» и теряет чужие правки.
--- Порядок обязателен: schema.sql → migrations/2026-08-06_account_sync.sql.
+--   • profiles.public_id и четыре функции вокруг него удалены целиком
+--     (2026-08-26_nickname_identity) — единственный адрес человека теперь ник;
+--   • заявки в друзья (friendship insert/update/delete) демонтированы там же:
+--     дружба стала производной от взаимной подписки;
+--   • прямая запись в app_state отозвана (2026-08-06_account_sync) —
+--     единственный путь сохранения состояния это save_app_state();
+--   • app_state.last_seen заменён таблицей presence (там же);
+--   • select-политика app_state переписана трижды и в итоге считает права
+--     через is_friend_with (2026-09-05_social_hardening).
+--
+-- ⚠ ОТДЕЛЬНО ЭТОТ ФАЙЛ НЕ ЗАПУСКАЮТ. Он имеет смысл только как первый шаг
+--   полной цепочки. Для установки базы с нуля берут supabase/setup_all.sql —
+--   в нём этот файл и все миграции склеены в единственно верном порядке.
+--
+-- Что в базе на самом деле — supabase/docs/catalog.md (генерируется из
+-- исходников, врать не может). Зачем так — supabase/docs/README.md.
+-- ═══════════════════════════════════════════════════════════════════════════
 
 -- ---------------- Tables ----------------
 
@@ -278,27 +293,46 @@ create trigger on_auth_user_created
 -- Поиск UUID по публичному ID (для заявок в друзья; обходит RLS).
 -- Если ввод не похож на публичный ID, normalize_public_id вернёт NULL, сравнение
 -- с NULL не даст ни одной строки — функция честно ответит «не найдено».
-create or replace function public.find_user_by_public_id(p_public_id text)
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select user_id from public.profiles
-  where public_id = public.normalize_public_id(p_public_id)
-  limit 1;
-$$;
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute $fn$
+      create or replace function public.find_user_by_public_id(p_public_id text)
+      returns uuid
+      language sql
+      stable
+      security definer
+      set search_path = public
+      as $body$
+        select user_id from public.profiles
+        where public_id = public.normalize_public_id(p_public_id)
+        limit 1;
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.find_user_by_public_id(text) from public, anon';
+    execute 'grant execute on function public.find_user_by_public_id(text) to authenticated';
 
-revoke all on function public.find_user_by_public_id(text) from public, anon;
-grant execute on function public.find_user_by_public_id(text) to authenticated;
-
--- Бэкфилл: выдать ID существующим пользователям по порядку регистрации.
-insert into public.profiles (user_id, public_id)
-select id, public.generate_public_id()
-from auth.users
-where id not in (select user_id from public.profiles)
-order by created_at;
+    -- Бэкфилл: выдать ID существующим пользователям по порядку регистрации.
+    insert into public.profiles (user_id, public_id)
+    select id, public.generate_public_id()
+    from auth.users
+    where id not in (select user_id from public.profiles)
+    order by created_at;
+  end if;
+end $$;
 
 -- ---------------- Чат между друзьями ----------------
 -- Сообщения хранятся в отдельной таблице; фотографии — в бакете Storage.
@@ -520,7 +554,7 @@ grant execute on function public.delete_current_user() to authenticated;
 -- ═══════════════════════════════════════════════════════════════════════════
 -- EatAps — надёжная синхронизация аккаунта между устройствами.
 --
--- Запускать в Supabase SQL Editor ПОСЛЕ supabase/schema.sql.
+-- Запускать в Supabase SQL Editor ПОСЛЕ supabase/migrations/2026-08-05_initial.sql.
 -- Идемпотентно: можно прогонять повторно, данные не удаляются.
 --
 -- Что решает:
@@ -944,14 +978,32 @@ $$;
 revoke all on function public.ensure_public_id() from public, anon;
 grant execute on function public.ensure_public_id() to authenticated;
 
--- Разовый добор для тех, у кого ID не выдался раньше.
-insert into public.profiles (user_id, public_id)
-select u.id, public.generate_public_id()
-from auth.users u
-left join public.profiles p on p.user_id = u.id
-where p.user_id is null
-order by u.created_at
-on conflict (user_id) do nothing;
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    -- Разовый добор для тех, у кого ID не выдался раньше.
+    insert into public.profiles (user_id, public_id)
+    select u.id, public.generate_public_id()
+    from auth.users u
+    left join public.profiles p on p.user_id = u.id
+    where p.user_id is null
+    order by u.created_at
+    on conflict (user_id) do nothing;
+  end if;
+end $$;
 
 
 -- ###########################################################################
@@ -1349,7 +1401,7 @@ $$;
 -- ─────────────────────────────────────────────────────────────────────────
 -- 4. Realtime
 -- ─────────────────────────────────────────────────────────────────────────
--- messages уже в публикации supabase_realtime (см. schema.sql) — публикация
+-- messages уже в публикации supabase_realtime (см. 2026-08-05_initial.sql) — публикация
 -- задана на уровне таблицы, новая колонка доезжает автоматически, отдельного
 -- шага не требует. Строка ниже на случай, если кто-то прогоняет только этот
 -- файл на пустой базе.
@@ -1472,20 +1524,39 @@ $$;
 -- ─────────────────────────────────────────────────────────────────────────
 -- Если ввод не похож на публичный ID, normalize_public_id вернёт NULL, сравнение
 -- с NULL не даст ни одной строки, и функция честно ответит «не найдено».
-create or replace function public.find_user_by_public_id(p_public_id text)
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select user_id from public.profiles
-  where public_id = public.normalize_public_id(p_public_id)
-  limit 1;
-$$;
-
-revoke all on function public.find_user_by_public_id(text) from public, anon;
-grant execute on function public.find_user_by_public_id(text) to authenticated;
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute $fn$
+      create or replace function public.find_user_by_public_id(p_public_id text)
+      returns uuid
+      language sql
+      stable
+      security definer
+      set search_path = public
+      as $body$
+        select user_id from public.profiles
+        where public_id = public.normalize_public_id(p_public_id)
+        limit 1;
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.find_user_by_public_id(text) from public, anon';
+    execute 'grant execute on function public.find_user_by_public_id(text) to authenticated';
+  end if;
+end $$;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 4. Перевыдача уже существующих ID
@@ -1499,18 +1570,54 @@ grant execute on function public.find_user_by_public_id(text) to authenticated;
 -- но при 2^60 вариантах и десятках пользователей совпадение исключено
 -- практически, а если бы и случилось, уникальный индекс отклонил бы весь
 -- запрос и файл достаточно было бы прогнать ещё раз.
-update public.profiles
-set public_id = public.generate_public_id()
-where public_id !~ '^[0-9A-HJKMNP-TV-Z]{12}$';
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    update public.profiles
+    set public_id = public.generate_public_id()
+    where public_id !~ '^[0-9A-HJKMNP-TV-Z]{12}$';
+  end if;
+end $$;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 5. Формат закреплён на уровне базы
 -- ─────────────────────────────────────────────────────────────────────────
 -- Ставится ПОСЛЕ перевыдачи: до неё в таблице ещё лежат коды старого формата.
 -- Дальше ни один путь записи не сможет вернуть последовательный ID незаметно.
-alter table public.profiles drop constraint if exists profiles_public_id_format;
-alter table public.profiles add constraint profiles_public_id_format
-  check (public_id ~ '^[0-9A-HJKMNP-TV-Z]{12}$');
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute 'alter table public.profiles drop constraint if exists profiles_public_id_format';
+    execute 'alter table public.profiles add constraint profiles_public_id_format
+      check (public_id ~ ''^[0-9A-HJKMNP-TV-Z]{12}$'')';
+  end if;
+end $$;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 6. Последовательность больше не нужна
@@ -1880,6 +1987,16 @@ create trigger post_comments_rate_limit
 -- это RPC, а не обычный select со связанными таблицами: связанный select
 -- вернул бы строки реакций, то есть поимённый список отреагировавших (см.
 -- политику в разделе 4). Проверка дружбы — внутри, как в friend_state.
+-- ⚠ DROP перед CREATE обязателен, и вот почему. Позже visibility добавит в
+-- возвращаемый набор ещё одну колонку (2026-08-25), а набор OUT-параметров —
+-- часть типа функции: create or replace сменить его не умеет и отвечает
+--   42P13: cannot change return type of existing function
+-- На чистой базе этого не видно — функции ещё нет. Ломался ПОВТОРНЫЙ прогон
+-- setup_all.sql поверх уже мигрированной базы: здесь пытались создать версию
+-- на десять колонок поверх живой на одиннадцать, и весь файл вставал на этой
+-- строке. Права выдаются заново сразу после создания — drop забирает их с собой.
+drop function if exists public.list_posts(uuid, int, timestamptz);
+
 create or replace function public.list_posts(
   p_user_id uuid,
   p_limit   int default 20,
@@ -1936,6 +2053,11 @@ grant execute on function public.list_posts(uuid, int, timestamptz) to authentic
 -- с кем он сам не дружит. Для ветки ответов это неизбежно (без имени ответ
 -- не имеет смысла), но это осознанный шаг, а не случайность: наружу уходят
 -- ровно имя и фото — те же два поля, что и в friend_briefs, и ничего больше.
+-- Тот же приём и по той же причине: 2026-09-05 добавит сюда курсор и ник автора.
+-- Здесь сигнатура ещё двухаргументная, поэтому без drop повторный прогон оставил
+-- бы рядом две перегрузки — и вызов стал бы неоднозначным для Postgres.
+drop function if exists public.list_post_comments(uuid, int);
+
 create or replace function public.list_post_comments(p_post_id uuid, p_limit int default 100)
 returns table (
   id            uuid,
@@ -2265,21 +2387,40 @@ create policy "day comment delete" on public.day_comments
   for delete using (auth.uid() = author or auth.uid() = client);
 
 -- Профиль собеседника по id — имя и публичный ID для интерфейса тренера.
-create or replace function public.user_brief(p_user uuid)
-returns table (public_id text, name text)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select p.public_id, (s.state -> 'profile' ->> 'name')
-  from public.profiles p
-  left join public.app_state s on s.user_id = p.user_id
-  where p.user_id = p_user;
-$$;
-
-revoke all on function public.user_brief(uuid) from public, anon;
-grant execute on function public.user_brief(uuid) to authenticated;
+-- ⚠ ЭТА ВЕРСИЯ СОЗДАЁТСЯ ТОЛЬКО ПОКА ЖИВА КОЛОНКА public_id.
+--
+-- Колонку удаляет 2026-08-26_nickname_identity, а вместе с ней меняется и набор
+-- колонок этой функции: (public_id, name) → (username, name). Для повторного
+-- прогона setup_all.sql поверх уже мигрированной базы это две ошибки сразу:
+--   42P13 — create or replace не меняет набор OUT-параметров;
+--   42703 — тело на language sql проверяется при создании, а p.public_id нет.
+-- Поэтому старая редакция ставится под условием: на свежей базе она нужна как
+-- шаг истории, на мигрированной — пропускается, и в силе остаётся версия из
+-- 2026-08-26. Тот же приём, что у touch_last_seen в первой миграции.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute $fn$
+      create or replace function public.user_brief(p_user uuid)
+      returns table (public_id text, name text)
+      language sql
+      stable
+      security definer
+      set search_path = public
+      as $body$
+        select p.public_id, (s.state -> 'profile' ->> 'name')
+        from public.profiles p
+        left join public.app_state s on s.user_id = p.user_id
+        where p.user_id = p_user;
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.user_brief(uuid) from public, anon';
+    execute 'grant execute on function public.user_brief(uuid) to authenticated';
+  end if;
+end $$;
 
 
 -- ###########################################################################
@@ -3835,6 +3976,10 @@ grant execute on function public.friend_state(uuid) to authenticated;
 
 drop policy if exists "read own public_id" on public.profiles;
 drop policy if exists "profiles select" on public.profiles;
+-- Снимаем и то имя, которое сейчас создаём: без этой строки повторный прогон
+-- setup_all.sql отвечает 42710 «policy already exists». Правило общее —
+-- create policy обязан быть под своим же drop policy if exists.
+drop policy if exists "profiles select own" on public.profiles;
 create policy "profiles select own" on public.profiles
   for select using (auth.uid() = user_id);
 
@@ -3845,27 +3990,47 @@ drop policy if exists "profiles update own" on public.profiles;
 create policy "profiles update own" on public.profiles
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
-create or replace function public.guard_profile_update()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
+-- ⚠ СОЗДАЁТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА public_id.
+--
+-- Эта редакция читает new.public_id. Тело plpgsql компилируется без разрешения
+-- имён, поэтому файл прогоняется без единой жалобы — а падает потом, на КАЖДОМ
+-- update по profiles, с 42703. Именно так оно и вышло на живой базе после
+-- 2026-08-26: ломались и смена ника, и сохранение состояния (см. разбор в
+-- 2026-09-05_social_hardening §11.1).
+--
+-- На мигрированной базе шаг пропускается: правильную версию функции всё равно
+-- создаёт 2026-09-05, и она же стоит в итоге.
+do $$
 begin
-  if new.user_id is distinct from old.user_id or new.public_id is distinct from old.public_id then
-    raise exception 'user_id and public_id are immutable';
-  end if;
-  -- Зеркальные поля клиент менять не может: их источник — app_state.
-  if auth.uid() is not null and (
-       new.display_name is distinct from old.display_name
-    or new.avatar_url   is distinct from old.avatar_url
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
   ) then
-    new.display_name := old.display_name;
-    new.avatar_url   := old.avatar_url;
+    execute $fn$
+      create or replace function public.guard_profile_update()
+      returns trigger
+      language plpgsql
+      security definer
+      set search_path = public
+      as $body$
+      begin
+        if new.user_id is distinct from old.user_id or new.public_id is distinct from old.public_id then
+          raise exception 'user_id and public_id are immutable';
+        end if;
+        -- Зеркальные поля клиент менять не может: их источник — app_state.
+        if auth.uid() is not null and (
+             new.display_name is distinct from old.display_name
+          or new.avatar_url   is distinct from old.avatar_url
+        ) then
+          new.display_name := old.display_name;
+          new.avatar_url   := old.avatar_url;
+        end if;
+        return new;
+      end;
+      $body$;
+    $fn$;
   end if;
-  return new;
-end;
-$$;
+end $$;
 
 drop trigger if exists profiles_update_guard on public.profiles;
 create trigger profiles_update_guard
@@ -3914,6 +4079,12 @@ grant execute on function public.set_username(text) to authenticated;
 -- на 500 человек весил бы больше десяти мегабайт. По той же причине у
 -- list_followers/list_following лимит 50, а не 100.
 
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.user_cards(uuid[]);
+
 create or replace function public.user_cards(p_user_ids uuid[])
 returns table (user_id uuid, username text, display_name text, avatar_url text)
 language sql
@@ -3939,6 +4110,12 @@ grant execute on function public.user_cards(uuid[]) to authenticated;
 -- friends/incoming/outgoing, а экран сам догадывался, какую кнопку рисовать.
 -- С появлением подписок и блокировок состояний стало восемь, и размазывать их
 -- по React-компонентам означало бы восемь мест, где можно разойтись.
+
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-07 (добавились can_message, conversation, can_view_diary), а
+-- create or replace сменить его не умеет — 42P13. На чистой базе не видно,
+-- ломается повторный прогон setup_all.sql поверх живой.
+drop function if exists public.get_relationship(uuid);
 
 create or replace function public.get_relationship(p_user_id uuid)
 returns table (
@@ -3995,6 +4172,12 @@ grant execute on function public.get_relationship(uuid) to authenticated;
 -- ─────────────────────────────────────────────────────────────────────────
 -- 16. Профиль пользователя со счётчиками
 -- ─────────────────────────────────────────────────────────────────────────
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.user_profile(uuid);
+
 create or replace function public.user_profile(p_user_id uuid)
 returns table (
   user_id         uuid,
@@ -4051,6 +4234,12 @@ grant execute on function public.user_profile(uuid) to authenticated;
 --
 -- Это смягчение, а не решение: при публичных профилях перебор всё равно
 -- возможен, просто дороже. См. шапку файла.
+
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.search_users(text, int);
 
 create or replace function public.search_users(p_query text, p_limit int default 20)
 returns table (
@@ -4149,6 +4338,12 @@ grant execute on function public.list_following(uuid, int, int) to authenticated
 -- Пагинация — keyset по (created_at, id), а не offset. На offset лента с
 -- дописываемым верхом показывает дубли: пока человек листает, сверху приезжают
 -- новые посты и сдвигают окно.
+
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.list_feed(int, timestamptz, uuid);
 
 create or replace function public.list_feed(
   p_limit     int default 20,
@@ -4308,6 +4503,12 @@ grant execute on function public.list_posts(uuid, int, timestamptz) to authentic
 -- ─────────────────────────────────────────────────────────────────────────
 -- 21. Чтение уведомлений
 -- ─────────────────────────────────────────────────────────────────────────
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.list_notifications(int, timestamptz);
+
 create or replace function public.list_notifications(
   p_limit int default 40, p_before timestamptz default null
 )
@@ -4437,30 +4638,49 @@ alter table public.notifications replica identity full;
 --
 -- Сигнатура и набор колонок не меняются, поэтому вызывающий код (на момент
 -- написания — отсутствующий) не ломается.
-create or replace function public.user_brief(p_user uuid)
-returns table (public_id text, name text)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select
-    case
-      when p_user = auth.uid() then p.public_id
-      when exists (
-        select 1 from public.coach_links cl
-        where cl.status = 'accepted' and cl.coach = auth.uid() and cl.client = p_user
-      ) then p.public_id
-      else null
-    end,
-    p.display_name
-  from public.profiles p
-  where p.user_id = p_user
-    and not public.is_blocked_between(p.user_id, auth.uid());
-$$;
-
-revoke all on function public.user_brief(uuid) from public, anon;
-grant execute on function public.user_brief(uuid) to authenticated;
+-- ⚠ ЭТА ВЕРСИЯ СОЗДАЁТСЯ ТОЛЬКО ПОКА ЖИВА КОЛОНКА public_id.
+--
+-- Колонку удаляет 2026-08-26_nickname_identity, а вместе с ней меняется и набор
+-- колонок этой функции: (public_id, name) → (username, name). Для повторного
+-- прогона setup_all.sql поверх уже мигрированной базы это две ошибки сразу:
+--   42P13 — create or replace не меняет набор OUT-параметров;
+--   42703 — тело на language sql проверяется при создании, а p.public_id нет.
+-- Поэтому старая редакция ставится под условием: на свежей базе она нужна как
+-- шаг истории, на мигрированной — пропускается, и в силе остаётся версия из
+-- 2026-08-26. Тот же приём, что у touch_last_seen в первой миграции.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    execute $fn$
+      create or replace function public.user_brief(p_user uuid)
+      returns table (public_id text, name text)
+      language sql
+      stable
+      security definer
+      set search_path = public
+      as $body$
+        select
+          case
+            when p_user = auth.uid() then p.public_id
+            when exists (
+              select 1 from public.coach_links cl
+              where cl.status = 'accepted' and cl.coach = auth.uid() and cl.client = p_user
+            ) then p.public_id
+            else null
+          end,
+          p.display_name
+        from public.profiles p
+        where p.user_id = p_user
+          and not public.is_blocked_between(p.user_id, auth.uid());
+      $body$;
+    $fn$;
+    execute 'revoke all on function public.user_brief(uuid) from public, anon';
+    execute 'grant execute on function public.user_brief(uuid) to authenticated';
+  end if;
+end $$;
 
 
 -- ###########################################################################
@@ -4751,6 +4971,12 @@ grant execute on function public.find_user_by_username(text) to authenticated;
 --
 -- Совпадение по-прежнему только С НАЧАЛА строки и от трёх символов: поиск
 -- подстрокой ('%a%') вернул бы почти всю базу по одной букве.
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-09, а create or replace на смену OUT-параметров отвечает 42P13.
+-- Без него повторный прогон setup_all.sql поверх мигрированной базы падал
+-- бы здесь — на строке, которая на чистой базе отрабатывает без нареканий.
+drop function if exists public.search_users(text, int);
+
 create or replace function public.search_users(p_query text, p_limit int default 20)
 returns table (
   user_id      uuid,
@@ -4988,6 +5214,12 @@ create trigger follows_sync_friendship_del
 -- про заявки теперь всегда false: заявок не существует. Признак дружбы
 -- считается из подписок, а не из материализованной строки, — по той же
 -- причине, что и в is_friend_with.
+-- DROP обязателен: набор возвращаемых колонок у этой функции меняется в
+-- 2026-09-07 (добавились can_message, conversation, can_view_diary), а
+-- create or replace сменить его не умеет — 42P13. На чистой базе не видно,
+-- ломается повторный прогон setup_all.sql поверх живой.
+drop function if exists public.get_relationship(uuid);
+
 create or replace function public.get_relationship(p_user_id uuid)
 returns table (
   following                boolean,
@@ -5177,8 +5409,56 @@ alter table public.promo_grants
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ---------------- 1) Дневной период в ai_usage ----------------
+-- ⚠ СМЕНА ОГРАНИЧЕНИЯ БЕЗ ПЕРЕНОСА ДАННЫХ НЕ РАБОТАЕТ.
+--
+-- В первой редакции этой миграции стояли просто drop constraint + add
+-- constraint. На пустой таблице проходит; на живой Postgres проверяет новое
+-- условие по ВСЕМ существующим строкам и отвечает
+--   23514: check constraint "ai_usage_period_check" of relation "ai_usage"
+--          is violated by some row
+-- потому что в таблице лежат строки старого, месячного формата ('2026-08').
+-- Ошибка вылезала на середине setup_all.sql и роняла весь прогон.
+--
+-- Строки не выбрасываем: ai_usage — единственный источник правды о том,
+-- сколько стоил каждый тариф, и терять накопленный расход ради смены формата
+-- нельзя. Месяц переносим на его первое число: суммы сохраняются полностью,
+-- меняется только гранулярность, которой у этих строк и так не было.
+--
+-- Порядок обязателен: сначала снять старое ограничение, потом переносить
+-- (иначе вставка '2026-08-01' упрётся в ещё живой месячный CHECK), и только
+-- потом ставить новое.
+
 alter table public.ai_usage
   drop constraint if exists ai_usage_period_check;
+
+-- Если у человека уже есть строка за первое число месяца, склеиваем: первичный
+-- ключ (user_id, period) не допускает двух, а расход должен сойтись.
+insert into public.ai_usage (user_id, period, spent_micro, requests, updated_at)
+select user_id, period || '-01', spent_micro, requests, updated_at
+from public.ai_usage
+where period ~ '^\d{4}-\d{2}$'
+on conflict (user_id, period) do update
+  set spent_micro = public.ai_usage.spent_micro + excluded.spent_micro,
+      requests    = public.ai_usage.requests    + excluded.requests,
+      updated_at  = greatest(public.ai_usage.updated_at, excluded.updated_at);
+
+delete from public.ai_usage where period ~ '^\d{4}-\d{2}$';
+
+-- Всё, что не месяц и не день, — не наш формат вовсе. Молча удалять учётные
+-- строки нельзя, поэтому останавливаемся с внятным сообщением: разбираться с
+-- ними должен человек, а не миграция.
+do $$
+declare
+  v_bad int;
+begin
+  select count(*) into v_bad from public.ai_usage where period !~ '^\d{4}-\d{2}-\d{2}$';
+  if v_bad > 0 then
+    raise exception
+      'ai_usage: % строк с периодом неизвестного формата. Посмотрите: select distinct period from public.ai_usage where period !~ ''^\d{4}-\d{2}-\d{2}$'';',
+      v_bad;
+  end if;
+end $$;
+
 alter table public.ai_usage
   add constraint ai_usage_period_check
   check (period ~ '^\d{4}-\d{2}-\d{2}$');
@@ -5869,6 +6149,7 @@ grant execute on function public.list_friends(uuid, int, int) to authenticated;
 -- продуктовую модель — чужие подписчики по-прежнему видны через RPC, но уже с
 -- проверкой блокировки.
 drop policy if exists "follows select" on public.follows;
+drop policy if exists "follows select own" on public.follows;
 create policy "follows select own" on public.follows
   for select using (auth.uid() = follower_id or auth.uid() = following_id);
 
@@ -6892,7 +7173,7 @@ grant execute on function public.list_conversations(int) to authenticated;
 -- ─────────────────────────────────────────────────────────────────────────
 -- 14. Realtime
 -- ─────────────────────────────────────────────────────────────────────────
--- messages и notifications уже в публикации (schema.sql и 2026-08-25).
+-- messages и notifications уже в публикации (2026-08-05_initial.sql и 2026-08-25).
 -- Здесь только страховка на случай базы, поднятой в другом порядке.
 do $$
 begin
@@ -6909,3 +7190,5309 @@ begin
     execute 'alter publication supabase_realtime add table public.notifications';
   end if;
 end $$;
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-07_open_messaging_and_diary_privacy.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — переписка открывается всем, дневник получает собственную настройку.
+--
+-- Запускать в Supabase SQL Editor ПОСЛЕ всех предыдущих миграций.
+-- Идемпотентно. Данные не удаляет.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- ЧТО МЕНЯЕТСЯ ПРИНЦИПИАЛЬНО
+--
+-- 1. ДРУЖБА ПЕРЕСТАЁТ БЫТЬ ПРАВОМ. Понятие «друзья» уходит из продукта: есть
+--    только подписки. Взаимная подписка больше ничего не открывает сама по
+--    себе — ни переписку, ни дневник. Она остаётся ровно тем, чем и является:
+--    фактом, что два человека подписаны друг на друга.
+--
+--    Таблица friendships и функция is_friend_with НЕ удаляются: на них
+--    завязаны видимость постов 'friends' (теперь читается как «взаимным
+--    подпискам») и уведомление о взаимной подписке. Удалять их значило бы
+--    трогать половину цепочки ради переименования.
+--
+-- 2. НАПИСАТЬ МОЖНО КОМУ УГОДНО. Сообщение доходит всегда. Но если получатель
+--    не подписан на отправителя, диалог попадает к нему во вкладку «Запросы»,
+--    а не в основной список: он видит сообщение и решает — разрешить или
+--    запретить писать.
+--
+--    «Запретить» здесь НЕ блокировка. Человек остаётся подписчиком, видит
+--    посты и профиль — он просто больше не может отправлять сообщения.
+--    Полная блокировка остаётся отдельной кнопкой в профиле: отказ от
+--    навязчивого сообщения не должен стоить человеку так дорого.
+--
+--    ⚠ ЭТО СНИМАЕТ ЕДИНСТВЕННЫЙ БАРЬЕР ОТ СПАМА В ЛИЧКЕ. Раньше им была
+--    дружба. Поэтому здесь же вводятся квоты: до принятия запроса можно
+--    отправить не больше 5 сообщений, и не больше 20 новых собеседников в час
+--    (см. раздел 5). Без них открытая личка — это готовый инструмент рассылки.
+--
+-- 3. ДНЕВНИК ПОЛУЧАЕТ СОБСТВЕННУЮ НАСТРОЙКУ. Раньше его круг был жёстко зашит
+--    («друзьям») и совпадал с кругом переписки. Теперь это выбор человека:
+--
+--      public    — любой авторизованный
+--      followers — подписчики (ЗНАЧЕНИЕ ПО УМОЛЧАНИЮ)
+--      mutuals   — только взаимные подписки
+--      private   — никто, кроме меня
+--
+--    ⚠ ПОСЛЕДСТВИЕ, КОТОРОЕ НАДО ЗНАТЬ. По умолчанию дневник видят ВСЕ
+--    ПОДПИСЧИКИ. Подписка односторонняя и согласия владельца не требует —
+--    значит, любой человек открывает себе доступ к тому, что ты ешь, одним
+--    нажатием. Прежний круг (взаимная подписка) требовал согласия обеих
+--    сторон. Это решение владельца продукта, принятое явно; кто хочет
+--    прежнего поведения — ставит 'mutuals' в настройках.
+--
+--    Существующим аккаунтам ставится 'mutuals', а не 'followers': менять
+--    круг доступа к чужим личным данным задним числом нельзя. Значение по
+--    умолчанию действует только для тех, кто заведётся после миграции.
+--
+-- 4. Тем же переключателем управляется «был(а) в сети»: это часть того же
+--    вопроса «кто меня наблюдает», и две отдельные настройки для него только
+--    множили бы состояния.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 1. Настройка видимости дневника
+-- ─────────────────────────────────────────────────────────────────────────
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'diary_audience') then
+    create type public.diary_audience as enum ('public', 'followers', 'mutuals', 'private');
+  end if;
+end $$;
+
+-- Колонку добавляем со значением 'mutuals', чтобы существующие строки не
+-- переехали в момент ALTER: сегодняшний круг доступа к дневнику — это ровно
+-- взаимная подписка, и он обязан сохраниться. Значение по умолчанию для НОВЫХ
+-- аккаунтов ставится отдельным шагом ниже, и это видно в диффе.
+alter table public.profiles
+  add column if not exists diary_visibility public.diary_audience not null default 'mutuals';
+
+alter table public.profiles alter column diary_visibility set default 'followers';
+
+-- Смена настройки. Отдельный RPC, а не UPDATE из клиента: прямой записи в
+-- profiles у клиента нет вовсе с 2026-09-05, и заводить её заново ради одной
+-- колонки значило бы открыть таблицу целиком.
+create or replace function public.set_diary_visibility(p_value text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_value not in ('public', 'followers', 'mutuals', 'private') then
+    raise exception 'unknown diary visibility: %', p_value using errcode = '22023';
+  end if;
+
+  update public.profiles
+     set diary_visibility = p_value::public.diary_audience
+   where user_id = v_uid;
+
+  return p_value;
+end;
+$$;
+
+revoke all on function public.set_diary_visibility(text) from public, anon;
+grant execute on function public.set_diary_visibility(text) to authenticated;
+
+create or replace function public.my_diary_visibility()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select diary_visibility::text from public.profiles where user_id = auth.uid();
+$$;
+
+revoke all on function public.my_diary_visibility() from public, anon;
+grant execute on function public.my_diary_visibility() to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 2. Единственный ответ на вопрос «вижу ли я дневник этого человека»
+-- ─────────────────────────────────────────────────────────────────────────
+-- SECURITY DEFINER обязателен по той же причине, что и у is_blocked_between:
+-- функции нужно видеть follows и profiles целиком, а политики этих таблиц
+-- отдают вызывающему только его собственные строки.
+--
+-- Блокировка проверяется ПЕРВОЙ и перекрывает всё, включая 'public'.
+-- Доступ тренера сохранён здесь же: держать два разных правила доступа к
+-- одной таблице — верный способ разойтись между ними при следующей правке.
+create or replace function public.can_view_diary(p_owner uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when p_owner is null or auth.uid() is null then false
+    when p_owner = auth.uid() then true
+    when public.is_blocked_between(p_owner, auth.uid()) then false
+    else
+      coalesce((
+        select case v.diary_visibility
+          when 'public' then true
+          when 'followers' then exists (
+            select 1 from public.follows f
+            where f.follower_id = auth.uid() and f.following_id = p_owner
+          )
+          when 'mutuals' then public.is_friend_with(auth.uid(), p_owner)
+          else false
+        end
+        from public.profiles v where v.user_id = p_owner
+      ), false)
+      -- Тренер с принятой связью видит дневник независимо от настройки:
+      -- клиент сам отдал ему доступ, и настройка публичности к этому
+      -- отношения не имеет.
+      or exists (
+        select 1 from public.coach_links l
+        where l.status = 'accepted' and l.coach = auth.uid() and l.client = p_owner
+      )
+  end;
+$$;
+
+revoke all on function public.can_view_diary(uuid) from public, anon;
+grant execute on function public.can_view_diary(uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 3. Дневник и присутствие переходят на настройку
+-- ─────────────────────────────────────────────────────────────────────────
+drop policy if exists "own state select" on public.app_state;
+drop policy if exists "state select self or friends" on public.app_state;
+drop policy if exists "state select self, friends or coach" on public.app_state;
+drop policy if exists "state select by diary visibility" on public.app_state;
+create policy "state select by diary visibility" on public.app_state
+  for select using (
+    auth.uid() = app_state.user_id
+    or public.can_view_diary(app_state.user_id)
+  );
+
+drop policy if exists "presence select self or friends" on public.presence;
+drop policy if exists "presence select by diary visibility" on public.presence;
+create policy "presence select by diary visibility" on public.presence
+  for select using (
+    auth.uid() = presence.user_id
+    or public.can_view_diary(presence.user_id)
+  );
+
+-- Выборка дневника для чужого экрана. Имя friend_state осталось от модели, где
+-- круг доступа назывался дружбой; смысла «только друзьям» в нём больше нет.
+-- Заводим внятное имя, а старое оставляем тонкой обёрткой: фронтенд может
+-- выкатываться и до, и после этой миграции.
+create or replace function public.visible_diary(p_user_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when public.can_view_diary(p_user_id)
+    then jsonb_strip_nulls(jsonb_build_object(
+      'profile', jsonb_build_object(
+        'name',           a.state->'profile'->'name',
+        'avatar',         a.state->'profile'->'avatar',
+        'bio',            a.state->'profile'->'bio',
+        'guiltyPleasure', a.state->'profile'->'guiltyPleasure',
+        'targets',        jsonb_build_object('calories', a.state->'profile'->'targets'->'calories')
+      ),
+      'days', coalesce((
+        select jsonb_object_agg(d.key, jsonb_build_object('meals', coalesce(d.value->'meals', '[]'::jsonb)))
+        from jsonb_each(coalesce(a.state->'days', '{}'::jsonb)) d
+      ), '{}'::jsonb),
+      'customFoods', coalesce((
+        select jsonb_agg(f)
+        from jsonb_array_elements(coalesce(a.state->'customFoods', '[]'::jsonb)) f
+        where f->>'kind' = 'composite' and f ? 'recipe'
+      ), '[]'::jsonb)
+    ))
+    else null
+  end
+  from public.app_state a
+  where a.user_id = p_user_id;
+$$;
+
+revoke all on function public.visible_diary(uuid) from public, anon;
+grant execute on function public.visible_diary(uuid) to authenticated;
+
+create or replace function public.friend_state(p_user_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.visible_diary(p_user_id);
+$$;
+
+revoke all on function public.friend_state(uuid) from public, anon;
+grant execute on function public.friend_state(uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 4. Разрешения на переписку
+-- ─────────────────────────────────────────────────────────────────────────
+-- Строка появляется только когда получатель ПРИНЯЛ решение. Состояние
+-- «запрос висит» не хранится вовсе: оно вычисляется как «решения нет и
+-- получатель не подписан на отправителя». Так нельзя рассинхронизировать
+-- таблицу с графом подписок, и не нужен триггер, создающий строку на каждое
+-- первое сообщение.
+create table if not exists public.message_grants (
+  owner_id   uuid not null references auth.users(id) on delete cascade,  -- получатель, он решает
+  peer_id    uuid not null references auth.users(id) on delete cascade,  -- отправитель
+  state      text not null check (state in ('accepted', 'declined')),
+  created_at timestamptz not null default now(),
+  primary key (owner_id, peer_id),
+  constraint message_grants_no_self check (owner_id <> peer_id)
+);
+
+create index if not exists message_grants_peer_idx on public.message_grants (peer_id, state);
+
+alter table public.message_grants enable row level security;
+
+-- Читать можно обе свои стороны: получателю нужно видеть свои решения,
+-- отправителю — понимать, почему он больше не может писать.
+drop policy if exists "message grants select own" on public.message_grants;
+create policy "message grants select own" on public.message_grants
+  for select using (auth.uid() = owner_id or auth.uid() = peer_id);
+
+-- INSERT/UPDATE/DELETE-политик нет: решение принимается только через RPC ниже.
+-- Иначе отправитель вписал бы себе 'accepted' прямым запросом.
+
+-- Существующие переписки не должны задним числом уехать в «Запросы»: люди уже
+-- общаются, и предъявлять им запрос на разговор, который идёт полгода, — это
+-- поломка, а не приватность. Проставляем согласие по факту существующей
+-- переписки, в обе стороны.
+insert into public.message_grants (owner_id, peer_id, state)
+select distinct m.recipient, m.sender, 'accepted'
+from public.messages m
+where m.recipient <> m.sender
+on conflict (owner_id, peer_id) do nothing;
+
+insert into public.message_grants (owner_id, peer_id, state)
+select distinct m.sender, m.recipient, 'accepted'
+from public.messages m
+where m.recipient <> m.sender
+on conflict (owner_id, peer_id) do nothing;
+
+
+-- Состояние диалога глазами его владельца.
+--   accepted — общаемся: владелец подписан на собеседника или принял его;
+--   declined — владелец запретил писать;
+--   pending  — сообщение пришло, решения ещё нет. Это и есть «Запрос».
+create or replace function public.conversation_state(p_owner uuid, p_peer uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when coalesce((select g.state from public.message_grants g
+                    where g.owner_id = p_owner and g.peer_id = p_peer), '') = 'declined'
+      then 'declined'
+    when exists (select 1 from public.message_grants g
+                  where g.owner_id = p_owner and g.peer_id = p_peer and g.state = 'accepted')
+      then 'accepted'
+    -- Подписка владельца на собеседника — это уже согласие его слушать.
+    -- Отдельного нажатия «разрешить» она не требует.
+    when exists (select 1 from public.follows f
+                  where f.follower_id = p_owner and f.following_id = p_peer)
+      then 'accepted'
+    else 'pending'
+  end;
+$$;
+
+revoke all on function public.conversation_state(uuid, uuid) from public, anon;
+grant execute on function public.conversation_state(uuid, uuid) to authenticated;
+
+
+-- Право отправить сообщение. Открыто всем, КРОМЕ двух случаев: полная
+-- блокировка и явный отказ получателя.
+create or replace function public.can_message(p_sender uuid, p_recipient uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p_sender is not null
+     and p_recipient is not null
+     and p_sender <> p_recipient
+     and not public.is_blocked_between(p_sender, p_recipient)
+     and not exists (
+       select 1 from public.message_grants g
+       where g.owner_id = p_recipient and g.peer_id = p_sender and g.state = 'declined'
+     );
+$$;
+
+revoke all on function public.can_message(uuid, uuid) from public, anon;
+grant execute on function public.can_message(uuid, uuid) to authenticated;
+
+-- Переписка больше не привилегия взаимной подписки.
+drop policy if exists "messages insert" on public.messages;
+create policy "messages insert" on public.messages
+  for insert with check (
+    auth.uid() = sender
+    and public.can_message(sender, recipient)
+  );
+
+
+-- Разрешить и запретить. Обе — от имени получателя и только про себя:
+-- p_peer участвует лишь как вторая половина ключа, подставить чужой owner_id
+-- невозможно по построению.
+create or replace function public.accept_message_request(p_peer uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_peer is null or p_peer = v_uid then
+    raise exception 'bad peer' using errcode = '22023';
+  end if;
+
+  insert into public.message_grants (owner_id, peer_id, state)
+  values (v_uid, p_peer, 'accepted')
+  on conflict (owner_id, peer_id) do update set state = 'accepted', created_at = now();
+
+  return 'accepted';
+end;
+$$;
+
+create or replace function public.decline_message_request(p_peer uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_peer is null or p_peer = v_uid then
+    raise exception 'bad peer' using errcode = '22023';
+  end if;
+
+  insert into public.message_grants (owner_id, peer_id, state)
+  values (v_uid, p_peer, 'declined')
+  on conflict (owner_id, peer_id) do update set state = 'declined', created_at = now();
+
+  -- Уведомления от него убираем: человек только что сказал, что не хочет
+  -- этого разговора, и бейдж о нём — продолжение того же разговора.
+  delete from public.notifications
+   where recipient_id = v_uid and actor_id = p_peer and type = 'MESSAGE';
+
+  return 'declined';
+end;
+$$;
+
+revoke all on function public.accept_message_request(uuid) from public, anon;
+revoke all on function public.decline_message_request(uuid) from public, anon;
+grant execute on function public.accept_message_request(uuid) to authenticated;
+grant execute on function public.decline_message_request(uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 5. Квоты: то, что раньше делала дружба
+-- ─────────────────────────────────────────────────────────────────────────
+-- Пока личка была открыта только друзьям, спам в ней был невозможен по
+-- построению — написать мог лишь тот, кого впустили. Теперь написать может
+-- каждый, и без ограничений это готовый инструмент рассылки: перебрать ники
+-- поиском и разослать всем по сообщению.
+--
+-- Два потолка, оба высокие для живого человека и низкие для рассылки:
+--   • до принятия запроса — не больше 5 сообщений одному человеку. Донести
+--     мысль хватает; завалить непрочитанным — нет;
+--   • не больше 20 НОВЫХ собеседников в час. Переписка с теми, кто уже
+--     ответил или подписан, не ограничена ничем.
+create or replace function public.limit_unaccepted_messages()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_pending int;
+  v_new_peers int;
+begin
+  -- Диалог уже принят — никаких ограничений.
+  if public.conversation_state(new.recipient, new.sender) = 'accepted' then
+    return new;
+  end if;
+
+  select count(*) into v_pending
+  from public.messages m
+  where m.sender = new.sender and m.recipient = new.recipient;
+
+  if v_pending >= 5 then
+    raise exception 'Пока человек не ответил, можно отправить не больше 5 сообщений'
+      using errcode = '54000';
+  end if;
+
+  -- Скольким новым людям я написал за час. Считаем по первому сообщению
+  -- каждому: продолжение начатого разговора новым собеседником не является.
+  select count(distinct m.recipient) into v_new_peers
+  from public.messages m
+  where m.sender = new.sender
+    and m.created_at > now() - interval '1 hour'
+    and not exists (
+      select 1 from public.messages e
+      where e.sender = m.recipient and e.recipient = m.sender
+    );
+
+  if v_new_peers >= 20 then
+    raise exception 'Слишком много новых собеседников за час, попробуйте позже'
+      using errcode = '54000';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists messages_request_quota on public.messages;
+create trigger messages_request_quota
+  before insert on public.messages
+  for each row execute function public.limit_unaccepted_messages();
+
+-- Под оба счёта нужен индекс по паре в прямом направлении: messages_pair_idx
+-- построен по неупорядоченной паре и для «сколько я написал ЕМУ» не годится.
+create index if not exists messages_sender_recipient_idx
+  on public.messages (sender, recipient, created_at desc);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 6. Список диалогов знает про состояние
+-- ─────────────────────────────────────────────────────────────────────────
+-- Набор колонок меняется (добавились state и карточка собеседника), поэтому
+-- нужен DROP: create or replace на смену OUT-параметров отвечает 42P13.
+-- Карточка здесь не роскошь — без неё клиент шёл бы за именами вторым
+-- запросом на каждого собеседника, а в «Запросах» это заведомо незнакомые
+-- люди, которых в кэше нет.
+drop function if exists public.list_conversations(int);
+drop function if exists public.list_conversations(int, text);
+
+create or replace function public.list_conversations(
+  p_limit int default 100,
+  p_state text default null          -- null = все, 'accepted' | 'pending' | 'declined'
+)
+returns table (
+  peer_id      uuid,
+  username     text,
+  display_name text,
+  avatar_url   text,
+  state        text,
+  last_id      uuid,
+  last_sender  uuid,
+  last_text    text,
+  last_image   text,
+  last_meal    boolean,
+  last_at      timestamptz,
+  unread_count int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with mine as (
+    select m.recipient as peer_id, m.id, m.sender, m.text, m.image_url,
+           (m.meal_ref is not null) as has_meal, m.created_at
+    from public.messages m
+    where m.sender = auth.uid()
+    union all
+    select m.sender, m.id, m.sender, m.text, m.image_url,
+           (m.meal_ref is not null), m.created_at
+    from public.messages m
+    where m.recipient = auth.uid()
+  ),
+  conv as (
+    select distinct on (peer_id) peer_id, id, sender, text, image_url, has_meal, created_at
+    from mine
+    order by peer_id, created_at desc, id desc
+  )
+  select c.peer_id, p.username, p.display_name, p.avatar_url,
+         public.conversation_state(auth.uid(), c.peer_id),
+         c.id, c.sender, c.text, c.image_url, c.has_meal, c.created_at,
+         (select count(*)::int from public.messages u
+           where u.recipient = auth.uid() and u.sender = c.peer_id and u.read_at is null)
+  from conv c
+  left join public.profiles p on p.user_id = c.peer_id
+  where not public.is_blocked_between(c.peer_id, auth.uid())
+    and (p_state is null or public.conversation_state(auth.uid(), c.peer_id) = p_state)
+  order by c.created_at desc
+  limit least(greatest(coalesce(p_limit, 100), 1), 200);
+$$;
+
+revoke all on function public.list_conversations(int, text) from public, anon;
+grant execute on function public.list_conversations(int, text) to authenticated;
+
+-- Счётчик для бейджа на вкладке «Запросы». Отдельная функция, а не длина
+-- списка: бейдж спрашивают часто, а тащить ради числа все карточки с
+-- аватарами по десятку килобайт каждая — расточительно.
+create or replace function public.pending_request_count()
+returns int
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(distinct m.sender)::int
+  from public.messages m
+  where m.recipient = auth.uid()
+    and public.conversation_state(auth.uid(), m.sender) = 'pending'
+    and not public.is_blocked_between(m.sender, auth.uid());
+$$;
+
+revoke all on function public.pending_request_count() from public, anon;
+grant execute on function public.pending_request_count() to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 7. Отправка: понятный отказ вместо «нарушение политики»
+-- ─────────────────────────────────────────────────────────────────────────
+-- send_message остаётся SECURITY INVOKER: вставку по-прежнему проверяет
+-- политика messages, и дублировать её условия внутри значило бы завести второе
+-- место, где они могут разойтись. Добавлена только ранняя проверка с внятным
+-- текстом — иначе человек видит «new row violates row-level security policy»
+-- и не понимает, что произошло.
+create or replace function public.send_message(
+  p_recipient      uuid,
+  p_text           text default null,
+  p_image_url      text default null,
+  p_meal_ref       jsonb default null,
+  p_reply_to       uuid default null,
+  p_reply_snapshot jsonb default null,
+  p_forwarded_name text default null,
+  p_client_id      uuid default null
+)
+returns public.messages
+language plpgsql
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_text text := nullif(btrim(coalesce(p_text, '')), '');
+  v_row  public.messages;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_recipient is null or p_recipient = v_uid then
+    raise exception 'bad recipient' using errcode = '22023';
+  end if;
+  if not public.can_message(v_uid, p_recipient) then
+    raise exception 'Этот человек не принимает от вас сообщения' using errcode = '42501';
+  end if;
+  if v_text is null and p_image_url is null and p_meal_ref is null then
+    raise exception 'empty message' using errcode = '22023';
+  end if;
+  if char_length(coalesce(v_text, '')) > 4000 then
+    raise exception 'message is too long' using errcode = '22001';
+  end if;
+  if p_meal_ref is not null and char_length(p_meal_ref::text) > 8000 then
+    raise exception 'meal reference is too large' using errcode = '22001';
+  end if;
+
+  if p_client_id is not null then
+    select * into v_row from public.messages m
+     where m.sender = v_uid and m.client_id = p_client_id
+     limit 1;
+    if found then
+      return v_row;
+    end if;
+  end if;
+
+  if p_reply_to is not null and not exists (
+    select 1 from public.messages m
+     where m.id = p_reply_to
+       and least(m.sender, m.recipient)    = least(v_uid, p_recipient)
+       and greatest(m.sender, m.recipient) = greatest(v_uid, p_recipient)
+  ) then
+    raise exception 'reply target is not in this conversation' using errcode = '42501';
+  end if;
+
+  insert into public.messages
+    (sender, recipient, text, image_url, meal_ref, reply_to, reply_snapshot, forwarded_name, client_id)
+  values
+    (v_uid, p_recipient, v_text, p_image_url, p_meal_ref, p_reply_to, p_reply_snapshot, p_forwarded_name, p_client_id)
+  returning * into v_row;
+
+  return v_row;
+
+exception when unique_violation then
+  select * into v_row from public.messages m
+   where m.sender = v_uid and m.client_id = p_client_id
+   limit 1;
+  if found then
+    return v_row;
+  end if;
+  raise;
+end;
+$$;
+
+revoke all on function public.send_message(uuid, text, text, jsonb, uuid, jsonb, text, uuid) from public, anon;
+grant execute on function public.send_message(uuid, text, text, jsonb, uuid, jsonb, text, uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 8. Отношение: право писать больше не следует из взаимной подписки
+-- ─────────────────────────────────────────────────────────────────────────
+-- Набор колонок сохранён, чтобы не переучивать вызывающий код; поля про
+-- заявки в друзья как были всегда false, так и остались. Добавлено ровно то,
+-- что теперь решает: можно ли писать и в каком состоянии диалог.
+drop function if exists public.get_relationship(uuid);
+
+create or replace function public.get_relationship(p_user_id uuid)
+returns table (
+  following                boolean,
+  followed_by              boolean,
+  mutual_follow            boolean,
+  friend                   boolean,
+  incoming_friend_request  boolean,
+  outgoing_friend_request  boolean,
+  blocked                  boolean,
+  blocked_by               boolean,
+  friendship_id            uuid,
+  can_message              boolean,
+  conversation             text,
+  can_view_diary           boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid),
+  fo as (
+    select
+      exists (select 1 from public.follows f, me where f.follower_id = me.uid and f.following_id = p_user_id) as fwing,
+      exists (select 1 from public.follows f, me where f.follower_id = p_user_id and f.following_id = me.uid) as fwed
+  ),
+  bl as (
+    select
+      exists (select 1 from public.blocks b, me where b.blocker_id = me.uid and b.blocked_id = p_user_id) as i_blocked,
+      exists (select 1 from public.blocks b, me where b.blocker_id = p_user_id and b.blocked_id = me.uid) as they_blocked
+  )
+  select
+    fo.fwing,
+    fo.fwed,
+    fo.fwing and fo.fwed,
+    fo.fwing and fo.fwed,
+    false,
+    false,
+    bl.i_blocked,
+    bl.they_blocked,
+    (select f.id from public.friendships f, me
+      where (f.requester = me.uid and f.addressee = p_user_id)
+         or (f.requester = p_user_id and f.addressee = me.uid)
+      limit 1),
+    public.can_message((select uid from me), p_user_id),
+    public.conversation_state((select uid from me), p_user_id),
+    public.can_view_diary(p_user_id)
+  from fo, bl;
+$$;
+
+revoke all on function public.get_relationship(uuid) from public, anon;
+grant execute on function public.get_relationship(uuid) to authenticated;
+
+-- Пакетная версия — тем же набором признаков.
+drop function if exists public.relationships_with(uuid[]);
+
+create or replace function public.relationships_with(p_user_ids uuid[])
+returns table (
+  user_id       uuid,
+  following     boolean,
+  followed_by   boolean,
+  mutual_follow boolean,
+  friend        boolean,
+  blocked       boolean,
+  blocked_by    boolean,
+  can_message   boolean,
+  conversation  text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid),
+  ids as (
+    select distinct u as id from unnest(p_user_ids[1:200]) u where u is not null
+  ),
+  fo as (
+    select f.following_id as id from public.follows f, me
+    where f.follower_id = me.uid and f.following_id in (select id from ids)
+  ),
+  fb as (
+    select f.follower_id as id from public.follows f, me
+    where f.following_id = me.uid and f.follower_id in (select id from ids)
+  ),
+  bl as (
+    select b.blocked_id as id from public.blocks b, me
+    where b.blocker_id = me.uid and b.blocked_id in (select id from ids)
+  ),
+  bb as (
+    select b.blocker_id as id from public.blocks b, me
+    where b.blocked_id = me.uid and b.blocker_id in (select id from ids)
+  )
+  select
+    ids.id,
+    ids.id in (select id from fo),
+    ids.id in (select id from fb),
+    ids.id in (select id from fo) and ids.id in (select id from fb),
+    ids.id in (select id from fo) and ids.id in (select id from fb),
+    ids.id in (select id from bl),
+    ids.id in (select id from bb),
+    public.can_message(me.uid, ids.id),
+    public.conversation_state(me.uid, ids.id)
+  from ids, me
+  where ids.id <> me.uid;
+$$;
+
+revoke all on function public.relationships_with(uuid[]) from public, anon;
+grant execute on function public.relationships_with(uuid[]) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 9. Realtime
+-- ─────────────────────────────────────────────────────────────────────────
+-- Решение по запросу должно доезжать до отправителя сразу: пока он видит
+-- «сообщение не отправляется», причину знает только получатель.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'message_grants'
+  ) then
+    execute 'alter publication supabase_realtime add table public.message_grants';
+  end if;
+end $$;
+
+alter table public.message_grants replica identity full;
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-08_notification_upsert_fix.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — второе сообщение человеку не отправлялось.
+--
+-- Запускать в Supabase SQL Editor ПОСЛЕ всех предыдущих миграций.
+-- Идемпотентно. Данные не трогает.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- ЧТО БЫЛО СЛОМАНО
+--
+-- Отправка сообщения падала с
+--   P0001: only read_at can be updated
+-- и человек видел «! повторить» под своим сообщением. Причём выборочно: одним
+-- собеседникам написать можно, другим — нет, и объяснить разницу было нечем.
+--
+-- Механика. Вставка сообщения дёргает триггер messages_notify, тот зовёт
+-- push_notification, а она делает upsert в notifications:
+--
+--     on conflict (recipient_id, actor_id, type, entity_id)
+--       where entity_id is not null
+--     do update set created_at = now(), read_at = null, metadata = excluded.metadata;
+--
+-- Замысел верный: одно и то же событие («в этом диалоге есть новое») — одна
+-- строка, которая поднимается наверх и снова становится непрочитанной.
+--
+-- Но на ветке DO UPDATE срабатывает BEFORE UPDATE-триггер той же таблицы, а он
+-- с 2026-08-25 запрещал менять всё, кроме read_at, — включая created_at и
+-- metadata, которые этот upsert как раз и меняет. Сервер сам себе запрещал
+-- запись, исключение уносило всю транзакцию, и сообщение не сохранялось.
+--
+-- ПОЧЕМУ ЭТО ВЫГЛЯДЕЛО КАК «НЕ МОГУ ПИСАТЬ ТОЛЬКО ЕМУ». Первое сообщение
+-- проходит: строки уведомления ещё нет, срабатывает INSERT, а на нём
+-- BEFORE UPDATE-триггера нет. Ломается ВТОРОЕ и все следующие — но только
+-- пока строка уведомления жива. Стоит собеседнику открыть приложение и
+-- разобрать события, строка исчезает, и переписка снова работает.
+--
+-- То есть отправка ломалась ровно к тем, кто давно не заходил. Именно это и
+-- сбивало с толку: с активными собеседниками всё работало.
+--
+-- ЭТО НЕ РЕГРЕССИЯ 2026-09-07. Ошибка живёт с 2026-08-25, просто до открытия
+-- переписки всем её встречали реже.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- КАК ЧИНИМ
+--
+-- Не ослаблением guard'а. Его смысл остаётся прежним и нужным: ПОЛУЧАТЕЛЬ не
+-- должен уметь переписать содержимое события — политика «notifications mark
+-- read» разрешает ему UPDATE строки без разбора по колонкам, и единственное,
+-- что мешает подменить actor_id или текст, это триггер.
+--
+-- Различаем законную серверную запись явным признаком — тем же приёмом, что
+-- уже применён к profiles в 2026-09-05 §11.1. Полагаться на auth.uid() здесь
+-- нельзя: SECURITY DEFINER меняет роль, но не JWT, и внутри push_notification
+-- auth.uid() — это по-прежнему тот, кто отправил сообщение.
+--
+-- Признак транзакционный (третий аргумент set_config = true): он не переживает
+-- запрос и не может утечь на соседний через пул соединений.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create or replace function public.push_notification(
+  p_recipient   uuid,
+  p_actor       uuid,
+  p_type        public.notification_type,
+  p_entity_type text default null,
+  p_entity_id   uuid default null,
+  p_metadata    jsonb default '{}'::jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_recipient is null or p_recipient = p_actor then
+    return;
+  end if;
+  if p_actor is not null and public.is_blocked_between(p_recipient, p_actor) then
+    return;
+  end if;
+
+  -- Признак снимается и в случае ошибки: он транзакционный, и откат
+  -- транзакции уносит его вместе с собой.
+  perform set_config('eataps.trusted_notification_write', 'on', true);
+
+  insert into public.notifications
+    (recipient_id, actor_id, type, entity_type, entity_id, metadata)
+  values
+    (p_recipient, p_actor, p_type, p_entity_type, p_entity_id, coalesce(p_metadata, '{}'::jsonb))
+  on conflict (recipient_id, actor_id, type, entity_id)
+    where entity_id is not null
+  do update set created_at = now(), read_at = null, metadata = excluded.metadata;
+
+  perform set_config('eataps.trusted_notification_write', 'off', true);
+end;
+$$;
+
+revoke all on function public.push_notification(uuid, uuid, public.notification_type, text, uuid, jsonb)
+  from public, anon, authenticated;
+
+
+-- Guard остаётся ровно таким же строгим для клиента и пропускает только
+-- запись, помеченную самим сервером.
+create or replace function public.guard_notification_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if coalesce(current_setting('eataps.trusted_notification_write', true), 'off') = 'on' then
+    return new;
+  end if;
+
+  if new.recipient_id is distinct from old.recipient_id
+     or new.actor_id    is distinct from old.actor_id
+     or new.type        is distinct from old.type
+     or new.entity_type is distinct from old.entity_type
+     or new.entity_id   is distinct from old.entity_id
+     or new.metadata    is distinct from old.metadata
+     or new.created_at  is distinct from old.created_at then
+    raise exception 'only read_at can be updated';
+  end if;
+  return new;
+end;
+$$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Разовая чистка залипших событий
+-- ─────────────────────────────────────────────────────────────────────────
+-- Пока баг был жив, уведомление о новом сообщении переставало обновляться:
+-- строка осталась от самого первого сообщения, а все последующие до неё не
+-- доходили. Поэтому у части людей в центре событий висит «вам написали» с
+-- датой месячной давности, хотя переписка шла и позже.
+--
+-- Чинить пересчётом не будем — правильную дату всё равно взять неоткуда, а
+-- сам счётчик непрочитанных считается по messages.read_at, а не по этим
+-- строкам. Просто подтягиваем время события к последнему сообщению в
+-- диалоге: так переход из уведомления ведёт туда же, куда и раньше, но
+-- список событий перестаёт врать о времени.
+-- Признак ставим и здесь: этот UPDATE меняет created_at, то есть упирается
+-- ровно в тот триггер, который чиним. Третий аргумент false — на всю сессию,
+-- потому что это отдельный оператор верхнего уровня, а не тело функции.
+select set_config('eataps.trusted_notification_write', 'on', false);
+
+update public.notifications n
+   set created_at = m.last_at
+  from (
+    select recipient, sender, max(created_at) as last_at
+    from public.messages
+    group by recipient, sender
+  ) m
+ where n.type = 'MESSAGE'
+   and n.recipient_id = m.recipient
+   and n.actor_id     = m.sender
+   and n.entity_id    = m.sender
+   and n.created_at < m.last_at;
+
+select set_config('eataps.trusted_notification_write', 'off', false);
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-09_social_graph_v2.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — социальный граф уровня современной соцсети.
+--
+-- Запускать в Supabase SQL Editor ПОСЛЕ всех предыдущих миграций.
+-- Идемпотентно. Данные не удаляет и НЕ РАСШИРЯЕТ доступ задним числом.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- ЗАЧЕМ ЭТА МИГРАЦИЯ
+--
+-- До сих пор в EatAps было ровно два состояния связи — «подписан» и
+-- «заблокирован», — и одно право («писать можно всем, кроме отказавших»).
+-- Этого хватало, пока аккаунты были открыты по построению. Теперь у человека
+-- появляется закрытый аккаунт, а значит и всё, что из него следует:
+--
+--   • ЗАПРОС НА ПОДПИСКУ. На закрытый аккаунт нельзя подписаться нажатием —
+--     можно только попросить. До решения владельца подписки НЕТ, и никакие
+--     права она не даёт;
+--   • БЛИЗКИЕ ДРУЗЬЯ. Односторонний список владельца: отдельный круг для
+--     постов и (по желанию) для дневника;
+--   • ОГРАНИЧЕНИЕ (restrict). Не блокировка: человек ничего не узнаёт, но его
+--     сообщения уходят в «Запросы», а присутствие от него скрыто;
+--   • ЗАГЛУШЕНИЕ (mute). Подписка цела, контент не показывается;
+--   • ПРАВА НА ПЕРЕПИСКУ ПО КАТЕГОРИЯМ. Отдельно для тех, на кого я подписан,
+--     для подписчиков и для всех остальных: писать сразу / в «Запросы» /
+--     нельзя.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- ЧТО ЗДЕСЬ ПРИНЦИПИАЛЬНО РАЗДЕЛЕНО
+--
+-- Раньше «взаимная подписка» была и признаком, и правом одновременно, и это
+-- уже стоило проекта одной поломки (см. 03-pitfalls §17). Теперь:
+--
+--   follows           — факт «A читает B». Для закрытого аккаунта строка
+--                       появляется ТОЛЬКО после одобрения владельца;
+--   follow_requests   — просьба, которая ещё не решена. Права не даёт;
+--   взаимная подписка — производная от follows, вычисляется, не хранится;
+--   close_friends     — отдельный круг, задаётся владельцем вручную;
+--   diary_access      — поимённый доступ к дневнику;
+--   message_grants    — решение по переписке (было в 2026-09-07, остаётся);
+--   restricted_users  — тихое ограничение;
+--   user_mutes        — личное скрытие, ни на чьи права не влияет.
+--
+-- Ни одно из этих отношений не выводится из другого. Право доступа считает
+-- ровно одна функция на ресурс, и она же стоит в политике.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- ПЕРЕЧИСЛЕНИЯ СТАНОВЯТСЯ ТЕКСТОМ С CHECK
+--
+-- post_visibility, diary_audience и notification_type были enum'ами. Каждое
+-- новое значение (close_friends, FOLLOW_REQUEST, MESSAGE_REQUEST…) означало бы
+-- `alter type … add value`, а он в одной транзакции с использованием нового
+-- значения запрещён — то есть setup_all.sql перестал бы прогоняться одним
+-- куском. Меняем на text + CHECK: расширять список значений становится
+-- обычной правкой ограничения, а не операцией с оговорками.
+--
+-- Сами типы не удаляем — на них ничто больше не ссылается, и удаление ради
+-- чистоты не стоит риска.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- ЧТО ПРОИСХОДИТ С СУЩЕСТВУЮЩИМИ ДАННЫМИ
+--
+--   • Все аккаунты остаются ОТКРЫТЫМИ (is_private = false). Закрыть аккаунт —
+--     осознанное действие владельца, а не следствие обновления;
+--   • Существующие подписки сохраняются целиком и считаются одобренными;
+--   • diary_visibility у всех остаётся ровно той, что была;
+--   • права на переписку по умолчанию воспроизводят прежнее поведение:
+--     «на кого я подписан» — сразу, все остальные — в «Запросы»;
+--   • ни один человек не получает доступа, которого у него не было вчера.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 1. Настройки аккаунта
+-- ─────────────────────────────────────────────────────────────────────────
+-- Всё это лежит в profiles, а не в app_state: доступ считает сервер, а
+-- app_state он не читает ни в одной политике — там блоб, который принадлежит
+-- человеку целиком и меняется без разбора по полям.
+
+alter table public.profiles add column if not exists is_private boolean not null default false;
+
+-- Право писать — три категории, как их видит получатель:
+--   msg_from_following — те, на кого подписан Я (получатель);
+--   msg_from_followers — мои подписчики, на которых я не подписан;
+--   msg_from_others    — все остальные.
+-- Значения: 'direct' (сразу в чаты) | 'request' (в «Запросы») | 'none'.
+-- Значения по умолчанию воспроизводят поведение до этой миграции.
+alter table public.profiles add column if not exists msg_from_following text not null default 'direct';
+alter table public.profiles add column if not exists msg_from_followers text not null default 'request';
+alter table public.profiles add column if not exists msg_from_others    text not null default 'request';
+
+alter table public.profiles drop constraint if exists profiles_msg_policy_known;
+alter table public.profiles add constraint profiles_msg_policy_known check (
+  msg_from_following in ('direct', 'request', 'none')
+  and msg_from_followers in ('direct', 'request', 'none')
+  and msg_from_others in ('direct', 'request', 'none')
+);
+
+-- Кто может добавлять меня в групповые чаты.
+alter table public.profiles add column if not exists group_invites text not null default 'following';
+alter table public.profiles drop constraint if exists profiles_group_invites_known;
+alter table public.profiles add constraint profiles_group_invites_known
+  check (group_invites in ('everyone', 'following', 'none'));
+
+-- «Показывать, что я в сети» и «показывать прочтение». Обе — взаимные по
+-- смыслу: выключив у себя, человек перестаёт видеть и чужие. Взаимность
+-- считается на чтении (см. can_see_activity / read_receipts_visible), а не
+-- записывается в данные.
+alter table public.profiles add column if not exists show_activity boolean not null default true;
+alter table public.profiles add column if not exists read_receipts boolean not null default true;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 2. Перечисления → text + CHECK
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- 2.1. Видимость поста. Добавляется 'close_friends'. Значение 'friends'
+-- сохраняет прежний смысл — «взаимным подпискам»; переименовать его значило бы
+-- переписать существующие строки ради косметики.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'posts'
+      and column_name = 'visibility' and data_type <> 'text'
+  ) then
+    alter table public.posts alter column visibility drop default;
+    alter table public.posts alter column visibility type text using visibility::text;
+    alter table public.posts alter column visibility set default 'followers';
+  end if;
+end $$;
+
+alter table public.posts drop constraint if exists posts_visibility_known;
+alter table public.posts add constraint posts_visibility_known
+  check (visibility in ('public', 'followers', 'friends', 'close_friends', 'private'));
+
+-- 2.2. Круг дневника. Добавляются 'close_friends' и 'selected'.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles'
+      and column_name = 'diary_visibility' and data_type <> 'text'
+  ) then
+    alter table public.profiles alter column diary_visibility drop default;
+    alter table public.profiles alter column diary_visibility type text using diary_visibility::text;
+    alter table public.profiles alter column diary_visibility set default 'followers';
+  end if;
+end $$;
+
+alter table public.profiles drop constraint if exists profiles_diary_visibility_known;
+alter table public.profiles add constraint profiles_diary_visibility_known
+  check (diary_visibility in ('public', 'followers', 'mutuals', 'close_friends', 'selected', 'private'));
+
+-- 2.3. Тип уведомления. Список расширяется сразу под всё, что умеет слать
+-- новая система, включая события переписки.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'notifications'
+      and column_name = 'type' and data_type <> 'text'
+  ) then
+    alter table public.notifications alter column type type text using type::text;
+  end if;
+end $$;
+
+alter table public.notifications drop constraint if exists notifications_type_known;
+alter table public.notifications add constraint notifications_type_known check (
+  type in (
+    'FOLLOW', 'FOLLOW_REQUEST', 'FOLLOW_ACCEPTED',
+    'FRIEND_REQUEST', 'FRIEND_ACCEPTED',
+    'POST_REACTION', 'POST_COMMENT',
+    'MESSAGE', 'MESSAGE_REQUEST', 'MESSAGE_REACTION',
+    'GROUP_INVITE'
+  )
+);
+
+-- Тип сущности, на которую ведёт событие. Прежнее ограничение называлось
+-- notifications_entity_type; здесь заводится ограничение с ДРУГИМ именем,
+-- потому что старое проверяло бы уже лежащие строки по новому условию — а
+-- расширение списка значений безопасно только тогда, когда это видно и
+-- инструменту проверки, и человеку.
+alter table public.notifications drop constraint if exists notifications_entity_type;
+alter table public.notifications drop constraint if exists notifications_entity_kind;
+alter table public.notifications add constraint notifications_entity_kind check (
+  entity_type is null
+  or entity_type in ('post', 'comment', 'user', 'friendship', 'message', 'conversation', 'follow_request')
+);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 3. Новые отношения
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- 3.1. Запрос на подписку. Живёт только пока не решён: одобрение переносит
+-- строку в follows, отказ удаляет её. Хранить решённые запросы незачем —
+-- «одобрен» и есть строка в follows, а «отклонён» не должен мешать человеку
+-- попросить снова.
+create table if not exists public.follow_requests (
+  requester_id uuid not null references auth.users(id) on delete cascade,
+  target_id    uuid not null references auth.users(id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  primary key (requester_id, target_id),
+  constraint follow_requests_no_self check (requester_id <> target_id)
+);
+
+create index if not exists follow_requests_target_idx on public.follow_requests (target_id, created_at desc);
+create index if not exists follow_requests_requester_idx on public.follow_requests (requester_id, created_at desc);
+
+alter table public.follow_requests enable row level security;
+
+-- Видит обе стороны: получателю нужен список, отправителю — состояние кнопки.
+drop policy if exists "follow requests select own" on public.follow_requests;
+create policy "follow requests select own" on public.follow_requests
+  for select using (auth.uid() = requester_id or auth.uid() = target_id);
+
+-- Отменить свою просьбу может отправитель, отклонить — адресат. Создание и
+-- одобрение идут только через RPC: одобрение обязано быть атомарным.
+drop policy if exists "follow requests delete own" on public.follow_requests;
+create policy "follow requests delete own" on public.follow_requests
+  for delete using (auth.uid() = requester_id or auth.uid() = target_id);
+
+
+-- 3.2. Близкие друзья. Список ОДНОСТОРОННИЙ и приватный: наружу не отдаётся
+-- даже тому, кто в нём состоит. Instagram здесь прав — знание «меня убрали из
+-- близких» не улучшает ничью жизнь.
+create table if not exists public.close_friends (
+  owner_id   uuid not null references auth.users(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (owner_id, user_id),
+  constraint close_friends_no_self check (owner_id <> user_id)
+);
+
+create index if not exists close_friends_user_idx on public.close_friends (user_id);
+
+alter table public.close_friends enable row level security;
+
+-- ТОЛЬКО владелец. Ни одной политики, отдающей строку тому, кого добавили.
+drop policy if exists "close friends select own" on public.close_friends;
+create policy "close friends select own" on public.close_friends
+  for select using (auth.uid() = owner_id);
+
+drop policy if exists "close friends insert own" on public.close_friends;
+create policy "close friends insert own" on public.close_friends
+  for insert with check (
+    auth.uid() = owner_id
+    and owner_id <> user_id
+    and not public.is_blocked_between(owner_id, user_id)
+  );
+
+drop policy if exists "close friends delete own" on public.close_friends;
+create policy "close friends delete own" on public.close_friends
+  for delete using (auth.uid() = owner_id);
+
+
+-- 3.3. Ограничение. Тише блокировки и по смыслу, и по последствиям: человек
+-- не получает никакого сигнала. Строку видит только тот, кто её поставил.
+create table if not exists public.restricted_users (
+  owner_id      uuid not null references auth.users(id) on delete cascade,
+  restricted_id uuid not null references auth.users(id) on delete cascade,
+  created_at    timestamptz not null default now(),
+  primary key (owner_id, restricted_id),
+  constraint restricted_no_self check (owner_id <> restricted_id)
+);
+
+create index if not exists restricted_users_target_idx on public.restricted_users (restricted_id);
+
+alter table public.restricted_users enable row level security;
+
+drop policy if exists "restricted select own" on public.restricted_users;
+create policy "restricted select own" on public.restricted_users
+  for select using (auth.uid() = owner_id);
+
+drop policy if exists "restricted insert own" on public.restricted_users;
+create policy "restricted insert own" on public.restricted_users
+  for insert with check (auth.uid() = owner_id and owner_id <> restricted_id);
+
+drop policy if exists "restricted delete own" on public.restricted_users;
+create policy "restricted delete own" on public.restricted_users
+  for delete using (auth.uid() = owner_id);
+
+
+-- 3.4. Заглушение. На права не влияет ВООБЩЕ: подписка цела, посты доступны,
+-- сообщения доходят. Меняется только то, что показывают мне.
+create table if not exists public.user_mutes (
+  owner_id       uuid not null references auth.users(id) on delete cascade,
+  target_id      uuid not null references auth.users(id) on delete cascade,
+  mute_posts     boolean not null default true,
+  mute_messages  boolean not null default false,
+  created_at     timestamptz not null default now(),
+  primary key (owner_id, target_id),
+  constraint user_mutes_no_self check (owner_id <> target_id)
+);
+
+alter table public.user_mutes enable row level security;
+
+drop policy if exists "mutes select own" on public.user_mutes;
+create policy "mutes select own" on public.user_mutes
+  for select using (auth.uid() = owner_id);
+
+drop policy if exists "mutes insert own" on public.user_mutes;
+create policy "mutes insert own" on public.user_mutes
+  for insert with check (auth.uid() = owner_id and owner_id <> target_id);
+
+drop policy if exists "mutes update own" on public.user_mutes;
+create policy "mutes update own" on public.user_mutes
+  for update using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+
+drop policy if exists "mutes delete own" on public.user_mutes;
+create policy "mutes delete own" on public.user_mutes
+  for delete using (auth.uid() = owner_id);
+
+
+-- 3.5. Поимённый доступ к дневнику (diary_visibility = 'selected').
+-- Отдельная таблица, а не список в блобе: доступ проверяет сервер, а блоб он
+-- не читает.
+create table if not exists public.diary_access (
+  owner_id   uuid not null references auth.users(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (owner_id, user_id),
+  constraint diary_access_no_self check (owner_id <> user_id)
+);
+
+create index if not exists diary_access_user_idx on public.diary_access (user_id);
+
+alter table public.diary_access enable row level security;
+
+-- Видит обе стороны: тому, кому открыли, полезно знать, что доступ есть.
+drop policy if exists "diary access select" on public.diary_access;
+create policy "diary access select" on public.diary_access
+  for select using (auth.uid() = owner_id or auth.uid() = user_id);
+
+drop policy if exists "diary access insert own" on public.diary_access;
+create policy "diary access insert own" on public.diary_access
+  for insert with check (
+    auth.uid() = owner_id
+    and owner_id <> user_id
+    and not public.is_blocked_between(owner_id, user_id)
+  );
+
+drop policy if exists "diary access delete own" on public.diary_access;
+create policy "diary access delete own" on public.diary_access
+  for delete using (auth.uid() = owner_id);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 4. Предикаты доступа — по одному на вопрос
+-- ─────────────────────────────────────────────────────────────────────────
+-- Все SECURITY DEFINER и STABLE. DEFINER обязателен: политики отдают
+-- вызывающему только его собственные строки, а этим функциям нужно видеть
+-- follows, close_friends и profiles целиком.
+--
+-- Правило порядка одно во всех: БЛОКИРОВКА ПРОВЕРЯЕТСЯ ПЕРВОЙ и перекрывает
+-- всё, включая 'public'.
+
+create or replace function public.is_private_account(p_user uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select is_private from public.profiles where user_id = p_user), false);
+$$;
+
+revoke all on function public.is_private_account(uuid) from public, anon;
+grant execute on function public.is_private_account(uuid) to authenticated;
+
+-- Состоит ли p_user в близких друзьях p_owner. Наружу этот факт отдаётся
+-- только владельцу списка (см. get_relationship: поле is_close_friend
+-- заполняется, когда СПРАШИВАЮЩИЙ и есть владелец).
+create or replace function public.is_close_friend(p_owner uuid, p_user uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.close_friends c
+    where c.owner_id = p_owner and c.user_id = p_user
+  );
+$$;
+
+revoke all on function public.is_close_friend(uuid, uuid) from public, anon;
+grant execute on function public.is_close_friend(uuid, uuid) to authenticated;
+
+create or replace function public.is_restricted(p_owner uuid, p_user uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.restricted_users r
+    where r.owner_id = p_owner and r.restricted_id = p_user
+  );
+$$;
+
+revoke all on function public.is_restricted(uuid, uuid) from public, anon;
+grant execute on function public.is_restricted(uuid, uuid) to authenticated;
+
+create or replace function public.follows_user(p_follower uuid, p_target uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.follows f
+    where f.follower_id = p_follower and f.following_id = p_target
+  );
+$$;
+
+revoke all on function public.follows_user(uuid, uuid) from public, anon;
+grant execute on function public.follows_user(uuid, uuid) to authenticated;
+
+
+-- ГЛАВНЫЙ предикат закрытого аккаунта: вижу ли я содержимое этого профиля.
+-- Открытый аккаунт виден всем незаблокированным; закрытый — себе и одобренным
+-- подписчикам. Шапка профиля (имя, аватар, счётчики) под это правило НЕ
+-- попадает: её показывают всегда, иначе на закрытый аккаунт невозможно даже
+-- попроситься.
+create or replace function public.can_view_profile_content(p_owner uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when p_owner is null or auth.uid() is null then false
+    when p_owner = auth.uid() then true
+    when public.is_blocked_between(p_owner, auth.uid()) then false
+    when not public.is_private_account(p_owner) then true
+    else public.follows_user(auth.uid(), p_owner)
+  end;
+$$;
+
+revoke all on function public.can_view_profile_content(uuid) from public, anon;
+grant execute on function public.can_view_profile_content(uuid) to authenticated;
+
+
+-- Дневник питания. Круг задаёт владелец; блокировка и закрытый аккаунт
+-- перекрывают выбранный круг сверху.
+--
+-- ⚠ ЗАКРЫТЫЙ АККАУНТ ЖЁСТЧЕ НАСТРОЙКИ. Если аккаунт закрыт, то даже
+-- diary_visibility = 'public' не открывает дневник посторонним: закрытость —
+-- это утверждение «мой контент только для одобренных», и дневник входит в
+-- контент. Иначе человек, закрывший аккаунт, продолжал бы отдавать самое
+-- личное всему приложению из-за настройки, выставленной год назад.
+create or replace function public.can_view_diary(p_owner uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when p_owner is null or auth.uid() is null then false
+    when p_owner = auth.uid() then true
+    when public.is_blocked_between(p_owner, auth.uid()) then false
+    else
+      (
+        -- Поимённый доступ и доступ тренера НЕ зависят от закрытости
+        -- аккаунта: и то и другое владелец выдал руками, конкретному
+        -- человеку.
+        exists (
+          select 1 from public.diary_access d
+          where d.owner_id = p_owner and d.user_id = auth.uid()
+        )
+        or exists (
+          select 1 from public.coach_links l
+          where l.status = 'accepted' and l.coach = auth.uid() and l.client = p_owner
+        )
+        or (
+          public.can_view_profile_content(p_owner)
+          and coalesce((
+            select case v.diary_visibility
+              when 'public' then true
+              when 'followers' then public.follows_user(auth.uid(), p_owner)
+              when 'mutuals' then public.follows_user(auth.uid(), p_owner)
+                                and public.follows_user(p_owner, auth.uid())
+              when 'close_friends' then public.is_close_friend(p_owner, auth.uid())
+              else false
+            end
+            from public.profiles v where v.user_id = p_owner
+          ), false)
+        )
+      )
+  end;
+$$;
+
+revoke all on function public.can_view_diary(uuid) from public, anon;
+grant execute on function public.can_view_diary(uuid) to authenticated;
+
+
+-- Видимость поста. Зеркало предиката в политике posts — держать их врозь
+-- нельзя, но и объединить нельзя: политика на posts, зовущая функцию,
+-- читающую posts, зациклится.
+create or replace function public.can_view_post(p_post_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.posts p
+    where p.id = p_post_id
+      and (
+        p.user_id = auth.uid()
+        or (
+          not public.is_blocked_between(p.user_id, auth.uid())
+          and public.can_view_profile_content(p.user_id)
+          and (
+            p.visibility = 'public'
+            or (p.visibility = 'followers' and public.follows_user(auth.uid(), p.user_id))
+            or (p.visibility = 'friends'
+                and public.follows_user(auth.uid(), p.user_id)
+                and public.follows_user(p.user_id, auth.uid()))
+            or (p.visibility = 'close_friends' and public.is_close_friend(p.user_id, auth.uid()))
+          )
+        )
+      )
+  );
+$$;
+
+revoke all on function public.can_view_post(uuid) from public, anon;
+grant execute on function public.can_view_post(uuid) to authenticated;
+
+
+-- Видно ли мне, что человек в сети / когда был. Взаимность намеренная: тот,
+-- кто скрыл своё присутствие, не видит и чужого. Ограниченному (restrict)
+-- присутствие не показывается вовсе — в этом половина смысла ограничения.
+create or replace function public.can_see_activity(p_owner uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when p_owner is null or auth.uid() is null then false
+    when p_owner = auth.uid() then true
+    when public.is_blocked_between(p_owner, auth.uid()) then false
+    when public.is_restricted(p_owner, auth.uid()) then false
+    else coalesce((select show_activity from public.profiles where user_id = p_owner), true)
+     and coalesce((select show_activity from public.profiles where user_id = auth.uid()), true)
+  end;
+$$;
+
+revoke all on function public.can_see_activity(uuid) from public, anon;
+grant execute on function public.can_see_activity(uuid) to authenticated;
+
+
+-- Присутствие переезжает на своё правило.
+--
+-- До сих пор «был(а) в сети» отдавалось по тому же условию, что и дневник
+-- питания (can_view_diary). Это связывало две несвязанные вещи: человек,
+-- закрывший дневник, заодно исчезал из сети, а человек, открывший дневник
+-- подписчикам, показывал им и своё присутствие, не выбирая этого.
+--
+-- Теперь у присутствия свой переключатель (show_activity), своя взаимность и
+-- своё исключение для ограниченных.
+drop policy if exists "presence select self or friends" on public.presence;
+drop policy if exists "presence select by diary visibility" on public.presence;
+drop policy if exists "presence select by activity setting" on public.presence;
+create policy "presence select by activity setting" on public.presence
+  for select using (
+    auth.uid() = presence.user_id
+    or public.can_see_activity(presence.user_id)
+  );
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 5. Право написать
+-- ─────────────────────────────────────────────────────────────────────────
+-- Один ответ на три значения: 'direct' — сразу в чаты, 'request' — в
+-- «Запросы», 'denied' — нельзя вовсе. Эту же функцию зовут RLS, RPC отправки
+-- и интерфейс: трёх разных трактовок права писать в системе быть не должно.
+create or replace function public.get_message_permission(p_sender uuid, p_recipient uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when p_sender is null or p_recipient is null or p_sender = p_recipient then 'denied'
+    when public.is_blocked_between(p_sender, p_recipient) then 'denied'
+    -- Явный отказ получателя сильнее любых настроек категорий.
+    when exists (
+      select 1 from public.message_grants g
+      where g.owner_id = p_recipient and g.peer_id = p_sender and g.state = 'declined'
+    ) then 'denied'
+    -- Ограничение переводит переписку в «Запросы», даже если раньше её
+    -- разрешили: именно это ограничение и означает.
+    when public.is_restricted(p_recipient, p_sender) then 'request'
+    when exists (
+      select 1 from public.message_grants g
+      where g.owner_id = p_recipient and g.peer_id = p_sender and g.state = 'accepted'
+    ) then 'direct'
+    else coalesce((
+      select case
+        when public.follows_user(p_recipient, p_sender) then pr.msg_from_following
+        when public.follows_user(p_sender, p_recipient) then pr.msg_from_followers
+        else pr.msg_from_others
+      end
+      from public.profiles pr where pr.user_id = p_recipient
+    ), 'request')
+  end;
+$$;
+
+revoke all on function public.get_message_permission(uuid, uuid) from public, anon;
+grant execute on function public.get_message_permission(uuid, uuid) to authenticated;
+
+-- Прежнее имя остаётся тонкой обёрткой: на нём стоит политика messages, и
+-- переписывать её отдельно от смысловой части незачем.
+create or replace function public.can_message(p_sender uuid, p_recipient uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.get_message_permission(p_sender, p_recipient) <> 'denied';
+$$;
+
+revoke all on function public.can_message(uuid, uuid) from public, anon;
+grant execute on function public.can_message(uuid, uuid) to authenticated;
+
+-- Состояние диалога глазами владельца. Опирается на то же право, чтобы
+-- «человек может писать сразу» и «диалог лежит в чатах» не разошлись.
+create or replace function public.conversation_state(p_owner uuid, p_peer uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when coalesce((select g.state from public.message_grants g
+                    where g.owner_id = p_owner and g.peer_id = p_peer), '') = 'declined'
+      then 'declined'
+    when public.get_message_permission(p_peer, p_owner) = 'direct' then 'accepted'
+    when public.get_message_permission(p_peer, p_owner) = 'denied' then 'declined'
+    else 'pending'
+  end;
+$$;
+
+revoke all on function public.conversation_state(uuid, uuid) from public, anon;
+grant execute on function public.conversation_state(uuid, uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 6. Подписка: одно действие, два исхода
+-- ─────────────────────────────────────────────────────────────────────────
+-- Прямую вставку в follows оставляем разрешённой ТОЛЬКО для открытых
+-- аккаунтов: на закрытый подписаться нажатием нельзя по определению, и это
+-- обязано держаться политикой, а не тем, что клиент позовёт правильный RPC.
+drop policy if exists "follows insert own" on public.follows;
+create policy "follows insert own" on public.follows
+  for insert with check (
+    auth.uid() = follower_id
+    and follower_id <> following_id
+    and not public.is_blocked_between(follower_id, following_id)
+    and not public.is_private_account(following_id)
+  );
+
+-- Частота просьб. Тот же потолок, что у подписок: двести в час — недостижимо
+-- для человека и заметно ограничивает перебор.
+create or replace function public.limit_follow_requests()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_recent int;
+begin
+  select count(*) into v_recent
+  from public.follow_requests
+  where requester_id = new.requester_id and created_at > now() - interval '1 hour';
+
+  if v_recent >= 200 then
+    raise exception 'too many follow requests, try later' using errcode = '54000';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists follow_requests_rate_limit on public.follow_requests;
+create trigger follow_requests_rate_limit
+  before insert on public.follow_requests
+  for each row execute function public.limit_follow_requests();
+
+-- Событие «просится в подписчики». Отдельный тип: у него своя карточка с
+-- кнопками «Принять» и «Удалить», и путать его с «подписался» нельзя.
+create or replace function public.notify_on_follow_request()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.push_notification(
+    new.target_id, new.requester_id, 'FOLLOW_REQUEST', 'follow_request', new.requester_id
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists follow_requests_notify on public.follow_requests;
+create trigger follow_requests_notify
+  after insert on public.follow_requests
+  for each row execute function public.notify_on_follow_request();
+
+-- Отозванная или отклонённая просьба не должна оставлять после себя событие,
+-- ведущее в никуда.
+create or replace function public.cleanup_follow_request_notification()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.notifications
+   where recipient_id = old.target_id
+     and actor_id = old.requester_id
+     and type = 'FOLLOW_REQUEST';
+  return old;
+end;
+$$;
+
+drop trigger if exists follow_requests_notify_cleanup on public.follow_requests;
+create trigger follow_requests_notify_cleanup
+  after delete on public.follow_requests
+  for each row execute function public.cleanup_follow_request_notification();
+
+
+-- Подписаться. Возвращает то, что случилось на самом деле:
+--   'following' — подписка создана (открытый аккаунт);
+--   'requested' — создана просьба (закрытый аккаунт);
+--   'blocked'   — нельзя.
+-- Повторный вызов ничего не ломает и возвращает текущее состояние: защита от
+-- двойного нажатия стоит здесь, а не на disabled у кнопки.
+create or replace function public.follow_user(p_target uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_target is null or p_target = v_uid then
+    raise exception 'bad target' using errcode = '22023';
+  end if;
+  if public.is_blocked_between(v_uid, p_target) then
+    return 'blocked';
+  end if;
+
+  if public.follows_user(v_uid, p_target) then
+    return 'following';
+  end if;
+
+  if public.is_private_account(p_target) then
+    insert into public.follow_requests (requester_id, target_id)
+    values (v_uid, p_target)
+    on conflict (requester_id, target_id) do nothing;
+    return 'requested';
+  end if;
+
+  insert into public.follows (follower_id, following_id)
+  values (v_uid, p_target)
+  on conflict do nothing;
+  -- Просьба, если она почему-то лежала (аккаунт был закрыт и стал открытым),
+  -- больше не нужна: подписка уже есть.
+  delete from public.follow_requests where requester_id = v_uid and target_id = p_target;
+  return 'following';
+end;
+$$;
+
+revoke all on function public.follow_user(uuid) from public, anon;
+grant execute on function public.follow_user(uuid) to authenticated;
+
+
+-- Отписаться. Снимает и просьбу — «Запрошено → Отменить» и «Вы подписаны →
+-- Отписаться» это одна кнопка в интерфейсе, и одно действие здесь.
+create or replace function public.unfollow_user(p_target uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  delete from public.follows where follower_id = v_uid and following_id = p_target;
+  delete from public.follow_requests where requester_id = v_uid and target_id = p_target;
+  return 'none';
+end;
+$$;
+
+revoke all on function public.unfollow_user(uuid) from public, anon;
+grant execute on function public.unfollow_user(uuid) to authenticated;
+
+
+-- Одобрить просьбу. АТОМАРНО: удаление просьбы и создание подписки в одной
+-- транзакции. Два независимых клиентских запроса на их месте оставляли бы
+-- человека без подписки при обрыве между ними — и без просьбы, то есть без
+-- возможности повторить.
+create or replace function public.accept_follow_request(p_requester uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_found boolean;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_requester is null or p_requester = v_uid then
+    raise exception 'bad requester' using errcode = '22023';
+  end if;
+
+  -- Блокировка строки просьбы: два одобрения подряд (двойное нажатие, две
+  -- вкладки) не должны обе дойти до вставки.
+  delete from public.follow_requests
+   where requester_id = p_requester and target_id = v_uid
+  returning true into v_found;
+
+  if not coalesce(v_found, false) then
+    -- Просьбы нет. Либо её уже одобрили, либо отозвали. Возвращаем текущее
+    -- состояние, а не ошибку: человек добивался именно этого.
+    return case when public.follows_user(p_requester, v_uid) then 'following' else 'gone' end;
+  end if;
+
+  if public.is_blocked_between(v_uid, p_requester) then
+    return 'blocked';
+  end if;
+
+  insert into public.follows (follower_id, following_id)
+  values (p_requester, v_uid)
+  on conflict do nothing;
+
+  -- Отправителю — событие «просьбу одобрили». Уведомление о новом подписчике
+  -- владельцу при этом НЕ шлётся: он сам только что нажал «Принять».
+  perform public.push_notification(p_requester, v_uid, 'FOLLOW_ACCEPTED', 'user', v_uid);
+
+  return 'following';
+end;
+$$;
+
+revoke all on function public.accept_follow_request(uuid) from public, anon;
+grant execute on function public.accept_follow_request(uuid) to authenticated;
+
+
+create or replace function public.decline_follow_request(p_requester uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  delete from public.follow_requests
+   where requester_id = p_requester and target_id = v_uid;
+  -- Отправителю ничего не сообщаем: отказ в подписке — не событие, о котором
+  -- человеку нужно узнать отдельным уведомлением.
+  return 'declined';
+end;
+$$;
+
+revoke all on function public.decline_follow_request(uuid) from public, anon;
+grant execute on function public.decline_follow_request(uuid) to authenticated;
+
+
+-- Убрать подписчика. НЕ блокировка: он не получает уведомления и может
+-- подписаться снова — если аккаунт открыт. У закрытого ему придётся заново
+-- просить, и это ровно то, зачем кнопка и нужна.
+create or replace function public.remove_follower(p_follower uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  delete from public.follows where follower_id = p_follower and following_id = v_uid;
+  return 'removed';
+end;
+$$;
+
+revoke all on function public.remove_follower(uuid) from public, anon;
+grant execute on function public.remove_follower(uuid) to authenticated;
+
+
+-- Список входящих просьб. Только свой: p_target здесь нет вовсе, и подставить
+-- чужой невозможно по построению.
+drop function if exists public.list_follow_requests(int, int);
+
+create or replace function public.list_follow_requests(p_limit int default 30, p_offset int default 0)
+returns table (
+  user_id      uuid,
+  username     text,
+  display_name text,
+  avatar_url   text,
+  created_at   timestamptz
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.user_id, p.username, p.display_name, p.avatar_url, r.created_at
+  from public.follow_requests r
+  join public.profiles p on p.user_id = r.requester_id
+  where r.target_id = auth.uid()
+    and not public.is_blocked_between(r.requester_id, auth.uid())
+  order by r.created_at desc
+  limit least(greatest(coalesce(p_limit, 30), 1), 50)
+  offset greatest(coalesce(p_offset, 0), 0);
+$$;
+
+revoke all on function public.list_follow_requests(int, int) from public, anon;
+grant execute on function public.list_follow_requests(int, int) to authenticated;
+
+create or replace function public.follow_request_count()
+returns int
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(*)::int from public.follow_requests r
+  where r.target_id = auth.uid()
+    and not public.is_blocked_between(r.requester_id, auth.uid());
+$$;
+
+revoke all on function public.follow_request_count() from public, anon;
+grant execute on function public.follow_request_count() to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 7. Настройки приватности
+-- ─────────────────────────────────────────────────────────────────────────
+-- Все — через RPC: прямой записи в profiles у клиента нет с 2026-09-05, и
+-- открывать таблицу ради тумблеров значило бы отдать вместе с ними ник,
+-- имя и аватар.
+
+-- Переключение открытый ↔ закрытый.
+--
+-- ЧТО ПРОИСХОДИТ С СУЩЕСТВУЮЩИМИ СВЯЗЯМИ:
+--   открытый → закрытый: подписчики СОХРАНЯЮТСЯ все до одного. Новые пойдут
+--     через просьбу. Выгонять уже впущенных при смене настройки нельзя —
+--     человек менял правило на будущее, а не отзывал прошлое;
+--   закрытый → открытый: подписчики сохраняются, а НЕРЕШЁННЫЕ ПРОСЬБЫ
+--     остаются просьбами. Автоматически превращать их в подписки нельзя:
+--     владелец эти конкретные аккаунты ещё не одобрил, и «я открываю
+--     аккаунт» не равно «я согласен на всех, кто уже просился». Они остаются
+--     в «Запросах», и он решает по каждому; попроситься заново им не нужно —
+--     а нажать «Подписаться» ещё раз можно в любой момент, подписка тогда
+--     создастся сразу.
+create or replace function public.set_account_privacy(p_private boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  update public.profiles set is_private = coalesce(p_private, false) where user_id = v_uid;
+  return coalesce(p_private, false);
+end;
+$$;
+
+revoke all on function public.set_account_privacy(boolean) from public, anon;
+grant execute on function public.set_account_privacy(boolean) to authenticated;
+
+
+-- Права на переписку по трём категориям — одним вызовом: три отдельных RPC
+-- означали бы три состояния «половина сохранилась».
+create or replace function public.set_message_policy(
+  p_following text, p_followers text, p_others text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_following not in ('direct', 'request', 'none')
+     or p_followers not in ('direct', 'request', 'none')
+     or p_others not in ('direct', 'request', 'none') then
+    raise exception 'unknown message policy' using errcode = '22023';
+  end if;
+
+  update public.profiles
+     set msg_from_following = p_following,
+         msg_from_followers = p_followers,
+         msg_from_others    = p_others
+   where user_id = v_uid;
+end;
+$$;
+
+revoke all on function public.set_message_policy(text, text, text) from public, anon;
+grant execute on function public.set_message_policy(text, text, text) to authenticated;
+
+
+create or replace function public.set_group_invites(p_value text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_value not in ('everyone', 'following', 'none') then
+    raise exception 'unknown group invite policy' using errcode = '22023';
+  end if;
+  update public.profiles set group_invites = p_value where user_id = v_uid;
+  return p_value;
+end;
+$$;
+
+revoke all on function public.set_group_invites(text) from public, anon;
+grant execute on function public.set_group_invites(text) to authenticated;
+
+
+create or replace function public.set_activity_visibility(p_on boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  update public.profiles set show_activity = coalesce(p_on, true) where user_id = v_uid;
+  return coalesce(p_on, true);
+end;
+$$;
+
+revoke all on function public.set_activity_visibility(boolean) from public, anon;
+grant execute on function public.set_activity_visibility(boolean) to authenticated;
+
+
+create or replace function public.set_read_receipts(p_on boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  update public.profiles set read_receipts = coalesce(p_on, true) where user_id = v_uid;
+  return coalesce(p_on, true);
+end;
+$$;
+
+revoke all on function public.set_read_receipts(boolean) from public, anon;
+grant execute on function public.set_read_receipts(boolean) to authenticated;
+
+
+-- Круг дневника. Список значений расширен; проверка — в одном месте, здесь.
+create or replace function public.set_diary_visibility(p_value text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_value not in ('public', 'followers', 'mutuals', 'close_friends', 'selected', 'private') then
+    raise exception 'unknown diary visibility: %', p_value using errcode = '22023';
+  end if;
+
+  update public.profiles set diary_visibility = p_value where user_id = v_uid;
+  return p_value;
+end;
+$$;
+
+revoke all on function public.set_diary_visibility(text) from public, anon;
+grant execute on function public.set_diary_visibility(text) to authenticated;
+
+
+-- Все мои настройки приватности одним запросом: экран настроек иначе делал бы
+-- шесть вызовов ради шести переключателей.
+drop function if exists public.my_privacy();
+
+create or replace function public.my_privacy()
+returns table (
+  is_private          boolean,
+  diary_visibility    text,
+  msg_from_following  text,
+  msg_from_followers  text,
+  msg_from_others     text,
+  group_invites       text,
+  show_activity       boolean,
+  read_receipts       boolean,
+  close_friends_count int,
+  blocked_count       int,
+  restricted_count    int,
+  muted_count         int,
+  diary_access_count  int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    p.is_private, p.diary_visibility,
+    p.msg_from_following, p.msg_from_followers, p.msg_from_others,
+    p.group_invites, p.show_activity, p.read_receipts,
+    (select count(*) from public.close_friends c where c.owner_id = p.user_id)::int,
+    (select count(*) from public.blocks b where b.blocker_id = p.user_id)::int,
+    (select count(*) from public.restricted_users r where r.owner_id = p.user_id)::int,
+    (select count(*) from public.user_mutes m where m.owner_id = p.user_id)::int,
+    (select count(*) from public.diary_access d where d.owner_id = p.user_id)::int
+  from public.profiles p
+  where p.user_id = auth.uid();
+$$;
+
+revoke all on function public.my_privacy() from public, anon;
+grant execute on function public.my_privacy() to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 8. Близкие друзья, ограничение, заглушение, поимённый доступ
+-- ─────────────────────────────────────────────────────────────────────────
+-- У каждого — установить/снять и список. Списки СВОИ и только свои: чужой
+-- список близких друзей не отдаёт ни одна функция и ни одна политика.
+
+create or replace function public.set_close_friend(p_user uuid, p_on boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_user is null or p_user = v_uid then
+    raise exception 'bad user' using errcode = '22023';
+  end if;
+
+  if coalesce(p_on, false) then
+    if public.is_blocked_between(v_uid, p_user) then
+      return false;
+    end if;
+    insert into public.close_friends (owner_id, user_id) values (v_uid, p_user)
+    on conflict (owner_id, user_id) do nothing;
+    return true;
+  end if;
+
+  delete from public.close_friends where owner_id = v_uid and user_id = p_user;
+  return false;
+end;
+$$;
+
+revoke all on function public.set_close_friend(uuid, boolean) from public, anon;
+grant execute on function public.set_close_friend(uuid, boolean) to authenticated;
+
+
+create or replace function public.set_restricted(p_user uuid, p_on boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_user is null or p_user = v_uid then
+    raise exception 'bad user' using errcode = '22023';
+  end if;
+
+  if coalesce(p_on, false) then
+    insert into public.restricted_users (owner_id, restricted_id) values (v_uid, p_user)
+    on conflict (owner_id, restricted_id) do nothing;
+    -- Ограниченный человек не должен узнать об этом ни из чего, включая
+    -- уведомления. Ничего ему не шлём — в этом весь смысл.
+    return true;
+  end if;
+
+  delete from public.restricted_users where owner_id = v_uid and restricted_id = p_user;
+  return false;
+end;
+$$;
+
+revoke all on function public.set_restricted(uuid, boolean) from public, anon;
+grant execute on function public.set_restricted(uuid, boolean) to authenticated;
+
+
+create or replace function public.set_user_mute(
+  p_user uuid, p_posts boolean default true, p_messages boolean default false
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_user is null or p_user = v_uid then
+    raise exception 'bad user' using errcode = '22023';
+  end if;
+
+  -- Обе галочки сняты — строка не нужна вовсе: пустое заглушение и его
+  -- отсутствие это одно и то же состояние, и хранить его дважды незачем.
+  if not coalesce(p_posts, false) and not coalesce(p_messages, false) then
+    delete from public.user_mutes where owner_id = v_uid and target_id = p_user;
+    return;
+  end if;
+
+  insert into public.user_mutes (owner_id, target_id, mute_posts, mute_messages)
+  values (v_uid, p_user, coalesce(p_posts, false), coalesce(p_messages, false))
+  on conflict (owner_id, target_id)
+  do update set mute_posts = excluded.mute_posts, mute_messages = excluded.mute_messages;
+end;
+$$;
+
+revoke all on function public.set_user_mute(uuid, boolean, boolean) from public, anon;
+grant execute on function public.set_user_mute(uuid, boolean, boolean) to authenticated;
+
+
+create or replace function public.set_diary_access(p_user uuid, p_on boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_user is null or p_user = v_uid then
+    raise exception 'bad user' using errcode = '22023';
+  end if;
+
+  if coalesce(p_on, false) then
+    if public.is_blocked_between(v_uid, p_user) then
+      return false;
+    end if;
+    insert into public.diary_access (owner_id, user_id) values (v_uid, p_user)
+    on conflict (owner_id, user_id) do nothing;
+    return true;
+  end if;
+
+  delete from public.diary_access where owner_id = v_uid and user_id = p_user;
+  return false;
+end;
+$$;
+
+revoke all on function public.set_diary_access(uuid, boolean) from public, anon;
+grant execute on function public.set_diary_access(uuid, boolean) to authenticated;
+
+
+-- Списки «моих» отношений. Одна функция на все четыре: карточки одинаковые,
+-- отличается только источник, и четыре почти одинаковых RPC разошлись бы в
+-- мелочах — ровно как уже разошлись четыре копии строки человека в интерфейсе.
+drop function if exists public.list_relation(text, int, int);
+
+create or replace function public.list_relation(
+  p_kind text, p_limit int default 100, p_offset int default 0
+)
+returns table (
+  user_id       uuid,
+  username      text,
+  display_name  text,
+  avatar_url    text,
+  created_at    timestamptz,
+  mute_posts    boolean,
+  mute_messages boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.user_id, p.username, p.display_name, p.avatar_url, s.created_at,
+         coalesce(s.mute_posts, false), coalesce(s.mute_messages, false)
+  from (
+    select c.user_id as target, c.created_at, null::boolean as mute_posts, null::boolean as mute_messages
+      from public.close_friends c where p_kind = 'close_friends' and c.owner_id = auth.uid()
+    union all
+    select b.blocked_id, b.created_at, null, null
+      from public.blocks b where p_kind = 'blocked' and b.blocker_id = auth.uid()
+    union all
+    select r.restricted_id, r.created_at, null, null
+      from public.restricted_users r where p_kind = 'restricted' and r.owner_id = auth.uid()
+    union all
+    select m.target_id, m.created_at, m.mute_posts, m.mute_messages
+      from public.user_mutes m where p_kind = 'muted' and m.owner_id = auth.uid()
+    union all
+    select d.user_id, d.created_at, null, null
+      from public.diary_access d where p_kind = 'diary_access' and d.owner_id = auth.uid()
+  ) s
+  join public.profiles p on p.user_id = s.target
+  order by s.created_at desc
+  limit least(greatest(coalesce(p_limit, 100), 1), 200)
+  offset greatest(coalesce(p_offset, 0), 0);
+$$;
+
+revoke all on function public.list_relation(text, int, int) from public, anon;
+grant execute on function public.list_relation(text, int, int) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 9. Блокировка сносит всё, что связывало двоих
+-- ─────────────────────────────────────────────────────────────────────────
+-- Триггер, а не RPC: блокировку можно поставить и прямой вставкой (политика
+-- blocks это разрешает), и последствия обязаны наступить в любом случае.
+-- Клиенту чистить нечего и незачем — половина удаляемого лежит в строках,
+-- которые ему не видны.
+create or replace function public.apply_block()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.follows
+   where (follower_id = new.blocker_id and following_id = new.blocked_id)
+      or (follower_id = new.blocked_id and following_id = new.blocker_id);
+
+  delete from public.follow_requests
+   where (requester_id = new.blocker_id and target_id = new.blocked_id)
+      or (requester_id = new.blocked_id and target_id = new.blocker_id);
+
+  delete from public.friendships
+   where (requester = new.blocker_id and addressee = new.blocked_id)
+      or (requester = new.blocked_id and addressee = new.blocker_id);
+
+  -- Близкие друзья и поимённый доступ к дневнику снимаются в обе стороны:
+  -- блокировка односторонняя по смыслу, но по последствиям симметрична.
+  delete from public.close_friends
+   where (owner_id = new.blocker_id and user_id = new.blocked_id)
+      or (owner_id = new.blocked_id and user_id = new.blocker_id);
+
+  delete from public.diary_access
+   where (owner_id = new.blocker_id and user_id = new.blocked_id)
+      or (owner_id = new.blocked_id and user_id = new.blocker_id);
+
+  -- Право писать отзывается явно и в обе стороны: без этого разблокировка
+  -- вернула бы старое «разрешено», о котором человек давно забыл.
+  delete from public.message_grants
+   where (owner_id = new.blocker_id and peer_id = new.blocked_id)
+      or (owner_id = new.blocked_id and peer_id = new.blocker_id);
+
+  delete from public.notifications
+   where (recipient_id = new.blocker_id and actor_id = new.blocked_id)
+      or (recipient_id = new.blocked_id and actor_id = new.blocker_id);
+
+  return new;
+end;
+$$;
+
+
+-- Блокировка и разблокировка отдельными RPC — чтобы клиент не собирал
+-- поведение из прямых запросов и не забыл ни одного шага.
+create or replace function public.block_user(p_user uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_user is null or p_user = v_uid then
+    raise exception 'bad user' using errcode = '22023';
+  end if;
+
+  insert into public.blocks (blocker_id, blocked_id) values (v_uid, p_user)
+  on conflict do nothing;
+  return 'blocked';
+end;
+$$;
+
+revoke all on function public.block_user(uuid) from public, anon;
+grant execute on function public.block_user(uuid) to authenticated;
+
+drop function if exists public.unblock_user(uuid);
+
+create or replace function public.unblock_user(p_user uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  delete from public.blocks where blocker_id = v_uid and blocked_id = p_user;
+  return 'unblocked';
+end;
+$$;
+
+revoke all on function public.unblock_user(uuid) from public, anon;
+grant execute on function public.unblock_user(uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 10. Отношение: единственный ответ на «кто мы друг другу»
+-- ─────────────────────────────────────────────────────────────────────────
+-- Набор колонок меняется целиком, поэтому DROP обязателен (42P13). Прежние
+-- поля про заявки в друзья удалены: их не существует с 2026-08-26, и держать
+-- две всегда-false колонки, чтобы «не переучивать клиент», больше не нужно —
+-- клиент переучивается этой же выкладкой.
+drop function if exists public.get_relationship(uuid);
+
+create or replace function public.get_relationship(p_user_id uuid)
+returns table (
+  is_self             boolean,
+  target_is_private   boolean,
+  following           boolean,
+  followed_by         boolean,
+  mutual_follow       boolean,
+  request_sent        boolean,
+  request_received    boolean,
+  is_close_friend     boolean,
+  blocked             boolean,
+  blocked_by          boolean,
+  restricted          boolean,
+  muted_posts         boolean,
+  muted_messages      boolean,
+  has_diary_access    boolean,
+  can_view_content    boolean,
+  can_view_diary      boolean,
+  can_see_activity    boolean,
+  message_permission  text,
+  conversation        text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid)
+  select
+    p_user_id = me.uid,
+    public.is_private_account(p_user_id),
+    public.follows_user(me.uid, p_user_id),
+    public.follows_user(p_user_id, me.uid),
+    public.follows_user(me.uid, p_user_id) and public.follows_user(p_user_id, me.uid),
+    exists (select 1 from public.follow_requests r
+             where r.requester_id = me.uid and r.target_id = p_user_id),
+    exists (select 1 from public.follow_requests r
+             where r.requester_id = p_user_id and r.target_id = me.uid),
+    -- ТОЛЬКО «я добавил его». Обратное («он добавил меня») не отдаётся
+    -- никому и никогда: список близких друзей односторонний и приватный.
+    public.is_close_friend(me.uid, p_user_id),
+    exists (select 1 from public.blocks b where b.blocker_id = me.uid and b.blocked_id = p_user_id),
+    exists (select 1 from public.blocks b where b.blocker_id = p_user_id and b.blocked_id = me.uid),
+    public.is_restricted(me.uid, p_user_id),
+    coalesce((select m.mute_posts from public.user_mutes m
+               where m.owner_id = me.uid and m.target_id = p_user_id), false),
+    coalesce((select m.mute_messages from public.user_mutes m
+               where m.owner_id = me.uid and m.target_id = p_user_id), false),
+    exists (select 1 from public.diary_access d
+             where d.owner_id = me.uid and d.user_id = p_user_id),
+    public.can_view_profile_content(p_user_id),
+    public.can_view_diary(p_user_id),
+    public.can_see_activity(p_user_id),
+    public.get_message_permission(me.uid, p_user_id),
+    public.conversation_state(me.uid, p_user_id)
+  from me;
+$$;
+
+revoke all on function public.get_relationship(uuid) from public, anon;
+grant execute on function public.get_relationship(uuid) to authenticated;
+
+
+-- Пакетная версия для списков. Тот же набор признаков минус те, что требуют
+-- отдельного похода в базу на каждого человека и в списке не нужны
+-- (дневник, присутствие).
+drop function if exists public.relationships_with(uuid[]);
+
+create or replace function public.relationships_with(p_user_ids uuid[])
+returns table (
+  user_id             uuid,
+  is_self             boolean,
+  target_is_private   boolean,
+  following           boolean,
+  followed_by         boolean,
+  mutual_follow       boolean,
+  request_sent        boolean,
+  request_received    boolean,
+  is_close_friend     boolean,
+  blocked             boolean,
+  blocked_by          boolean,
+  restricted          boolean,
+  muted_posts         boolean,
+  muted_messages      boolean,
+  can_view_content    boolean,
+  message_permission  text,
+  conversation        text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid),
+  ids as (select distinct u as id from unnest(p_user_ids[1:200]) u where u is not null)
+  select
+    ids.id,
+    false,
+    public.is_private_account(ids.id),
+    public.follows_user(me.uid, ids.id),
+    public.follows_user(ids.id, me.uid),
+    public.follows_user(me.uid, ids.id) and public.follows_user(ids.id, me.uid),
+    exists (select 1 from public.follow_requests r where r.requester_id = me.uid and r.target_id = ids.id),
+    exists (select 1 from public.follow_requests r where r.requester_id = ids.id and r.target_id = me.uid),
+    public.is_close_friend(me.uid, ids.id),
+    exists (select 1 from public.blocks b where b.blocker_id = me.uid and b.blocked_id = ids.id),
+    exists (select 1 from public.blocks b where b.blocker_id = ids.id and b.blocked_id = me.uid),
+    public.is_restricted(me.uid, ids.id),
+    coalesce((select m.mute_posts from public.user_mutes m where m.owner_id = me.uid and m.target_id = ids.id), false),
+    coalesce((select m.mute_messages from public.user_mutes m where m.owner_id = me.uid and m.target_id = ids.id), false),
+    public.can_view_profile_content(ids.id),
+    public.get_message_permission(me.uid, ids.id),
+    public.conversation_state(me.uid, ids.id)
+  from ids, me
+  where ids.id <> me.uid;
+$$;
+
+revoke all on function public.relationships_with(uuid[]) from public, anon;
+grant execute on function public.relationships_with(uuid[]) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 11. Профиль и списки людей знают про закрытый аккаунт
+-- ─────────────────────────────────────────────────────────────────────────
+-- Шапка и счётчики видны ВСЕГДА (кроме блокировки): иначе на закрытый аккаунт
+-- нельзя даже попроситься — человек не найдёт, к кому обращается. Скрыто ровно
+-- содержимое: посты, дневник, списки подписчиков.
+drop function if exists public.user_profile(uuid);
+
+create or replace function public.user_profile(p_user_id uuid)
+returns table (
+  user_id          uuid,
+  username         text,
+  display_name     text,
+  avatar_url       text,
+  is_private       boolean,
+  is_self          boolean,
+  can_view_content boolean,
+  followers_count  int,
+  following_count  int,
+  friends_count    int,
+  posts_count      int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    p.user_id, p.username, p.display_name, p.avatar_url,
+    p.is_private,
+    p.user_id = auth.uid(),
+    public.can_view_profile_content(p.user_id),
+    (select count(*) from public.follows f where f.following_id = p.user_id)::int,
+    (select count(*) from public.follows f where f.follower_id  = p.user_id)::int,
+    (select count(*) from public.follows f
+      join public.follows r on r.follower_id = f.following_id and r.following_id = f.follower_id
+      where f.follower_id = p.user_id)::int,
+    -- Счётчик записей — только тех, что видны спрашивающему. Иначе закрытый
+    -- профиль обещал бы «12 мыслей» под замком, а открыв доступ, человек
+    -- обнаруживал бы другое число.
+    (select count(*) from public.posts po
+      where po.user_id = p.user_id and public.can_view_post(po.id))::int
+  from public.profiles p
+  where p.user_id = p_user_id
+    and not public.is_blocked_between(p.user_id, auth.uid());
+$$;
+
+revoke all on function public.user_profile(uuid) from public, anon;
+grant execute on function public.user_profile(uuid) to authenticated;
+
+
+-- Подписчики и подписки закрытого аккаунта видны только ему самому и его
+-- одобренным подписчикам. Открытый аккаунт — как раньше, всем.
+drop function if exists public.list_followers(uuid, int, int);
+
+create or replace function public.list_followers(
+  p_user_id uuid, p_limit int default 50, p_offset int default 0
+)
+returns table (user_id uuid, username text, display_name text, avatar_url text, created_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.user_id, p.username, p.display_name, p.avatar_url, f.created_at
+  from public.follows f
+  join public.profiles p on p.user_id = f.follower_id
+  where f.following_id = p_user_id
+    and public.can_view_profile_content(p_user_id)
+    and not public.is_blocked_between(p.user_id, auth.uid())
+  order by f.created_at desc
+  limit least(greatest(coalesce(p_limit, 50), 1), 50)
+  offset greatest(coalesce(p_offset, 0), 0);
+$$;
+
+drop function if exists public.list_following(uuid, int, int);
+
+create or replace function public.list_following(
+  p_user_id uuid, p_limit int default 50, p_offset int default 0
+)
+returns table (user_id uuid, username text, display_name text, avatar_url text, created_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.user_id, p.username, p.display_name, p.avatar_url, f.created_at
+  from public.follows f
+  join public.profiles p on p.user_id = f.following_id
+  where f.follower_id = p_user_id
+    and public.can_view_profile_content(p_user_id)
+    and not public.is_blocked_between(p.user_id, auth.uid())
+  order by f.created_at desc
+  limit least(greatest(coalesce(p_limit, 50), 1), 50)
+  offset greatest(coalesce(p_offset, 0), 0);
+$$;
+
+revoke all on function public.list_followers(uuid, int, int) from public, anon;
+revoke all on function public.list_following(uuid, int, int) from public, anon;
+grant execute on function public.list_followers(uuid, int, int) to authenticated;
+grant execute on function public.list_following(uuid, int, int) to authenticated;
+
+-- Взаимные подписки («Друзья» в интерфейсе). Тот же круг доступа.
+drop function if exists public.list_friends(uuid, int, int);
+
+create or replace function public.list_friends(
+  p_user_id uuid, p_limit int default 100, p_offset int default 0
+)
+returns table (user_id uuid, username text, display_name text, avatar_url text, created_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.user_id, p.username, p.display_name, p.avatar_url, f.created_at
+  from public.follows f
+  join public.follows r on r.follower_id = f.following_id and r.following_id = f.follower_id
+  join public.profiles p on p.user_id = f.following_id
+  where f.follower_id = p_user_id
+    and public.can_view_profile_content(p_user_id)
+    and not public.is_blocked_between(p.user_id, auth.uid())
+  order by f.created_at desc
+  limit least(greatest(coalesce(p_limit, 100), 1), 200)
+  offset greatest(coalesce(p_offset, 0), 0);
+$$;
+
+revoke all on function public.list_friends(uuid, int, int) from public, anon;
+grant execute on function public.list_friends(uuid, int, int) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 12. Посты: круг «близкие друзья» и закрытый аккаунт
+-- ─────────────────────────────────────────────────────────────────────────
+-- Предикат политики — зеркало can_view_post и обязан править́ся вместе с ней.
+-- Развернут здесь целиком, а не вызовом функции: политика на posts, зовущая
+-- функцию, которая читает posts, зациклится.
+drop policy if exists "posts select" on public.posts;
+create policy "posts select" on public.posts
+  for select using (
+    auth.uid() = posts.user_id
+    or (
+      not public.is_blocked_between(posts.user_id, auth.uid())
+      -- Закрытый аккаунт: содержимое только одобренным подписчикам, даже
+      -- если сам пост помечен 'public'. Без этой строки закрытие аккаунта
+      -- ничего бы не закрывало.
+      and (
+        not public.is_private_account(posts.user_id)
+        or public.follows_user(auth.uid(), posts.user_id)
+      )
+      and (
+        posts.visibility = 'public'
+        or (posts.visibility = 'followers' and public.follows_user(auth.uid(), posts.user_id))
+        or (posts.visibility = 'friends'
+            and public.follows_user(auth.uid(), posts.user_id)
+            and public.follows_user(posts.user_id, auth.uid()))
+        or (posts.visibility = 'close_friends' and public.is_close_friend(posts.user_id, auth.uid()))
+      )
+    )
+  );
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 13. Лента
+-- ─────────────────────────────────────────────────────────────────────────
+-- Что изменилось: заглушённые авторы исключаются, круг «близкие друзья»
+-- добавлен, закрытые аккаунты отдают записи только одобренным подписчикам.
+-- Всё это считает сервер — фронтенд ничего не фильтрует и не может.
+drop function if exists public.list_feed(int, timestamptz, uuid);
+
+create or replace function public.list_feed(
+  p_limit int default 20,
+  p_before_at timestamptz default null,
+  p_before_id uuid default null
+)
+returns table (
+  id uuid,
+  user_id uuid,
+  username text,
+  display_name text,
+  avatar_url text,
+  text text,
+  image_url text,
+  visibility text,
+  created_at timestamptz,
+  edited_at timestamptz,
+  carrots int,
+  broccoli int,
+  my_reaction text,
+  comments_count int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid),
+  blocked as (
+    select b.blocked_id as id from public.blocks b, me where b.blocker_id = me.uid
+    union
+    select b.blocker_id from public.blocks b, me where b.blocked_id = me.uid
+  ),
+  followed as (
+    select f.following_id as id from public.follows f, me where f.follower_id = me.uid
+  ),
+  -- Заглушённые авторы выпадают из круга целиком. Подписка при этом цела:
+  -- заглушение её не трогает и человек об этом не узнаёт.
+  muted as (
+    select m.target_id as id from public.user_mutes m, me
+    where m.owner_id = me.uid and m.mute_posts
+  ),
+  circle as (
+    select uid as id from me
+    union select id from followed
+  )
+  select
+    p.id, p.user_id, pr.username, pr.display_name, pr.avatar_url,
+    p.text, p.image_url, p.visibility, p.created_at, p.edited_at,
+    (select count(*) from public.post_reactions r where r.post_id = p.id and r.reaction = '🥕')::int,
+    (select count(*) from public.post_reactions r where r.post_id = p.id and r.reaction = '🥦')::int,
+    (select r.reaction from public.post_reactions r where r.post_id = p.id and r.user_id = (select uid from me)),
+    (select count(*) from public.post_comments c
+      where c.post_id = p.id and c.user_id not in (select id from blocked))::int
+  from public.posts p
+  join circle             on circle.id = p.user_id
+  join public.profiles pr on pr.user_id = p.user_id
+  where
+    (p_before_at is null
+      or (p.created_at, p.id) < (p_before_at, coalesce(p_before_id, '00000000-0000-0000-0000-000000000000'::uuid)))
+    and p.user_id not in (select id from blocked)
+    and p.user_id not in (select id from muted)
+    -- Закрытый аккаунт отдаёт записи только одобренным подписчикам. В ленте
+    -- посторонних его записей быть и не может (круг — только подписки), но
+    -- правило записано явно: отписка не должна оставлять хвост доступа.
+    and (
+      p.user_id = (select uid from me)
+      or (
+        (not public.is_private_account(p.user_id)
+         or p.user_id in (select id from followed))
+        and (
+          p.visibility = 'public'
+          or (p.visibility = 'followers' and p.user_id in (select id from followed))
+          or (p.visibility = 'friends'
+              and p.user_id in (select id from followed)
+              and public.follows_user(p.user_id, (select uid from me)))
+          or (p.visibility = 'close_friends'
+              and public.is_close_friend(p.user_id, (select uid from me)))
+        )
+      )
+    )
+  order by p.created_at desc, p.id desc
+  limit least(greatest(coalesce(p_limit, 20), 1), 50);
+$$;
+
+revoke all on function public.list_feed(int, timestamptz, uuid) from public, anon;
+grant execute on function public.list_feed(int, timestamptz, uuid) to authenticated;
+
+
+-- Записи одного человека. Право на каждую считает can_view_post — одно
+-- определение на все экраны.
+drop function if exists public.list_posts(uuid, int, timestamptz);
+
+create or replace function public.list_posts(
+  p_user_id uuid, p_limit int default 20, p_before timestamptz default null
+)
+returns table (
+  id uuid,
+  user_id uuid,
+  text text,
+  image_url text,
+  visibility text,
+  created_at timestamptz,
+  edited_at timestamptz,
+  carrots int,
+  broccoli int,
+  my_reaction text,
+  comments_count int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid)
+  select
+    p.id, p.user_id, p.text, p.image_url, p.visibility, p.created_at, p.edited_at,
+    (select count(*) from public.post_reactions r where r.post_id = p.id and r.reaction = '🥕')::int,
+    (select count(*) from public.post_reactions r where r.post_id = p.id and r.reaction = '🥦')::int,
+    (select r.reaction from public.post_reactions r, me where r.post_id = p.id and r.user_id = me.uid),
+    (select count(*) from public.post_comments c where c.post_id = p.id)::int
+  from public.posts p, me
+  where p.user_id = p_user_id
+    and (p_before is null or p.created_at < p_before)
+    and public.can_view_post(p.id)
+  order by p.created_at desc
+  limit least(greatest(coalesce(p_limit, 20), 1), 50);
+$$;
+
+revoke all on function public.list_posts(uuid, int, timestamptz) from public, anon;
+grant execute on function public.list_posts(uuid, int, timestamptz) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 14. Поиск людей
+-- ─────────────────────────────────────────────────────────────────────────
+-- Что изменилось: ищем ещё и по отображаемому имени, а не только по нику.
+-- Раньше имя из условия убрали, потому что оно неуникально, — но это довод
+-- против имени как АДРЕСА, а не против поиска по нему: человек ищет «Аня», а
+-- не «anya_k», и не находил ничего.
+--
+-- Закрытые аккаунты из выдачи НЕ убираются: закрытость прячет содержимое, а не
+-- существование человека, иначе на него нельзя попроситься. Заблокированные —
+-- убираются в обе стороны.
+drop function if exists public.search_users(text, int);
+
+create or replace function public.search_users(p_query text, p_limit int default 20)
+returns table (
+  user_id      uuid,
+  username     text,
+  display_name text,
+  avatar_url   text,
+  is_private   boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with q as (
+    select lower(btrim(regexp_replace(coalesce(p_query, ''), '^@+', ''))) as v
+  )
+  select p.user_id, p.username, p.display_name, p.avatar_url, p.is_private
+  from public.profiles p, q
+  where char_length(q.v) >= 2
+    and p.user_id <> auth.uid()
+    and (
+      p.username like q.v || '%'
+      or lower(coalesce(p.display_name, '')) like q.v || '%'
+      or lower(coalesce(p.display_name, '')) like '% ' || q.v || '%'
+    )
+    and not public.is_blocked_between(p.user_id, auth.uid())
+  order by
+    (p.username = q.v) desc,
+    (p.username like q.v || '%') desc,
+    (exists (select 1 from public.follows f
+              where f.follower_id = auth.uid() and f.following_id = p.user_id)) desc,
+    (exists (select 1 from public.follows f
+              where f.follower_id = p.user_id and f.following_id = auth.uid())) desc,
+    p.username
+  limit least(greatest(coalesce(p_limit, 20), 1), 30);
+$$;
+
+revoke all on function public.search_users(text, int) from public, anon;
+grant execute on function public.search_users(text, int) to authenticated;
+
+-- Поиск по имени требует индекса по нижнему регистру: без него каждый запрос
+-- читал бы profiles целиком.
+create index if not exists profiles_display_name_lower_idx
+  on public.profiles (lower(display_name) text_pattern_ops);
+
+-- Карточка человека теперь несёт и признак закрытости: списки рисуют по ней
+-- замок, не спрашивая отношения отдельным запросом.
+drop function if exists public.user_cards(uuid[]);
+
+create or replace function public.user_cards(p_user_ids uuid[])
+returns table (
+  user_id      uuid,
+  username     text,
+  display_name text,
+  avatar_url   text,
+  is_private   boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.user_id, p.username, p.display_name, p.avatar_url, p.is_private
+  from public.profiles p
+  where p.user_id = any (p_user_ids[1:200])
+    and not public.is_blocked_between(p.user_id, auth.uid());
+$$;
+
+revoke all on function public.user_cards(uuid[]) from public, anon;
+grant execute on function public.user_cards(uuid[]) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 15. Уведомления
+-- ─────────────────────────────────────────────────────────────────────────
+-- Тип стал текстом (см. §2.3), поэтому старую сигнатуру push_notification
+-- нужно СНЯТЬ, а не переопределить: иначе рядом окажутся две функции с
+-- одинаковым именем, и вызов вида push_notification(…, 'FOLLOW', …) станет
+-- неоднозначным (42725).
+drop function if exists public.push_notification(uuid, uuid, public.notification_type, text, uuid, jsonb);
+
+create or replace function public.push_notification(
+  p_recipient   uuid,
+  p_actor       uuid,
+  p_type        text,
+  p_entity_type text default null,
+  p_entity_id   uuid default null,
+  p_metadata    jsonb default '{}'::jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_recipient is null or p_recipient = p_actor then
+    return;
+  end if;
+  if p_actor is not null and public.is_blocked_between(p_recipient, p_actor) then
+    return;
+  end if;
+
+  -- Заглушённый собеседник не звонит в колокольчик. Событие всё равно не
+  -- пишем: непрочитанный бейдж — это и есть тот сигнал, от которого человек
+  -- отказался, заглушив. Сама переписка при этом идёт как обычно.
+  if p_actor is not null and p_type in ('MESSAGE', 'MESSAGE_REQUEST', 'MESSAGE_REACTION') then
+    if exists (
+      select 1 from public.user_mutes m
+      where m.owner_id = p_recipient and m.target_id = p_actor and m.mute_messages
+    ) then
+      return;
+    end if;
+  end if;
+
+  perform set_config('eataps.trusted_notification_write', 'on', true);
+
+  insert into public.notifications
+    (recipient_id, actor_id, type, entity_type, entity_id, metadata)
+  values
+    (p_recipient, p_actor, p_type, p_entity_type, p_entity_id, coalesce(p_metadata, '{}'::jsonb))
+  on conflict (recipient_id, actor_id, type, entity_id)
+    where entity_id is not null
+  do update set created_at = now(), read_at = null, metadata = excluded.metadata;
+
+  perform set_config('eataps.trusted_notification_write', 'off', true);
+end;
+$$;
+
+revoke all on function public.push_notification(uuid, uuid, text, text, uuid, jsonb)
+  from public, anon, authenticated;
+
+
+-- «Подписался» больше не шлётся на закрытый аккаунт: туда подписка приходит
+-- только через одобренную просьбу, а о ней уже сказало FOLLOW_REQUEST.
+-- Триггер снимается вместе с функцией: иначе DROP упирается в зависимость.
+-- Пересоздаём оба тут же, ниже.
+drop trigger if exists follows_notify on public.follows;
+drop function if exists public.notify_on_follow();
+
+create or replace function public.notify_on_follow()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- На ЗАКРЫТЫЙ аккаунт подписка появляется только через одобренную просьбу,
+  -- и о ней владелец уже знает: он сам нажал «Принять» секунду назад.
+  -- Событие «подписался» здесь было бы вторым уведомлением о том же.
+  if public.is_private_account(new.following_id) then
+    return new;
+  end if;
+
+  perform public.push_notification(
+    new.following_id, new.follower_id, 'FOLLOW', 'user', new.follower_id
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists follows_notify on public.follows;
+create trigger follows_notify
+  after insert on public.follows
+  for each row execute function public.notify_on_follow();
+
+
+-- Список событий. Тип теперь text; добавлено поле actor_is_private, чтобы
+-- карточка «просится в подписчики» могла нарисовать замок, не спрашивая
+-- профиль отдельным запросом на каждую строку.
+drop function if exists public.list_notifications(int, timestamptz);
+
+create or replace function public.list_notifications(
+  p_limit int default 40, p_before timestamptz default null
+)
+returns table (
+  id             uuid,
+  type           text,
+  entity_type    text,
+  entity_id      uuid,
+  metadata       jsonb,
+  created_at     timestamptz,
+  read_at        timestamptz,
+  actor_id       uuid,
+  actor_name     text,
+  actor_avatar   text,
+  actor_username text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    n.id, n.type, n.entity_type, n.entity_id, n.metadata, n.created_at, n.read_at,
+    n.actor_id, p.display_name, p.avatar_url, p.username
+  from public.notifications n
+  left join public.profiles p on p.user_id = n.actor_id
+  where n.recipient_id = auth.uid()
+    and (p_before is null or n.created_at < p_before)
+    and (n.actor_id is null or not public.is_blocked_between(n.actor_id, auth.uid()))
+    -- Просьба о подписке живёт, пока лежит сама просьба. Одобрив её из
+    -- профиля, человек не должен потом видеть в событиях кнопку «Принять»
+    -- для того, кто уже подписан.
+    and (n.type <> 'FOLLOW_REQUEST' or exists (
+      select 1 from public.follow_requests r
+      where r.target_id = auth.uid() and r.requester_id = n.actor_id
+    ))
+  order by n.created_at desc
+  limit least(greatest(coalesce(p_limit, 40), 1), 100);
+$$;
+
+revoke all on function public.list_notifications(int, timestamptz) from public, anon;
+grant execute on function public.list_notifications(int, timestamptz) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 16. Realtime
+-- ─────────────────────────────────────────────────────────────────────────
+-- Просьба о подписке должна доезжать до владельца сразу — иначе бейдж
+-- «Запросы» появляется только при следующем открытии приложения.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'follow_requests'
+  ) then
+    execute 'alter publication supabase_realtime add table public.follow_requests';
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'follows'
+  ) then
+    execute 'alter publication supabase_realtime add table public.follows';
+  end if;
+end $$;
+
+alter table public.follow_requests replica identity full;
+alter table public.follows replica identity full;
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-09_conversations.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — переписка переезжает на диалоги: группы, запросы, отзыв сообщений.
+--
+-- Запускать в Supabase SQL Editor ПОСЛЕ 2026-09-09_social_graph_v2.sql.
+-- Идемпотентно. НИ ОДНО СООБЩЕНИЕ НЕ УДАЛЯЕТСЯ И НЕ ПЕРЕПИСЫВАЕТСЯ.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- ПОЧЕМУ НЕЛЬЗЯ БЫЛО ОСТАТЬСЯ НА ПАРЕ (sender, recipient)
+--
+-- Модель «у сообщения ровно один получатель» описывает переписку двоих и
+-- ничего кроме. Групповой чат в неё не ложится ни при каких ухищрениях:
+-- рассылать по копии сообщения каждому участнику — значит завести N разных
+-- сообщений, у которых разъедутся реакции, ответы, отзыв и прочтение.
+--
+-- Поэтому появляется диалог как самостоятельная сущность, а сообщение
+-- принадлежит диалогу. Личная переписка — частный случай: диалог из двух
+-- участников.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- КАК ПЕРЕЕЗЖАЮТ СУЩЕСТВУЮЩИЕ ДАННЫЕ
+--
+-- 1. Для каждой пары, между которыми есть хоть одно сообщение, заводится
+--    диалог типа 'direct';
+-- 2. У всех сообщений этой пары проставляется conversation_id;
+-- 3. Оба человека становятся участниками; состояние участника берётся из
+--    message_grants — то есть ровно то, что уже решено;
+-- 4. Колонка recipient ОСТАЁТСЯ и продолжает заполняться для личных
+--    диалогов. Это не дубль ради дубля: на ней держатся счётчик
+--    непрочитанного, бейдж в навигации и весь ещё не обновлённый клиент.
+--    Для группового сообщения recipient пуст — отсюда снятие NOT NULL.
+--
+-- ───────────────────────────────────────────────────────────────────────────
+-- ЧТО ПОЯВЛЯЕТСЯ
+--
+--   • групповые чаты с ролями, названием и составом участников;
+--   • запросы на переписку живут на участнике диалога, а не вычисляются
+--     каждый раз заново;
+--   • отзыв сообщения у всех (unsend) и скрытие у себя (delete for me);
+--   • «прочитано» указателем last_read_at, а не UPDATE на каждое сообщение;
+--   • реакции произвольным эмодзи из списка, по одной на человека;
+--   • архив и очистка переписки — у каждого участника своя;
+--   • пересылка;
+--   • поиск по сообщениям;
+--   • закрытое хранилище для вложений личной переписки.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 1. Диалоги и участники
+-- ─────────────────────────────────────────────────────────────────────────
+-- pair_low / pair_high — отсортированная пара участников личного диалога.
+-- Нужны ровно для одного: уникального индекса, который не даёт двум
+-- одновременным «написать этому человеку» создать два диалога. Без него
+-- гонка при первом сообщении разводит переписку по двум веткам, и обнаружить
+-- это можно только по жалобе «он мне отвечает, а я не вижу».
+create table if not exists public.conversations (
+  id              uuid primary key default gen_random_uuid(),
+  kind            text not null default 'direct',
+  title           text,
+  avatar_url      text,
+  created_by      uuid references auth.users(id) on delete set null,
+  created_at      timestamptz not null default now(),
+  last_message_at timestamptz not null default now(),
+  pair_low        uuid references auth.users(id) on delete cascade,
+  pair_high       uuid references auth.users(id) on delete cascade,
+  constraint conversations_kind_known check (kind in ('direct', 'group')),
+  constraint conversations_title_len check (title is null or char_length(title) <= 80),
+  -- Личный диалог обязан знать свою пару, групповой — не имеет её вовсе.
+  constraint conversations_pair_shape check (
+    (kind = 'direct' and pair_low is not null and pair_high is not null and pair_low < pair_high)
+    or (kind = 'group' and pair_low is null and pair_high is null)
+  )
+);
+
+create unique index if not exists conversations_direct_pair_uniq
+  on public.conversations (pair_low, pair_high) where kind = 'direct';
+
+create index if not exists conversations_recent_idx
+  on public.conversations (last_message_at desc);
+
+
+-- Участник диалога. Здесь же лежит всё «личное отношение к переписке»:
+-- прочитано до, заглушено до, убрано в архив, очищено у себя, состояние
+-- запроса. Всё это у каждого своё и в общую строку диалога не помещается.
+create table if not exists public.conversation_members (
+  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  user_id         uuid not null references auth.users(id) on delete cascade,
+  role            text not null default 'member',
+  state           text not null default 'accepted',
+  joined_at       timestamptz not null default now(),
+  left_at         timestamptz,
+  last_read_at    timestamptz,
+  muted_until     timestamptz,
+  archived        boolean not null default false,
+  cleared_at      timestamptz,
+  primary key (conversation_id, user_id),
+  constraint conversation_members_role_known check (role in ('owner', 'admin', 'member')),
+  constraint conversation_members_state_known check (state in ('accepted', 'pending', 'declined'))
+);
+
+create index if not exists conversation_members_user_idx
+  on public.conversation_members (user_id, state)
+  where left_at is null;
+
+alter table public.conversations enable row level security;
+alter table public.conversation_members enable row level security;
+
+
+-- Членство — предикат, а не подзапрос в каждой политике. SECURITY DEFINER,
+-- потому что политика самой conversation_members иначе сослалась бы на себя
+-- и ушла в бесконечную рекурсию (42P17) — классическая ловушка RLS.
+create or replace function public.is_conversation_member(p_conversation uuid, p_user uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.conversation_members m
+    where m.conversation_id = p_conversation
+      and m.user_id = p_user
+      and m.left_at is null
+  );
+$$;
+
+revoke all on function public.is_conversation_member(uuid, uuid) from public, anon;
+grant execute on function public.is_conversation_member(uuid, uuid) to authenticated;
+
+create or replace function public.conversation_role(p_conversation uuid, p_user uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select m.role from public.conversation_members m
+  where m.conversation_id = p_conversation and m.user_id = p_user and m.left_at is null;
+$$;
+
+revoke all on function public.conversation_role(uuid, uuid) from public, anon;
+grant execute on function public.conversation_role(uuid, uuid) to authenticated;
+
+
+-- Диалог виден только его участникам. Ни создания, ни изменения напрямую:
+-- и то и другое проверяет права, которых у политики нет.
+drop policy if exists "conversations select member" on public.conversations;
+create policy "conversations select member" on public.conversations
+  for select using (public.is_conversation_member(id, auth.uid()));
+
+-- Состав диалога виден его участникам. Себя добавить нельзя: INSERT-политики
+-- нет вовсе, вступление идёт только через RPC.
+drop policy if exists "conversation members select" on public.conversation_members;
+create policy "conversation members select" on public.conversation_members
+  for select using (public.is_conversation_member(conversation_id, auth.uid()));
+
+-- Своя строка участника — единственное, что можно менять напрямую: прочитано,
+-- заглушено, архив. Роль и состояние сюда не входят и проверяются триггером.
+drop policy if exists "conversation members update own" on public.conversation_members;
+create policy "conversation members update own" on public.conversation_members
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Клиент не должен уметь выдать себе роль администратора или перевести свой
+-- запрос в «принято» в обход RPC — тот делает это вместе с message_grants.
+create or replace function public.guard_conversation_member_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if coalesce(current_setting('eataps.trusted_member_write', true), 'off') = 'on' then
+    return new;
+  end if;
+  if new.role is distinct from old.role
+     or new.state is distinct from old.state
+     or new.user_id is distinct from old.user_id
+     or new.conversation_id is distinct from old.conversation_id
+     or new.joined_at is distinct from old.joined_at
+     or new.left_at is distinct from old.left_at then
+    raise exception 'only read/mute/archive state can be updated directly';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists conversation_members_update_guard on public.conversation_members;
+create trigger conversation_members_update_guard
+  before update on public.conversation_members
+  for each row execute function public.guard_conversation_member_update();
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 2. Сообщения переезжают в диалоги
+-- ─────────────────────────────────────────────────────────────────────────
+alter table public.messages add column if not exists conversation_id uuid references public.conversations(id) on delete cascade;
+-- Отзыв «у всех». Строку не удаляем: у ответов на неё есть reply_to, а
+-- каскад on delete set null стёр бы связь и превратил цитату в сироту.
+-- Отозванное сообщение остаётся на месте пустой пометкой «сообщение удалено».
+alter table public.messages add column if not exists unsent_at timestamptz;
+alter table public.messages add column if not exists edited_at timestamptz;
+-- Вложение сложнее картинки: видео, звук, «просмотр один раз».
+--   { kind: 'image'|'video'|'audio', url, mime, size, duration, width, height,
+--     mode: 'keep'|'view_once' }
+alter table public.messages add column if not exists media jsonb;
+alter table public.messages add column if not exists forwarded_from uuid references auth.users(id) on delete set null;
+
+-- Групповому сообщению получатель не нужен: их там столько, сколько
+-- участников. Для личного он по-прежнему заполняется — на нём держатся
+-- счётчики непрочитанного и весь ещё не обновлённый клиент.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'messages'
+      and column_name = 'recipient' and is_nullable = 'NO'
+  ) then
+    alter table public.messages alter column recipient drop not null;
+  end if;
+end $$;
+
+create index if not exists messages_conversation_idx
+  on public.messages (conversation_id, created_at desc, id desc);
+
+-- Поиск по тексту переписки. Индекс по триграммам не заводим: расширение
+-- pg_trgm есть не во всех проектах, а объём переписки здесь такой, что
+-- обычный ILIKE по одному диалогу отрабатывает по индексу выше.
+
+
+-- 2.1. Разовый перенос существующей переписки в диалоги.
+--
+-- Выполняется только для сообщений без conversation_id, поэтому повторный
+-- прогон ничего не делает. Личные диалоги создаются по факту переписки,
+-- состояние участника берётся из уже принятых решений.
+insert into public.conversations (kind, pair_low, pair_high, created_at, last_message_at)
+select 'direct',
+       least(m.sender, m.recipient),
+       greatest(m.sender, m.recipient),
+       min(m.created_at),
+       max(m.created_at)
+from public.messages m
+where m.conversation_id is null
+  and m.recipient is not null
+  and m.sender <> m.recipient
+group by least(m.sender, m.recipient), greatest(m.sender, m.recipient)
+on conflict (pair_low, pair_high) where kind = 'direct' do nothing;
+
+update public.messages m
+   set conversation_id = c.id
+  from public.conversations c
+ where m.conversation_id is null
+   and m.recipient is not null
+   and c.kind = 'direct'
+   and c.pair_low  = least(m.sender, m.recipient)
+   and c.pair_high = greatest(m.sender, m.recipient);
+
+-- Участники: обе стороны каждого личного диалога.
+insert into public.conversation_members (conversation_id, user_id, role, state, last_read_at)
+select c.id, c.pair_low, 'member',
+       coalesce((select g.state from public.message_grants g
+                  where g.owner_id = c.pair_low and g.peer_id = c.pair_high), 'accepted'),
+       (select max(x.created_at) from public.messages x
+         where x.conversation_id = c.id and x.recipient = c.pair_low and x.read_at is not null)
+from public.conversations c
+where c.kind = 'direct'
+on conflict (conversation_id, user_id) do nothing;
+
+insert into public.conversation_members (conversation_id, user_id, role, state, last_read_at)
+select c.id, c.pair_high, 'member',
+       coalesce((select g.state from public.message_grants g
+                  where g.owner_id = c.pair_high and g.peer_id = c.pair_low), 'accepted'),
+       (select max(x.created_at) from public.messages x
+         where x.conversation_id = c.id and x.recipient = c.pair_high and x.read_at is not null)
+from public.conversations c
+where c.kind = 'direct'
+on conflict (conversation_id, user_id) do nothing;
+
+
+-- 2.2. Права на сообщения.
+--
+-- Прежнее условие (я отправитель или получатель) СОХРАНЕНО: на нём держится
+-- ещё не обновлённый клиент, читающий messages напрямую. Добавлено членство в
+-- диалоге — единственный способ увидеть групповое сообщение.
+--
+-- Заблокированные не видят переписку друг друга вовсе: без этой строки
+-- блокировка оставляла бы полностью читаемую историю.
+drop policy if exists "messages select" on public.messages;
+create policy "messages select" on public.messages
+  for select using (
+    (
+      auth.uid() = sender
+      or auth.uid() = recipient
+      or (conversation_id is not null and public.is_conversation_member(conversation_id, auth.uid()))
+    )
+    and (recipient is null or not public.is_blocked_between(sender, auth.uid()))
+  );
+
+-- Вставка: либо старым путём (личное сообщение с проверкой права писать),
+-- либо в диалог, где я состою. Второе условие ещё раз проверяется в RPC —
+-- политика здесь нижняя граница, а не единственная.
+drop policy if exists "messages insert" on public.messages;
+create policy "messages insert" on public.messages
+  for insert with check (
+    auth.uid() = sender
+    and (
+      (recipient is not null and public.can_message(sender, recipient))
+      or (conversation_id is not null and public.is_conversation_member(conversation_id, auth.uid()))
+    )
+  );
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 3. «Удалить у себя»
+-- ─────────────────────────────────────────────────────────────────────────
+-- Раньше это жило в localStorage и не переживало смену устройства: человек
+-- убирал сообщение на телефоне и снова видел его на ноутбуке. Скрытие — это
+-- решение человека, а не настройка браузера, поэтому его место на сервере.
+create table if not exists public.message_deletions (
+  message_id uuid not null references public.messages(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (message_id, user_id)
+);
+
+create index if not exists message_deletions_user_idx on public.message_deletions (user_id);
+
+alter table public.message_deletions enable row level security;
+
+drop policy if exists "message deletions own" on public.message_deletions;
+create policy "message deletions own" on public.message_deletions
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "message deletions insert own" on public.message_deletions;
+create policy "message deletions insert own" on public.message_deletions
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "message deletions delete own" on public.message_deletions;
+create policy "message deletions delete own" on public.message_deletions
+  for delete using (auth.uid() = user_id);
+
+-- Кто уже посмотрел «одноразовое» вложение. Отдельная таблица, потому что
+-- в группе просмотр у каждого свой.
+create table if not exists public.message_views (
+  message_id uuid not null references public.messages(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  viewed_at  timestamptz not null default now(),
+  primary key (message_id, user_id)
+);
+
+alter table public.message_views enable row level security;
+
+-- Отправитель видит, кто посмотрел; каждый видит свои отметки.
+drop policy if exists "message views select" on public.message_views;
+create policy "message views select" on public.message_views
+  for select using (
+    auth.uid() = user_id
+    or exists (select 1 from public.messages m where m.id = message_id and m.sender = auth.uid())
+  );
+
+drop policy if exists "message views insert own" on public.message_views;
+create policy "message views insert own" on public.message_views
+  for insert with check (auth.uid() = user_id);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 4. Триггеры сообщений становятся диалоговыми
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- Квоты на непринятую переписку. Групповые сообщения под них не попадают:
+-- войти в группу без приглашения нельзя, и рассылать через неё некому.
+create or replace function public.limit_unaccepted_messages()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_pending int;
+  v_new_peers int;
+begin
+  if new.recipient is null then
+    return new;
+  end if;
+  if public.get_message_permission(new.sender, new.recipient) = 'direct' then
+    return new;
+  end if;
+
+  select count(*) into v_pending
+  from public.messages m
+  where m.sender = new.sender and m.recipient = new.recipient;
+
+  if v_pending >= 5 then
+    raise exception 'Пока человек не ответил, можно отправить не больше 5 сообщений'
+      using errcode = '54000';
+  end if;
+
+  select count(distinct m.recipient) into v_new_peers
+  from public.messages m
+  where m.sender = new.sender
+    and m.created_at > now() - interval '1 hour'
+    and not exists (
+      select 1 from public.messages e
+      where e.sender = m.recipient and e.recipient = m.sender
+    );
+
+  if v_new_peers >= 20 then
+    raise exception 'Слишком много новых собеседников за час, попробуйте позже'
+      using errcode = '54000';
+  end if;
+
+  return new;
+end;
+$$;
+
+
+-- Событие о сообщении. Теперь оно рассылается ВСЕМ участникам диалога, кроме
+-- отправителя, и различает обычное сообщение и запрос: у них разные экраны и
+-- разные бейджи.
+--
+-- entity_id для личного диалога — id собеседника (одна строка на диалог, и
+-- вести она должна в диалог). Для группы — id диалога.
+create or replace function public.notify_on_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_member record;
+  v_kind text;
+begin
+  if new.conversation_id is null then
+    -- Сообщение, вставленное старым клиентом напрямую: диалога у него нет.
+    perform public.push_notification(new.recipient, new.sender, 'MESSAGE', 'message', new.sender);
+    return new;
+  end if;
+
+  select kind into v_kind from public.conversations where id = new.conversation_id;
+
+  for v_member in
+    select m.user_id, m.state, m.muted_until
+    from public.conversation_members m
+    where m.conversation_id = new.conversation_id
+      and m.user_id <> new.sender
+      and m.left_at is null
+  loop
+    -- Заглушённый диалог не звонит. Сообщение при этом доставлено, счётчик
+    -- внутри списка диалогов его посчитает — молчит только колокольчик.
+    if v_member.muted_until is not null and v_member.muted_until > now() then
+      continue;
+    end if;
+    if v_member.state = 'declined' then
+      continue;
+    end if;
+
+    if v_kind = 'group' then
+      perform public.push_notification(
+        v_member.user_id, new.sender,
+        case when v_member.state = 'pending' then 'MESSAGE_REQUEST' else 'MESSAGE' end,
+        'conversation', new.conversation_id
+      );
+    else
+      perform public.push_notification(
+        v_member.user_id, new.sender,
+        case when v_member.state = 'pending' then 'MESSAGE_REQUEST' else 'MESSAGE' end,
+        'message', new.sender
+      );
+    end if;
+  end loop;
+
+  return new;
+end;
+$$;
+
+
+-- Прямые UPDATE по messages остаются доступны только получателю личного
+-- сообщения и только для read_at. Всё остальное (реакции, отзыв, правка) идёт
+-- через RPC, которые помечают запись доверенной.
+create or replace function public.guard_message_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if coalesce(current_setting('eataps.trusted_message_write', true), 'off') = 'on' then
+    return new;
+  end if;
+
+  if auth.uid() = old.recipient and auth.uid() <> old.sender then
+    if new.text            is distinct from old.text
+       or new.image_url    is distinct from old.image_url
+       or new.media        is distinct from old.media
+       or new.meal_ref     is distinct from old.meal_ref
+       or new.sender       is distinct from old.sender
+       or new.recipient    is distinct from old.recipient
+       or new.created_at   is distinct from old.created_at
+       or new.reply_to     is distinct from old.reply_to
+       or new.reply_snapshot  is distinct from old.reply_snapshot
+       or new.forwarded_name  is distinct from old.forwarded_name
+       or new.unsent_at    is distinct from old.unsent_at
+       or new.reactions    is distinct from old.reactions
+       or new.conversation_id is distinct from old.conversation_id then
+      raise exception 'Only read_at can be updated by the recipient';
+    end if;
+    if new.read_at is null and old.read_at is not null then
+      raise exception 'read_at cannot be cleared';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop policy if exists "messages mark read" on public.messages;
+create policy "messages mark read" on public.messages
+  for update using (auth.uid() = recipient) with check (auth.uid() = recipient);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 5. Создание диалогов
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- Личный диалог: найти или создать. Идемпотентна по построению — повторный
+-- вызов возвращает тот же id, а уникальный индекс по паре не даёт двум
+-- одновременным вызовам развести переписку по двум веткам.
+--
+-- Состояние участника выставляется по праву писать: 'accepted', если человек
+-- принимает сообщения от собеседника сразу, иначе 'pending' — и диалог
+-- ложится к нему в «Запросы», а не в чаты.
+create or replace function public.direct_conversation(p_peer uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_low  uuid;
+  v_high uuid;
+  v_id   uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_peer is null or p_peer = v_uid then
+    raise exception 'bad peer' using errcode = '22023';
+  end if;
+  if public.is_blocked_between(v_uid, p_peer) then
+    raise exception 'Этот диалог недоступен' using errcode = '42501';
+  end if;
+
+  v_low  := least(v_uid, p_peer);
+  v_high := greatest(v_uid, p_peer);
+
+  select id into v_id from public.conversations
+   where kind = 'direct' and pair_low = v_low and pair_high = v_high;
+
+  if v_id is not null then
+    return v_id;
+  end if;
+
+  insert into public.conversations (kind, created_by, pair_low, pair_high)
+  values ('direct', v_uid, v_low, v_high)
+  on conflict (pair_low, pair_high) where kind = 'direct' do nothing
+  returning id into v_id;
+
+  if v_id is null then
+    -- Гонку выиграл кто-то другой: диалог уже есть, и это нормальный исход.
+    select id into v_id from public.conversations
+     where kind = 'direct' and pair_low = v_low and pair_high = v_high;
+    return v_id;
+  end if;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  insert into public.conversation_members (conversation_id, user_id, state)
+  values
+    (v_id, v_uid,  case when public.get_message_permission(p_peer, v_uid) = 'direct' then 'accepted' else 'pending' end),
+    (v_id, p_peer, case when public.get_message_permission(v_uid, p_peer) = 'direct' then 'accepted' else 'pending' end)
+  on conflict (conversation_id, user_id) do nothing;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+
+  return v_id;
+end;
+$$;
+
+revoke all on function public.direct_conversation(uuid) from public, anon;
+grant execute on function public.direct_conversation(uuid) to authenticated;
+
+
+-- Кто может добавить меня в группу. Блокировка перекрывает всё; дальше —
+-- настройка приглашаемого.
+create or replace function public.can_invite_to_group(p_inviter uuid, p_invitee uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when p_inviter is null or p_invitee is null or p_inviter = p_invitee then false
+    when public.is_blocked_between(p_inviter, p_invitee) then false
+    else coalesce((
+      select case pr.group_invites
+        when 'everyone' then true
+        when 'following' then public.follows_user(p_invitee, p_inviter)
+        else false
+      end
+      from public.profiles pr where pr.user_id = p_invitee
+    ), false)
+  end;
+$$;
+
+revoke all on function public.can_invite_to_group(uuid, uuid) from public, anon;
+grant execute on function public.can_invite_to_group(uuid, uuid) to authenticated;
+
+
+-- Групповой диалог. Приглашать можно только тех, кто это разрешил: настройка
+-- group_invites у каждого своя ('everyone' | 'following' | 'none').
+create or replace function public.create_group_conversation(p_title text, p_members uuid[])
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_id    uuid;
+  v_title text := nullif(btrim(coalesce(p_title, '')), '');
+  v_ids   uuid[];
+  v_one   uuid;
+  v_added int := 0;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select array_agg(distinct u) into v_ids
+  from unnest(coalesce(p_members, '{}'::uuid[])) u
+  where u is not null and u <> v_uid;
+
+  if v_ids is null or array_length(v_ids, 1) < 1 then
+    raise exception 'Выберите хотя бы одного участника' using errcode = '22023';
+  end if;
+  if array_length(v_ids, 1) > 49 then
+    raise exception 'В группе не больше 50 участников' using errcode = '22023';
+  end if;
+  if v_title is not null and char_length(v_title) > 80 then
+    raise exception 'Слишком длинное название' using errcode = '22001';
+  end if;
+
+  insert into public.conversations (kind, title, created_by)
+  values ('group', v_title, v_uid)
+  returning id into v_id;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  insert into public.conversation_members (conversation_id, user_id, role, state)
+  values (v_id, v_uid, 'owner', 'accepted');
+
+  foreach v_one in array v_ids loop
+    if public.is_blocked_between(v_uid, v_one) then
+      continue;
+    end if;
+    if public.can_invite_to_group(v_uid, v_one) then
+      insert into public.conversation_members (conversation_id, user_id, role, state)
+      values (v_id, v_one, 'member',
+              case when public.get_message_permission(v_uid, v_one) = 'direct' then 'accepted' else 'pending' end)
+      on conflict (conversation_id, user_id) do nothing;
+      -- Человек должен узнать, что его куда-то добавили, а не обнаружить это
+      -- по всплывшему в списке незнакомому диалогу.
+      perform public.push_notification(v_one, v_uid, 'GROUP_INVITE', 'conversation', v_id);
+      v_added := v_added + 1;
+    end if;
+  end loop;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+
+  if v_added = 0 then
+    raise exception 'Никого из выбранных нельзя добавить в группу' using errcode = '42501';
+  end if;
+
+  return v_id;
+end;
+$$;
+
+revoke all on function public.create_group_conversation(text, uuid[]) from public, anon;
+grant execute on function public.create_group_conversation(text, uuid[]) to authenticated;
+
+
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 6. Отправка
+-- ─────────────────────────────────────────────────────────────────────────
+-- Одна точка входа на личное и групповое сообщение. SECURITY DEFINER, потому
+-- что нужно писать в conversations.last_message_at — таблицу, у которой нет
+-- клиентской UPDATE-политики и не должно быть.
+--
+-- Идемпотентность: client_id придумывает клиент ОДИН раз на сообщение и
+-- повторяет при каждой попытке. Сервер, увидев знакомый ключ, возвращает уже
+-- существующую строку. Без этого «отправил → сеть отвалилась → повторил»
+-- давало два одинаковых сообщения ровно там, где повтор и нужен.
+create or replace function public.send_conversation_message(
+  p_conversation   uuid,
+  p_text           text default null,
+  p_image_url      text default null,
+  p_media          jsonb default null,
+  p_meal_ref       jsonb default null,
+  p_reply_to       uuid default null,
+  p_reply_snapshot jsonb default null,
+  p_forwarded_name text default null,
+  p_client_id      uuid default null
+)
+returns public.messages
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid       uuid := auth.uid();
+  v_text      text := nullif(btrim(coalesce(p_text, '')), '');
+  v_kind      text;
+  v_peer      uuid;
+  v_row       public.messages;
+  v_my_state  text;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select c.kind,
+         case when c.kind = 'direct'
+              then case when c.pair_low = v_uid then c.pair_high else c.pair_low end
+         end
+    into v_kind, v_peer
+  from public.conversations c where c.id = p_conversation;
+
+  if v_kind is null then
+    raise exception 'conversation not found' using errcode = 'P0002';
+  end if;
+  if not public.is_conversation_member(p_conversation, v_uid) then
+    raise exception 'Вы не участник этого диалога' using errcode = '42501';
+  end if;
+
+  select state into v_my_state from public.conversation_members
+   where conversation_id = p_conversation and user_id = v_uid;
+  if v_my_state = 'declined' then
+    raise exception 'Вы отказались от этого диалога' using errcode = '42501';
+  end if;
+
+  if v_kind = 'direct' then
+    if public.get_message_permission(v_uid, v_peer) = 'denied' then
+      raise exception 'Этот человек не принимает от вас сообщения' using errcode = '42501';
+    end if;
+  end if;
+
+  if v_text is null and p_image_url is null and p_media is null and p_meal_ref is null then
+    raise exception 'empty message' using errcode = '22023';
+  end if;
+  if char_length(coalesce(v_text, '')) > 4000 then
+    raise exception 'message is too long' using errcode = '22001';
+  end if;
+  if p_meal_ref is not null and char_length(p_meal_ref::text) > 8000 then
+    raise exception 'meal reference is too large' using errcode = '22001';
+  end if;
+  if p_media is not null and char_length(p_media::text) > 4000 then
+    raise exception 'media reference is too large' using errcode = '22001';
+  end if;
+
+  if p_client_id is not null then
+    select * into v_row from public.messages m
+     where m.sender = v_uid and m.client_id = p_client_id
+     limit 1;
+    if found then
+      return v_row;
+    end if;
+  end if;
+
+  -- Ответ обязан лежать в ЭТОМ диалоге: иначе цитатой можно было бы вытащить
+  -- в чужую переписку кусок своей.
+  if p_reply_to is not null and not exists (
+    select 1 from public.messages m
+     where m.id = p_reply_to and m.conversation_id = p_conversation
+  ) then
+    raise exception 'reply target is not in this conversation' using errcode = '42501';
+  end if;
+
+  insert into public.messages
+    (conversation_id, sender, recipient, text, image_url, media, meal_ref,
+     reply_to, reply_snapshot, forwarded_name, client_id)
+  values
+    (p_conversation, v_uid, v_peer, v_text, p_image_url, p_media, p_meal_ref,
+     p_reply_to, p_reply_snapshot, p_forwarded_name, p_client_id)
+  returning * into v_row;
+
+  update public.conversations set last_message_at = v_row.created_at where id = p_conversation;
+
+  -- Отправитель прочитал собственное сообщение по определению, и его же
+  -- отправка снимает его отказ, если он раньше сам был в «Запросах».
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  update public.conversation_members
+     set last_read_at = v_row.created_at,
+         archived = false,
+         state = case when state = 'pending' then 'accepted' else state end
+   where conversation_id = p_conversation and user_id = v_uid;
+
+  -- Новое сообщение возвращает диалог из архива у всех: архив прячет
+  -- переписку, а не отключает её.
+  update public.conversation_members
+     set archived = false
+   where conversation_id = p_conversation and archived;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+
+  return v_row;
+
+exception when unique_violation then
+  select * into v_row from public.messages m
+   where m.sender = v_uid and m.client_id = p_client_id
+   limit 1;
+  if found then
+    return v_row;
+  end if;
+  raise;
+end;
+$$;
+
+revoke all on function public.send_conversation_message(uuid, text, text, jsonb, jsonb, uuid, jsonb, text, uuid) from public, anon;
+grant execute on function public.send_conversation_message(uuid, text, text, jsonb, jsonb, uuid, jsonb, text, uuid) to authenticated;
+
+
+-- Прежний send_message остаётся: на нём стоит ещё не обновлённый клиент.
+-- Теперь он находит или создаёт диалог и передаёт работу общей функции —
+-- второй реализации отправки в системе быть не должно.
+create or replace function public.send_message(
+  p_recipient      uuid,
+  p_text           text default null,
+  p_image_url      text default null,
+  p_meal_ref       jsonb default null,
+  p_reply_to       uuid default null,
+  p_reply_snapshot jsonb default null,
+  p_forwarded_name text default null,
+  p_client_id      uuid default null
+)
+returns public.messages
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_conv uuid;
+begin
+  v_conv := public.direct_conversation(p_recipient);
+  return public.send_conversation_message(
+    v_conv, p_text, p_image_url, null, p_meal_ref,
+    p_reply_to, p_reply_snapshot, p_forwarded_name, p_client_id
+  );
+end;
+$$;
+
+revoke all on function public.send_message(uuid, text, text, jsonb, uuid, jsonb, text, uuid) from public, anon;
+grant execute on function public.send_message(uuid, text, text, jsonb, uuid, jsonb, text, uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 7. Список диалогов
+-- ─────────────────────────────────────────────────────────────────────────
+-- Одна строка на диалог со всем, что нужно нарисовать: карточка собеседника
+-- или название группы, последнее сообщение, непрочитанные, заглушение,
+-- архив, состояние запроса. Без этого список из двадцати диалогов означал бы
+-- двадцать походов за именами и двадцать — за счётчиками.
+--
+-- Непрочитанные считаются по указателю last_read_at, а не по read_at на
+-- каждом сообщении: в группе у пятерых участников это пять разных чисел, и
+-- хранить их на строке сообщения нечем.
+drop function if exists public.list_conversations_v2(text, boolean, int, timestamptz);
+
+create or replace function public.list_conversations_v2(
+  p_state    text default null,       -- null = все, 'accepted' | 'pending'
+  p_archived boolean default false,
+  p_limit    int default 40,
+  p_before   timestamptz default null
+)
+returns table (
+  id             uuid,
+  kind           text,
+  title          text,
+  avatar_url     text,
+  peer_id        uuid,
+  peer_username  text,
+  peer_name      text,
+  peer_avatar    text,
+  peer_private   boolean,
+  members_count  int,
+  state          text,
+  archived       boolean,
+  muted_until    timestamptz,
+  last_id        uuid,
+  last_sender    uuid,
+  last_sender_name text,
+  last_text      text,
+  last_image     text,
+  last_media     jsonb,
+  last_meal      boolean,
+  last_unsent    boolean,
+  last_at        timestamptz,
+  unread_count   int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid),
+  mine as (
+    select c.*, m.state as my_state, m.archived as my_archived,
+           m.muted_until as my_muted, m.last_read_at, m.cleared_at
+    from public.conversation_members m
+    join public.conversations c on c.id = m.conversation_id
+    cross join me
+    where m.user_id = me.uid and m.left_at is null
+  ),
+  peer as (
+    select mine.id as cid,
+           case when mine.kind = 'direct'
+                then case when mine.pair_low = (select uid from me) then mine.pair_high else mine.pair_low end
+           end as pid
+    from mine
+  ),
+  last_msg as (
+    select distinct on (x.conversation_id)
+           x.conversation_id, x.id, x.sender, x.text, x.image_url, x.media,
+           (x.meal_ref is not null) as has_meal, x.unsent_at, x.created_at
+    from public.messages x
+    join mine on mine.id = x.conversation_id
+    where (mine.cleared_at is null or x.created_at > mine.cleared_at)
+      and not exists (
+        select 1 from public.message_deletions d
+        where d.message_id = x.id and d.user_id = (select uid from me)
+      )
+    order by x.conversation_id, x.created_at desc, x.id desc
+  )
+  select
+    mine.id, mine.kind, mine.title, mine.avatar_url,
+    peer.pid, pp.username, pp.display_name, pp.avatar_url, pp.is_private,
+    (select count(*)::int from public.conversation_members cm
+      where cm.conversation_id = mine.id and cm.left_at is null),
+    mine.my_state, mine.my_archived, mine.my_muted,
+    last_msg.id, last_msg.sender, sp.display_name,
+    case when last_msg.unsent_at is null then last_msg.text end,
+    case when last_msg.unsent_at is null then last_msg.image_url end,
+    case when last_msg.unsent_at is null then last_msg.media end,
+    coalesce(last_msg.has_meal, false) and last_msg.unsent_at is null,
+    last_msg.unsent_at is not null,
+    coalesce(last_msg.created_at, mine.last_message_at),
+    (select count(*)::int from public.messages u
+      where u.conversation_id = mine.id
+        and u.sender <> (select uid from me)
+        and u.unsent_at is null
+        and (mine.last_read_at is null or u.created_at > mine.last_read_at)
+        and (mine.cleared_at is null or u.created_at > mine.cleared_at))
+  from mine
+  join peer on peer.cid = mine.id
+  left join last_msg on last_msg.conversation_id = mine.id
+  left join public.profiles pp on pp.user_id = peer.pid
+  left join public.profiles sp on sp.user_id = last_msg.sender
+  where mine.my_state <> 'declined'
+    and coalesce(mine.my_archived, false) = coalesce(p_archived, false)
+    and (p_state is null or mine.my_state = p_state)
+    and (peer.pid is null or not public.is_blocked_between(peer.pid, (select uid from me)))
+    -- Диалог без единого сообщения показывать незачем: он появляется в тот
+    -- момент, когда человек открыл переписку, но ещё ничего не написал.
+    and (last_msg.id is not null or mine.kind = 'group')
+    and (p_before is null or coalesce(last_msg.created_at, mine.last_message_at) < p_before)
+  order by coalesce(last_msg.created_at, mine.last_message_at) desc
+  limit least(greatest(coalesce(p_limit, 40), 1), 100);
+$$;
+
+revoke all on function public.list_conversations_v2(text, boolean, int, timestamptz) from public, anon;
+grant execute on function public.list_conversations_v2(text, boolean, int, timestamptz) to authenticated;
+
+
+-- Прежний list_conversations остаётся для ещё не обновлённого клиента и
+-- пересобран поверх новой модели: две независимые выборки одного и того же
+-- списка разошлись бы на первой же правке.
+drop function if exists public.list_conversations(int, text);
+
+create or replace function public.list_conversations(
+  p_limit int default 100,
+  p_state text default null
+)
+returns table (
+  peer_id      uuid,
+  username     text,
+  display_name text,
+  avatar_url   text,
+  state        text,
+  last_id      uuid,
+  last_sender  uuid,
+  last_text    text,
+  last_image   text,
+  last_meal    boolean,
+  last_at      timestamptz,
+  unread_count int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.peer_id, c.peer_username, c.peer_name, c.peer_avatar, c.state,
+         c.last_id, c.last_sender, c.last_text, c.last_image, c.last_meal,
+         c.last_at, c.unread_count
+  from public.list_conversations_v2(p_state, false, least(greatest(coalesce(p_limit, 100), 1), 100), null) c
+  where c.kind = 'direct' and c.peer_id is not null;
+$$;
+
+revoke all on function public.list_conversations(int, text) from public, anon;
+grant execute on function public.list_conversations(int, text) to authenticated;
+
+
+-- Счётчики для бейджей: сообщения, запросы на переписку, запросы на подписку.
+-- Одним запросом — их спрашивают на каждом открытии приложения и по каждому
+-- realtime-событию.
+drop function if exists public.unread_totals();
+
+create or replace function public.unread_totals()
+returns table (
+  messages         int,
+  message_requests int,
+  follow_requests  int,
+  notifications    int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid),
+  mine as (
+    select m.conversation_id, m.state, m.last_read_at, m.cleared_at, m.muted_until
+    from public.conversation_members m, me
+    where m.user_id = me.uid and m.left_at is null and m.state <> 'declined'
+  ),
+  counts as (
+    select mine.state,
+           (select count(*) from public.messages u, me
+             where u.conversation_id = mine.conversation_id
+               and u.sender <> me.uid
+               and u.unsent_at is null
+               and (mine.last_read_at is null or u.created_at > mine.last_read_at)
+               and (mine.cleared_at is null or u.created_at > mine.cleared_at)) as n
+    from mine
+    -- Заглушённый диалог не участвует в бейдже: заглушение ровно об этом.
+    where mine.muted_until is null or mine.muted_until <= now()
+  )
+  select
+    coalesce((select sum(n)::int from counts where state = 'accepted'), 0),
+    coalesce((select count(*)::int from mine where state = 'pending'), 0),
+    public.follow_request_count(),
+    public.unread_notification_count();
+$$;
+
+revoke all on function public.unread_totals() from public, anon;
+grant execute on function public.unread_totals() to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 8. Чтение переписки
+-- ─────────────────────────────────────────────────────────────────────────
+-- Страницами, начиная с конца. Скрытые «у себя» и обрезанные очисткой не
+-- отдаются вовсе — фильтровать это на клиенте значило бы возить по сети то,
+-- что человек велел убрать.
+drop function if exists public.list_conversation_messages(uuid, int, timestamptz, uuid);
+
+create or replace function public.list_conversation_messages(
+  p_conversation uuid,
+  p_limit int default 40,
+  p_before_at timestamptz default null,
+  p_before_id uuid default null
+)
+returns table (
+  id             uuid,
+  conversation_id uuid,
+  sender         uuid,
+  recipient      uuid,
+  text           text,
+  image_url      text,
+  media          jsonb,
+  meal_ref       jsonb,
+  reply_to       uuid,
+  reply_snapshot jsonb,
+  forwarded_name text,
+  reactions      jsonb,
+  unsent_at      timestamptz,
+  edited_at      timestamptz,
+  created_at     timestamptz,
+  read_at        timestamptz,
+  client_id      uuid,
+  media_viewed   boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (select auth.uid() as uid),
+  mem as (
+    select m.cleared_at from public.conversation_members m, me
+    where m.conversation_id = p_conversation and m.user_id = me.uid and m.left_at is null
+  )
+  select
+    x.id, x.conversation_id, x.sender, x.recipient,
+    case when x.unsent_at is null then x.text end,
+    case when x.unsent_at is null then x.image_url end,
+    case when x.unsent_at is null then x.media end,
+    case when x.unsent_at is null then x.meal_ref end,
+    x.reply_to,
+    case when x.unsent_at is null then x.reply_snapshot end,
+    x.forwarded_name,
+    coalesce(x.reactions, '{}'::jsonb),
+    x.unsent_at, x.edited_at, x.created_at, x.read_at, x.client_id,
+    exists (select 1 from public.message_views v, me
+             where v.message_id = x.id and v.user_id = me.uid)
+  from public.messages x, me, mem
+  where x.conversation_id = p_conversation
+    and (mem.cleared_at is null or x.created_at > mem.cleared_at)
+    and (p_before_at is null
+         or (x.created_at, x.id) < (p_before_at, coalesce(p_before_id, '00000000-0000-0000-0000-000000000000'::uuid)))
+    and not exists (
+      select 1 from public.message_deletions d
+      where d.message_id = x.id and d.user_id = me.uid
+    )
+  order by x.created_at desc, x.id desc
+  limit least(greatest(coalesce(p_limit, 40), 1), 100);
+$$;
+
+revoke all on function public.list_conversation_messages(uuid, int, timestamptz, uuid) from public, anon;
+grant execute on function public.list_conversation_messages(uuid, int, timestamptz, uuid) to authenticated;
+
+
+-- Отметить диалог прочитанным. Один UPDATE по указателю вместо UPDATE на
+-- каждое сообщение: в переписке на две тысячи реплик разница между этими
+-- двумя способами — три порядка.
+--
+-- read_at на самих сообщениях продолжаем ставить ТОЛЬКО в личном диалоге и
+-- только если получатель разрешил показывать прочтение: на этой колонке
+-- держится «Прочитано» у собеседника и счётчик у необновлённого клиента.
+create or replace function public.mark_conversation_read(p_conversation uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_kind text;
+  v_receipts boolean;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if not public.is_conversation_member(p_conversation, v_uid) then
+    return;
+  end if;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  update public.conversation_members
+     set last_read_at = now()
+   where conversation_id = p_conversation and user_id = v_uid;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+
+  select kind into v_kind from public.conversations where id = p_conversation;
+  select read_receipts into v_receipts from public.profiles where user_id = v_uid;
+
+  if v_kind = 'direct' and coalesce(v_receipts, true) then
+    update public.messages
+       set read_at = now()
+     where conversation_id = p_conversation
+       and recipient = v_uid
+       and read_at is null;
+  end if;
+end;
+$$;
+
+revoke all on function public.mark_conversation_read(uuid) from public, anon;
+grant execute on function public.mark_conversation_read(uuid) to authenticated;
+
+-- Прежнее имя, прежняя сигнатура: старый клиент зовёт его по собеседнику.
+create or replace function public.mark_messages_read(p_sender uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_conv uuid;
+begin
+  if v_uid is null then
+    return;
+  end if;
+  select id into v_conv from public.conversations
+   where kind = 'direct'
+     and pair_low = least(v_uid, p_sender) and pair_high = greatest(v_uid, p_sender);
+  if v_conv is not null then
+    perform public.mark_conversation_read(v_conv);
+  else
+    update public.messages set read_at = now()
+     where recipient = v_uid and sender = p_sender and read_at is null;
+  end if;
+end;
+$$;
+
+revoke all on function public.mark_messages_read(uuid) from public, anon;
+grant execute on function public.mark_messages_read(uuid) to authenticated;
+
+
+-- Видно ли мне, что собеседник прочитал. Взаимно, как и присутствие: кто
+-- скрыл своё прочтение, не видит и чужого.
+create or replace function public.read_receipts_visible(p_peer uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select read_receipts from public.profiles where user_id = p_peer), true)
+     and coalesce((select read_receipts from public.profiles where user_id = auth.uid()), true)
+     and not public.is_blocked_between(p_peer, auth.uid());
+$$;
+
+revoke all on function public.read_receipts_visible(uuid) from public, anon;
+grant execute on function public.read_receipts_visible(uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 9. Запросы на переписку
+-- ─────────────────────────────────────────────────────────────────────────
+-- Открытие запроса НЕ означает согласия: человек читает сообщение и решает
+-- отдельно. Решение хранится в двух местах намеренно — в состоянии участника
+-- (оно про этот диалог) и в message_grants (оно про человека и переживает
+-- удаление диалога). Обе записи ставит одна функция, поэтому разойтись им
+-- негде.
+create or replace function public.accept_conversation_request(p_conversation uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_kind text;
+  v_peer uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if not public.is_conversation_member(p_conversation, v_uid) then
+    raise exception 'Вы не участник этого диалога' using errcode = '42501';
+  end if;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  update public.conversation_members
+     set state = 'accepted'
+   where conversation_id = p_conversation and user_id = v_uid;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+
+  select c.kind,
+         case when c.kind = 'direct'
+              then case when c.pair_low = v_uid then c.pair_high else c.pair_low end
+         end
+    into v_kind, v_peer
+  from public.conversations c where c.id = p_conversation;
+
+  if v_peer is not null then
+    insert into public.message_grants (owner_id, peer_id, state)
+    values (v_uid, v_peer, 'accepted')
+    on conflict (owner_id, peer_id) do update set state = 'accepted', created_at = now();
+  end if;
+
+  -- Событие о запросе больше не актуально: человек его разобрал.
+  delete from public.notifications
+   where recipient_id = v_uid and type = 'MESSAGE_REQUEST'
+     and (entity_id = v_peer or entity_id = p_conversation);
+
+  return 'accepted';
+end;
+$$;
+
+revoke all on function public.accept_conversation_request(uuid) from public, anon;
+grant execute on function public.accept_conversation_request(uuid) to authenticated;
+
+
+-- Отказ. НЕ блокировка: человек остаётся подписчиком, видит посты и профиль —
+-- он теряет ровно право писать. Отказ от навязчивого сообщения не должен
+-- стоить так же дорого, как блокировка.
+create or replace function public.decline_conversation_request(p_conversation uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_peer uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if not public.is_conversation_member(p_conversation, v_uid) then
+    raise exception 'Вы не участник этого диалога' using errcode = '42501';
+  end if;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  update public.conversation_members
+     set state = 'declined'
+   where conversation_id = p_conversation and user_id = v_uid;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+
+  select case when c.pair_low = v_uid then c.pair_high else c.pair_low end
+    into v_peer
+  from public.conversations c where c.id = p_conversation and c.kind = 'direct';
+
+  if v_peer is not null then
+    insert into public.message_grants (owner_id, peer_id, state)
+    values (v_uid, v_peer, 'declined')
+    on conflict (owner_id, peer_id) do update set state = 'declined', created_at = now();
+  end if;
+
+  delete from public.notifications
+   where recipient_id = v_uid
+     and type in ('MESSAGE', 'MESSAGE_REQUEST')
+     and (entity_id = v_peer or entity_id = p_conversation);
+
+  return 'declined';
+end;
+$$;
+
+revoke all on function public.decline_conversation_request(uuid) from public, anon;
+grant execute on function public.decline_conversation_request(uuid) to authenticated;
+
+
+-- Прежние имена по собеседнику — для ещё не обновлённого клиента.
+create or replace function public.accept_message_request(p_peer uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_conv uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_peer is null or p_peer = v_uid then
+    raise exception 'bad peer' using errcode = '22023';
+  end if;
+
+  insert into public.message_grants (owner_id, peer_id, state)
+  values (v_uid, p_peer, 'accepted')
+  on conflict (owner_id, peer_id) do update set state = 'accepted', created_at = now();
+
+  select id into v_conv from public.conversations
+   where kind = 'direct'
+     and pair_low = least(v_uid, p_peer) and pair_high = greatest(v_uid, p_peer);
+  if v_conv is not null then
+    perform set_config('eataps.trusted_member_write', 'on', true);
+    update public.conversation_members set state = 'accepted'
+     where conversation_id = v_conv and user_id = v_uid;
+    perform set_config('eataps.trusted_member_write', 'off', true);
+  end if;
+
+  return 'accepted';
+end;
+$$;
+
+create or replace function public.decline_message_request(p_peer uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_conv uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_peer is null or p_peer = v_uid then
+    raise exception 'bad peer' using errcode = '22023';
+  end if;
+
+  insert into public.message_grants (owner_id, peer_id, state)
+  values (v_uid, p_peer, 'declined')
+  on conflict (owner_id, peer_id) do update set state = 'declined', created_at = now();
+
+  select id into v_conv from public.conversations
+   where kind = 'direct'
+     and pair_low = least(v_uid, p_peer) and pair_high = greatest(v_uid, p_peer);
+  if v_conv is not null then
+    perform set_config('eataps.trusted_member_write', 'on', true);
+    update public.conversation_members set state = 'declined'
+     where conversation_id = v_conv and user_id = v_uid;
+    perform set_config('eataps.trusted_member_write', 'off', true);
+  end if;
+
+  delete from public.notifications
+   where recipient_id = v_uid and actor_id = p_peer and type in ('MESSAGE', 'MESSAGE_REQUEST');
+
+  return 'declined';
+end;
+$$;
+
+revoke all on function public.accept_message_request(uuid) from public, anon;
+revoke all on function public.decline_message_request(uuid) from public, anon;
+grant execute on function public.accept_message_request(uuid) to authenticated;
+grant execute on function public.decline_message_request(uuid) to authenticated;
+
+-- Счётчик запросов на переписку — теперь по состоянию участника.
+create or replace function public.pending_request_count()
+returns int
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(*)::int
+  from public.conversation_members m
+  where m.user_id = auth.uid() and m.left_at is null and m.state = 'pending'
+    and exists (select 1 from public.messages x where x.conversation_id = m.conversation_id);
+$$;
+
+revoke all on function public.pending_request_count() from public, anon;
+grant execute on function public.pending_request_count() to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 10. Действия над сообщением
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- Отзыв «у всех». Строку не удаляем: на неё ссылаются ответы, и удаление
+-- превратило бы цитату в сироту. Содержимое стирается, остаётся пометка.
+create or replace function public.unsend_message(p_message uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_row public.messages;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select * into v_row from public.messages where id = p_message;
+  if not found then
+    return;
+  end if;
+  if v_row.sender <> v_uid then
+    raise exception 'Отозвать можно только своё сообщение' using errcode = '42501';
+  end if;
+  if v_row.unsent_at is not null then
+    return;
+  end if;
+
+  perform set_config('eataps.trusted_message_write', 'on', true);
+  update public.messages
+     set unsent_at = now(),
+         text = null, image_url = null, media = null, meal_ref = null,
+         reply_snapshot = null, reactions = '{}'::jsonb
+   where id = p_message;
+  perform set_config('eataps.trusted_message_write', 'off', true);
+
+  -- Событие о сообщении, которого больше нет, вести некуда.
+  delete from public.notifications
+   where actor_id = v_uid
+     and type in ('MESSAGE', 'MESSAGE_REQUEST', 'MESSAGE_REACTION')
+     and entity_id = p_message;
+end;
+$$;
+
+revoke all on function public.unsend_message(uuid) from public, anon;
+grant execute on function public.unsend_message(uuid) to authenticated;
+
+
+-- Скрыть у себя. У собеседника сообщение остаётся — в этом вся разница с
+-- отзывом, и путать их нельзя.
+create or replace function public.delete_message_for_me(p_message uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_conv uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select conversation_id into v_conv from public.messages where id = p_message;
+  if v_conv is not null and not public.is_conversation_member(v_conv, v_uid) then
+    raise exception 'Вы не участник этого диалога' using errcode = '42501';
+  end if;
+
+  insert into public.message_deletions (message_id, user_id)
+  values (p_message, v_uid)
+  on conflict (message_id, user_id) do nothing;
+end;
+$$;
+
+revoke all on function public.delete_message_for_me(uuid) from public, anon;
+grant execute on function public.delete_message_for_me(uuid) to authenticated;
+
+
+-- Реакция. Одна на человека: повторное нажатие тем же эмодзи снимает её,
+-- другим — заменяет. Форма хранения прежняя ({ user_id: emoji }), поэтому
+-- ещё не обновлённый клиент продолжает читать реакции как читал.
+create or replace function public.set_message_reaction(p_message uuid, p_emoji text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_row  public.messages;
+  v_key  text;
+  v_next jsonb;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_emoji is not null and p_emoji not in ('🥕', '❤️', '😂', '😮', '😢', '😡', '👍') then
+    raise exception 'unsupported reaction' using errcode = '22023';
+  end if;
+
+  select * into v_row from public.messages where id = p_message for update;
+  if not found then
+    raise exception 'message not found' using errcode = 'P0002';
+  end if;
+  if v_row.unsent_at is not null then
+    return '{}'::jsonb;
+  end if;
+
+  if v_row.conversation_id is not null then
+    if not public.is_conversation_member(v_row.conversation_id, v_uid) then
+      raise exception 'Вы не участник этого диалога' using errcode = '42501';
+    end if;
+  elsif v_uid <> v_row.sender and v_uid <> v_row.recipient then
+    raise exception 'Вы не участник этого диалога' using errcode = '42501';
+  end if;
+
+  v_key := v_uid::text;
+  if p_emoji is null or coalesce(v_row.reactions, '{}'::jsonb)->>v_key = p_emoji then
+    v_next := coalesce(v_row.reactions, '{}'::jsonb) - v_key;
+  else
+    v_next := jsonb_set(coalesce(v_row.reactions, '{}'::jsonb), array[v_key], to_jsonb(p_emoji), true);
+  end if;
+
+  perform set_config('eataps.trusted_message_write', 'on', true);
+  update public.messages set reactions = v_next where id = p_message;
+  perform set_config('eataps.trusted_message_write', 'off', true);
+
+  -- Автору — событие о реакции. Своей же реакции на своё сообщение не бывает:
+  -- push_notification отбрасывает такое сам.
+  if v_next ? v_key then
+    perform public.push_notification(
+      v_row.sender, v_uid, 'MESSAGE_REACTION', 'message', p_message,
+      jsonb_build_object('reaction', p_emoji)
+    );
+  end if;
+
+  return v_next;
+end;
+$$;
+
+revoke all on function public.set_message_reaction(uuid, text) from public, anon;
+grant execute on function public.set_message_reaction(uuid, text) to authenticated;
+
+-- Прежнее имя — тонкая обёртка, чтобы не держать вторую реализацию.
+create or replace function public.toggle_message_reaction(p_message_id uuid, p_emoji text)
+returns jsonb
+language sql
+security definer
+set search_path = public
+as $$
+  select public.set_message_reaction(p_message_id, p_emoji);
+$$;
+
+revoke all on function public.toggle_message_reaction(uuid, text) from public, anon;
+grant execute on function public.toggle_message_reaction(uuid, text) to authenticated;
+
+
+-- Отметить одноразовое вложение просмотренным. Сервер после этого перестаёт
+-- отдавать ссылку — но честно предупреждаем в интерфейсе: помешать снять
+-- скриншот веб-клиент не может, и обещать этого нельзя.
+create or replace function public.mark_media_viewed(p_message uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_conv uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  select conversation_id into v_conv from public.messages where id = p_message;
+  if v_conv is null or not public.is_conversation_member(v_conv, v_uid) then
+    raise exception 'Вы не участник этого диалога' using errcode = '42501';
+  end if;
+
+  insert into public.message_views (message_id, user_id)
+  values (p_message, v_uid)
+  on conflict (message_id, user_id) do nothing;
+end;
+$$;
+
+revoke all on function public.mark_media_viewed(uuid) from public, anon;
+grant execute on function public.mark_media_viewed(uuid) to authenticated;
+
+
+-- Пересылка. Создаёт НОВОЕ сообщение в каждом выбранном диалоге — отдать
+-- чужой conversation_id значило бы впустить человека в чужую переписку.
+-- Права на каждый диалог проверяются по отдельности.
+create or replace function public.forward_message(p_message uuid, p_conversations uuid[])
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_row  public.messages;
+  v_conv uuid;
+  v_from text;
+  v_sent int := 0;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select * into v_row from public.messages where id = p_message;
+  if not found or v_row.unsent_at is not null then
+    raise exception 'message not found' using errcode = 'P0002';
+  end if;
+  if v_row.conversation_id is not null
+     and not public.is_conversation_member(v_row.conversation_id, v_uid) then
+    raise exception 'Вы не участник этого диалога' using errcode = '42501';
+  end if;
+
+  select coalesce(display_name, username) into v_from from public.profiles where user_id = v_row.sender;
+
+  foreach v_conv in array coalesce(p_conversations[1:20], '{}'::uuid[]) loop
+    if public.is_conversation_member(v_conv, v_uid) then
+      perform public.send_conversation_message(
+        v_conv, v_row.text, v_row.image_url, v_row.media, v_row.meal_ref,
+        null, null, v_from, null
+      );
+      v_sent := v_sent + 1;
+    end if;
+  end loop;
+
+  return v_sent;
+end;
+$$;
+
+revoke all on function public.forward_message(uuid, uuid[]) from public, anon;
+grant execute on function public.forward_message(uuid, uuid[]) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 11. Управление диалогом
+-- ─────────────────────────────────────────────────────────────────────────
+
+drop function if exists public.conversation_info(uuid);
+
+create or replace function public.conversation_info(p_conversation uuid)
+returns table (
+  id            uuid,
+  kind          text,
+  title         text,
+  avatar_url    text,
+  created_by    uuid,
+  created_at    timestamptz,
+  my_role       text,
+  my_state      text,
+  archived      boolean,
+  muted_until   timestamptz,
+  peer_id       uuid,
+  members_count int,
+  media_count   int
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    c.id, c.kind, c.title, c.avatar_url, c.created_by, c.created_at,
+    m.role, m.state, m.archived, m.muted_until,
+    case when c.kind = 'direct'
+         then case when c.pair_low = auth.uid() then c.pair_high else c.pair_low end end,
+    (select count(*)::int from public.conversation_members x
+      where x.conversation_id = c.id and x.left_at is null),
+    (select count(*)::int from public.messages x
+      where x.conversation_id = c.id and x.unsent_at is null
+        and (x.image_url is not null or x.media is not null))
+  from public.conversations c
+  join public.conversation_members m
+    on m.conversation_id = c.id and m.user_id = auth.uid() and m.left_at is null
+  where c.id = p_conversation;
+$$;
+
+revoke all on function public.conversation_info(uuid) from public, anon;
+grant execute on function public.conversation_info(uuid) to authenticated;
+
+
+drop function if exists public.conversation_member_list(uuid);
+
+create or replace function public.conversation_member_list(p_conversation uuid)
+returns table (
+  user_id      uuid,
+  username     text,
+  display_name text,
+  avatar_url   text,
+  role         text,
+  joined_at    timestamptz
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.user_id, p.username, p.display_name, p.avatar_url, m.role, m.joined_at
+  from public.conversation_members m
+  join public.profiles p on p.user_id = m.user_id
+  where m.conversation_id = p_conversation
+    and m.left_at is null
+    and public.is_conversation_member(p_conversation, auth.uid())
+  order by (m.role = 'owner') desc, (m.role = 'admin') desc, m.joined_at;
+$$;
+
+revoke all on function public.conversation_member_list(uuid) from public, anon;
+grant execute on function public.conversation_member_list(uuid) to authenticated;
+
+
+create or replace function public.rename_conversation(p_conversation uuid, p_title text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_title text := nullif(btrim(coalesce(p_title, '')), '');
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if public.conversation_role(p_conversation, v_uid) not in ('owner', 'admin') then
+    raise exception 'Переименовать группу может администратор' using errcode = '42501';
+  end if;
+  if v_title is not null and char_length(v_title) > 80 then
+    raise exception 'Слишком длинное название' using errcode = '22001';
+  end if;
+
+  update public.conversations set title = v_title
+   where id = p_conversation and kind = 'group';
+  return v_title;
+end;
+$$;
+
+revoke all on function public.rename_conversation(uuid, text) from public, anon;
+grant execute on function public.rename_conversation(uuid, text) to authenticated;
+
+
+create or replace function public.add_conversation_members(p_conversation uuid, p_members uuid[])
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_one   uuid;
+  v_added int := 0;
+  v_kind  text;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  select kind into v_kind from public.conversations where id = p_conversation;
+  if v_kind <> 'group' then
+    raise exception 'Добавлять людей можно только в группу' using errcode = '22023';
+  end if;
+  if public.conversation_role(p_conversation, v_uid) not in ('owner', 'admin') then
+    raise exception 'Добавлять участников может администратор' using errcode = '42501';
+  end if;
+  if (select count(*) from public.conversation_members
+       where conversation_id = p_conversation and left_at is null) >= 50 then
+    raise exception 'В группе не больше 50 участников' using errcode = '22023';
+  end if;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  foreach v_one in array coalesce(p_members[1:50], '{}'::uuid[]) loop
+    if v_one is not null and v_one <> v_uid and public.can_invite_to_group(v_uid, v_one) then
+      insert into public.conversation_members (conversation_id, user_id, role, state)
+      values (p_conversation, v_one, 'member',
+              case when public.get_message_permission(v_uid, v_one) = 'direct' then 'accepted' else 'pending' end)
+      on conflict (conversation_id, user_id)
+      do update set left_at = null
+      where conversation_members.left_at is not null;
+      perform public.push_notification(v_one, v_uid, 'GROUP_INVITE', 'conversation', p_conversation);
+      v_added := v_added + 1;
+    end if;
+  end loop;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+
+  return v_added;
+end;
+$$;
+
+revoke all on function public.add_conversation_members(uuid, uuid[]) from public, anon;
+grant execute on function public.add_conversation_members(uuid, uuid[]) to authenticated;
+
+
+create or replace function public.remove_conversation_member(p_conversation uuid, p_user uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if public.conversation_role(p_conversation, v_uid) not in ('owner', 'admin') then
+    raise exception 'Убирать участников может администратор' using errcode = '42501';
+  end if;
+  if public.conversation_role(p_conversation, p_user) = 'owner' then
+    raise exception 'Создателя группы убрать нельзя' using errcode = '42501';
+  end if;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  update public.conversation_members set left_at = now()
+   where conversation_id = p_conversation and user_id = p_user and left_at is null;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+end;
+$$;
+
+revoke all on function public.remove_conversation_member(uuid, uuid) from public, anon;
+grant execute on function public.remove_conversation_member(uuid, uuid) to authenticated;
+
+
+create or replace function public.set_conversation_role(p_conversation uuid, p_user uuid, p_role text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if p_role not in ('admin', 'member') then
+    raise exception 'unknown role' using errcode = '22023';
+  end if;
+  -- Роль «создатель» не передаётся и не назначается: она одна на группу и
+  -- определяется тем, кто её завёл.
+  if public.conversation_role(p_conversation, v_uid) <> 'owner' then
+    raise exception 'Назначать администраторов может только создатель' using errcode = '42501';
+  end if;
+  if public.conversation_role(p_conversation, p_user) = 'owner' then
+    raise exception 'Роль создателя не меняется' using errcode = '42501';
+  end if;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  update public.conversation_members set role = p_role
+   where conversation_id = p_conversation and user_id = p_user and left_at is null;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+  return p_role;
+end;
+$$;
+
+revoke all on function public.set_conversation_role(uuid, uuid, text) from public, anon;
+grant execute on function public.set_conversation_role(uuid, uuid, text) to authenticated;
+
+
+create or replace function public.leave_conversation(p_conversation uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_kind text;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  select kind into v_kind from public.conversations where id = p_conversation;
+  if v_kind <> 'group' then
+    raise exception 'Выйти можно только из группы' using errcode = '22023';
+  end if;
+
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  update public.conversation_members set left_at = now()
+   where conversation_id = p_conversation and user_id = v_uid and left_at is null;
+
+  -- Группа без создателя не должна остаться без администратора: передаём
+  -- роль самому давнему участнику. Иначе состав становится неуправляемым.
+  if not exists (
+    select 1 from public.conversation_members
+    where conversation_id = p_conversation and role = 'owner' and left_at is null
+  ) then
+    update public.conversation_members set role = 'owner'
+     where conversation_id = p_conversation and left_at is null
+       and user_id = (
+         select user_id from public.conversation_members
+         where conversation_id = p_conversation and left_at is null
+         order by joined_at limit 1
+       );
+  end if;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+end;
+$$;
+
+revoke all on function public.leave_conversation(uuid) from public, anon;
+grant execute on function public.leave_conversation(uuid) to authenticated;
+
+
+-- Заглушить, убрать в архив, очистить у себя. Все три — про МОЮ строку
+-- участника и ни на кого больше не влияют.
+create or replace function public.set_conversation_muted(p_conversation uuid, p_until timestamptz)
+returns timestamptz
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  update public.conversation_members set muted_until = p_until
+   where conversation_id = p_conversation and user_id = v_uid;
+  return p_until;
+end;
+$$;
+
+create or replace function public.set_conversation_archived(p_conversation uuid, p_on boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  update public.conversation_members set archived = coalesce(p_on, false)
+   where conversation_id = p_conversation and user_id = v_uid;
+  return coalesce(p_on, false);
+end;
+$$;
+
+-- «Удалить переписку» — у СЕБЯ. Чужую историю не трогаем: она принадлежит не
+-- нам. Ставим отсечку по времени, и всё, что до неё, перестаёт отдаваться.
+create or replace function public.clear_conversation(p_conversation uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  perform set_config('eataps.trusted_member_write', 'on', true);
+  update public.conversation_members
+     set cleared_at = now(), last_read_at = now(), archived = false
+   where conversation_id = p_conversation and user_id = v_uid;
+  perform set_config('eataps.trusted_member_write', 'off', true);
+end;
+$$;
+
+revoke all on function public.set_conversation_muted(uuid, timestamptz) from public, anon;
+revoke all on function public.set_conversation_archived(uuid, boolean) from public, anon;
+revoke all on function public.clear_conversation(uuid) from public, anon;
+grant execute on function public.set_conversation_muted(uuid, timestamptz) to authenticated;
+grant execute on function public.set_conversation_archived(uuid, boolean) to authenticated;
+grant execute on function public.clear_conversation(uuid) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 12. Общие вложения и поиск по переписке
+-- ─────────────────────────────────────────────────────────────────────────
+drop function if exists public.conversation_media(uuid, int, int);
+
+create or replace function public.conversation_media(
+  p_conversation uuid, p_limit int default 60, p_offset int default 0
+)
+returns table (
+  id         uuid,
+  sender     uuid,
+  image_url  text,
+  media      jsonb,
+  created_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select x.id, x.sender, x.image_url, x.media, x.created_at
+  from public.messages x
+  join public.conversation_members m
+    on m.conversation_id = x.conversation_id and m.user_id = auth.uid() and m.left_at is null
+  where x.conversation_id = p_conversation
+    and x.unsent_at is null
+    and (x.image_url is not null or x.media is not null)
+    and (m.cleared_at is null or x.created_at > m.cleared_at)
+    and not exists (
+      select 1 from public.message_deletions d
+      where d.message_id = x.id and d.user_id = auth.uid()
+    )
+  order by x.created_at desc
+  limit least(greatest(coalesce(p_limit, 60), 1), 100)
+  offset greatest(coalesce(p_offset, 0), 0);
+$$;
+
+revoke all on function public.conversation_media(uuid, int, int) from public, anon;
+grant execute on function public.conversation_media(uuid, int, int) to authenticated;
+
+
+-- Поиск по сообщениям. Только там, где я участник: p_conversation = null
+-- ищет по всем моим диалогам сразу, и это по-прежнему не выходит за пределы
+-- моего членства.
+drop function if exists public.search_messages(text, uuid, int);
+
+create or replace function public.search_messages(
+  p_query text, p_conversation uuid default null, p_limit int default 40
+)
+returns table (
+  id              uuid,
+  conversation_id uuid,
+  sender          uuid,
+  text            text,
+  created_at      timestamptz,
+  peer_id         uuid,
+  title           text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with q as (select btrim(coalesce(p_query, '')) as v)
+  select x.id, x.conversation_id, x.sender, x.text, x.created_at,
+         case when c.kind = 'direct'
+              then case when c.pair_low = auth.uid() then c.pair_high else c.pair_low end end,
+         c.title
+  from public.messages x
+  join public.conversation_members m
+    on m.conversation_id = x.conversation_id and m.user_id = auth.uid() and m.left_at is null
+  join public.conversations c on c.id = x.conversation_id
+  cross join q
+  where char_length(q.v) >= 2
+    and x.unsent_at is null
+    and x.text is not null
+    and x.text ilike '%' || q.v || '%'
+    and (p_conversation is null or x.conversation_id = p_conversation)
+    and (m.cleared_at is null or x.created_at > m.cleared_at)
+  order by x.created_at desc
+  limit least(greatest(coalesce(p_limit, 40), 1), 60);
+$$;
+
+revoke all on function public.search_messages(text, uuid, int) from public, anon;
+grant execute on function public.search_messages(text, uuid, int) to authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 13. Хранилище вложений личной переписки
+-- ─────────────────────────────────────────────────────────────────────────
+-- ЗАКРЫТЫЙ бакет, в отличие от chat-images и post-images. Разница
+-- принципиальная: те публичны на чтение, и границей доступа служит не бакет,
+-- а RLS на posts/messages — «у кого есть точный URL, тот увидит». Для
+-- вложений групповых и личных диалогов этого мало, поэтому здесь граница
+-- стоит на самом файле: путь начинается с id диалога, и политика пускает
+-- только его участников.
+--
+-- Клиент получает подписанную ссылку (createSignedUrl) — она живёт час и
+-- выдаётся только тому, кого пустила политика.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'dm-media', 'dm-media', false, 26214400,
+  array['image/jpeg', 'image/png', 'image/webp', 'image/gif',
+        'video/mp4', 'video/webm', 'video/quicktime',
+        'audio/webm', 'audio/mpeg', 'audio/mp4', 'audio/ogg']
+)
+on conflict (id) do update set
+  public = false,
+  file_size_limit = 26214400,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- Первый сегмент пути — id диалога. Приведение к uuid делаем через
+-- безопасный разбор: невалидный путь должен ОТКЛОНЯТЬСЯ политикой, а не
+-- ронять весь запрос ошибкой приведения типа (22P02), которая унесла бы с
+-- собой и чтение соседних файлов.
+create or replace function public.safe_uuid(p_text text)
+returns uuid
+language sql
+immutable
+as $$
+  select case when p_text ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+              then p_text::uuid end;
+$$;
+
+drop policy if exists "dm-media read members" on storage.objects;
+create policy "dm-media read members" on storage.objects
+  for select using (
+    bucket_id = 'dm-media'
+    and public.is_conversation_member(
+      public.safe_uuid((storage.foldername(name))[1]), auth.uid()
+    )
+  );
+
+drop policy if exists "dm-media write members" on storage.objects;
+create policy "dm-media write members" on storage.objects
+  for insert with check (
+    bucket_id = 'dm-media'
+    and auth.role() = 'authenticated'
+    and public.is_conversation_member(
+      public.safe_uuid((storage.foldername(name))[1]), auth.uid()
+    )
+    -- Второй сегмент пути — id автора: свои файлы человек может удалить, а
+    -- чужие в его папку не попадут.
+    and (storage.foldername(name))[2] = auth.uid()::text
+  );
+
+drop policy if exists "dm-media delete own" on storage.objects;
+create policy "dm-media delete own" on storage.objects
+  for delete using (
+    bucket_id = 'dm-media'
+    and (storage.foldername(name))[2] = auth.uid()::text
+  );
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 14. Realtime
+-- ─────────────────────────────────────────────────────────────────────────
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'conversation_members'
+  ) then
+    execute 'alter publication supabase_realtime add table public.conversation_members';
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'conversations'
+  ) then
+    execute 'alter publication supabase_realtime add table public.conversations';
+  end if;
+end $$;
+
+alter table public.conversations replica identity full;
+alter table public.conversation_members replica identity full;

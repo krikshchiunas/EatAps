@@ -18,7 +18,7 @@ import {
   listPostComments, addPostComment, deletePostComment, uploadPostImage,
 } from '../lib/supabase.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
-import { Avatar } from './FriendsScreen.jsx'
+import { Avatar } from './Avatar.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import { visibilityLabel, VISIBILITY, DEFAULT_VISIBILITY, canViewPost } from '../lib/relationship.js'
 import { setPostVisibility } from '../lib/social.js'
@@ -499,12 +499,19 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
   //
   // Матрица доступа даёт достаточно, чтобы сказать честно: если мы даже не
   // подписаны, часть записей мы бы не увидели в любом случае.
+  //
+  // Кругов теперь четыре, и подсказка обязана называть САМЫЙ ШИРОКИЙ, в
+  // который мы не входим: сказать взаимному подписчику «видны только друзьям»
+  // значит соврать ему ровно наоборот — друг он как раз есть, а вот в близких
+  // друзьях его нет.
   const hiddenHint = !rel ? null
     : !canViewPost('followers', rel)
       ? 'Пока ни одной мысли — или они видны только подписчикам.'
       : !canViewPost('friends', rel)
         ? 'Пока ни одной мысли — или они видны только друзьям.'
-        : null
+        : !canViewPost('close_friends', rel)
+          ? 'Пока ни одной мысли — или они видны только близким друзьям.'
+          : null
 
   // Без аккаунта мысли не существуют: они живут в облаке и адресованы друзьям.
   if (!supabaseEnabled || !myId) {

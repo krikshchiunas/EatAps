@@ -155,11 +155,29 @@ $$;
 revoke all on function public.ensure_public_id() from public, anon;
 grant execute on function public.ensure_public_id() to authenticated;
 
--- Разовый добор для тех, у кого ID не выдался раньше.
-insert into public.profiles (user_id, public_id)
-select u.id, public.generate_public_id()
-from auth.users u
-left join public.profiles p on p.user_id = u.id
-where p.user_id is null
-order by u.created_at
-on conflict (user_id) do nothing;
+-- ⚠ ВЫПОЛНЯЕТСЯ, ТОЛЬКО ПОКА ЖИВА КОЛОНКА profiles.public_id.
+--
+-- Её удаляет 2026-08-26_nickname_identity. На базе, где та миграция уже
+-- прошла, всё, что читает или пишет эту колонку, падает с
+--   42703: column "public_id" does not exist
+-- причём у функций на language sql — прямо при СОЗДАНИИ: их тело проверяется
+-- в этот момент, а не при вызове. Прогон setup_all.sql вставал на этой строке.
+--
+-- Поэтому историческая часть ставится под условием: на свежей базе она нужна
+-- как шаг истории, на уже мигрированной — пропускается целиком.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'public_id'
+  ) then
+    -- Разовый добор для тех, у кого ID не выдался раньше.
+    insert into public.profiles (user_id, public_id)
+    select u.id, public.generate_public_id()
+    from auth.users u
+    left join public.profiles p on p.user_id = u.id
+    where p.user_id is null
+    order by u.created_at
+    on conflict (user_id) do nothing;
+  end if;
+end $$;

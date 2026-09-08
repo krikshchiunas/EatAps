@@ -21,7 +21,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -44,6 +44,101 @@ test('SQL-файлы проходят статическую проверку', 
   assert.ok(res.ok, res.out)
 })
 
+// Сплошная проверка идемпотентности: каждое создание объекта либо снабжено
+// `if not exists`, либо стоит под своим же `drop … if exists`, либо спрятано
+// в условный do-блок. Свойство ломается молча и НЕ ловится ни сборкой, ни
+// проверкой синтаксиса, ни прогоном на чистой базе — там объектов ещё нет.
+// Уже сорвало два обновления прода: 42P13 на list_posts и 42710 на политике
+// "profiles select own", оба раза на середине шеститысячестрочного файла.
+test('миграции переживают повторный прогон', async () => {
+  const { auditIdempotency } = await import(join(ROOT, 'scripts', 'sql-idempotency.mjs'))
+  const problems = auditIdempotency()
+  const lines = problems.map((p) => `${p.file}: ${p.kind} ${p.what} → ${p.hint}`)
+  assert.deepEqual(lines, [], 'повторный прогон setup_all.sql упадёт на этом:\n  ' + lines.join('\n  '))
+})
+
+// setup_all.sql обязан выполняться ПОВТОРНО на уже мигрированной базе — на этом
+// держится вся инструкция по обновлению. Один класс ошибок ломает это молча:
+// набор OUT-параметров — часть типа функции, и `create or replace` сменить его
+// не умеет (42P13). Пока функцию создают один раз, проблемы нет; как только
+// более поздняя миграция меняет состав колонок, РАННЕЕ создание становится миной,
+// которая срабатывает только на повторном прогоне поверх живой базы.
+//
+// Так и вышло: list_posts получила visibility в 2026-08-25, а версия из
+// 2026-08-11 осталась без drop — и весь setup_all.sql вставал на этой строке.
+// На чистой базе не воспроизводится вовсе.
+test('функции со сменившимся набором колонок создаются защищённо', () => {
+  const build = readFileSync(join(ROOT, 'scripts', 'build-setup-all.mjs'), 'utf8')
+  const list = build.slice(build.indexOf('export const SOURCES'), build.indexOf('const HEADER'))
+  const sources = [...list.matchAll(/'(supabase\/[^']+)'/g)].map((m) => m[1])
+
+  const CREATE = /create\s+(?:or\s+replace\s+)?function\s+public\.(\w+)\s*\(([\s\S]*?)\)\s*returns\s+([\s\S]*?)\s*language\s/gi
+  const DROP = /drop\s+function\s+if\s+exists\s+public\.(\w+)\s*\(/gi
+  const DO_BLOCK = /^do \$\$[\s\S]*?^end \$\$;/gim
+
+  const hist = new Map()
+  for (const rel of sources) {
+    const code = readFileSync(join(ROOT, rel), 'utf8')
+      .split('\n').filter((l) => !l.trimStart().startsWith('--')).join('\n')
+    const drops = [...code.matchAll(DROP)].map((m) => ({ at: m.index, name: m[1] }))
+    // Создание внутри условного do-блока защищено самим условием: на базе,
+    // где условие ложно, старая редакция просто не создаётся.
+    const blocks = [...code.matchAll(DO_BLOCK)].map((m) => [m.index, m.index + m[0].length])
+
+    for (const m of code.matchAll(CREATE)) {
+      const shape = m[3].replace(/\s+/g, ' ').trim().toLowerCase()
+      if (shape === 'trigger') continue
+      const args = m[2].replace(/\s+/g, ' ').trim().toLowerCase()
+      const guarded =
+        drops.some((d) => d.at < m.index && d.name === m[1]) ||
+        blocks.some(([a, b]) => m.index > a && m.index < b)
+      const key = `${m[1]}(${args})`
+      if (!hist.has(key)) hist.set(key, [])
+      hist.get(key).push({ file: rel, shape, guarded })
+    }
+  }
+
+  const offenders = []
+  for (const [key, defs] of hist) {
+    if (new Set(defs.map((d) => d.shape)).size < 2) continue
+    for (const d of defs) if (!d.guarded) offenders.push(`${key} в ${d.file}`)
+  }
+
+  assert.deepEqual(offenders, [],
+    'набор колонок у этих функций меняется по ходу цепочки, но раннее создание ' +
+    'не защищено ни drop function if exists, ни условным do-блоком — ' +
+    'повторный прогон setup_all.sql упадёт с 42P13:\n  ' + offenders.join('\n  '))
+})
+
+// Каталог — единственный документ, которому можно верить про текущее состояние
+// базы. Устаревший каталог хуже отсутствующего: в него верят.
+test('docs/catalog.md не разошёлся с миграциями', () => {
+  const res = run('sql-catalog.mjs', ['--check'])
+  assert.ok(res.ok, `${res.out}\nЗапустите: node scripts/sql-catalog.mjs`)
+})
+
+// Файлы в supabase/archive — снимки уже применённых миграций. Их прогон
+// сегодня откатывает более поздние исправления (месячный CHECK на ai_usage,
+// политику app_state, поддержку AI_PREMIUM). Две страховки: они не участвуют
+// в сборке и падают на первой же строке, если их всё-таки вставят в SQL Editor.
+test('архивные файлы не участвуют в сборке и защищены предохранителем', () => {
+  const build = readFileSync(join(ROOT, 'scripts', 'build-setup-all.mjs'), 'utf8')
+  assert.ok(!build.includes('supabase/archive/'), 'архивный файл попал в SOURCES')
+
+  const dir = join(ROOT, 'supabase', 'archive')
+  const files = readdirSync(dir).filter((f) => f.endsWith('.sql'))
+  assert.ok(files.length > 0, 'архив пуст — тест потерял смысл, удалите его')
+  for (const f of files) {
+    const sql = readFileSync(join(dir, f), 'utf8')
+    const stop = sql.indexOf('raise exception')
+    assert.ok(stop > -1, `${f}: нет предохранителя raise exception`)
+    // Предохранитель обязан стоять ДО первого исполняемого оператора, иначе
+    // часть файла успеет примениться прежде, чем он сработает.
+    const firstDdl = sql.search(/^\s*(create|alter|drop|insert|update|revoke|grant)\s/im)
+    assert.ok(firstDdl === -1 || stop < firstDdl, `${f}: предохранитель стоит после первого оператора`)
+  }
+})
+
 // Порядок в сборке обязан совпадать с порядком применения миграций: каждая
 // рассчитывает на состояние после предыдущих, и перестановка ломает установку
 // молча — файл выполнится, но с другим итоговым определением функций.
@@ -52,9 +147,14 @@ test('порядок источников в сборке — по дате в �
   const list = src.slice(src.indexOf('export const SOURCES'), src.indexOf('const HEADER'))
   const files = [...list.matchAll(/'(supabase\/[^']+)'/g)].map((m) => m[1])
 
-  assert.equal(files[0], 'supabase/schema.sql', 'схема обязана идти первой')
+  // Первая миграция раньше называлась supabase/schema.sql — имя вводило в
+  // заблуждение, будто это актуальная схема, хотя добрую половину её содержимого
+  // отменяют более поздние файлы. Теперь источник ровно один: migrations/.
+  for (const f of files) {
+    assert.ok(f.startsWith('supabase/migrations/'), `источник не в migrations/: ${f}`)
+  }
 
-  const dated = files.slice(1).map((f) => {
+  const dated = files.map((f) => {
     const m = f.match(/(\d{4}-\d{2}-\d{2})/)
     assert.ok(m, `в имени миграции нет даты: ${f}`)
     return m[1]

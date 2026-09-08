@@ -26,8 +26,56 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ---------------- 1) Дневной период в ai_usage ----------------
+-- ⚠ СМЕНА ОГРАНИЧЕНИЯ БЕЗ ПЕРЕНОСА ДАННЫХ НЕ РАБОТАЕТ.
+--
+-- В первой редакции этой миграции стояли просто drop constraint + add
+-- constraint. На пустой таблице проходит; на живой Postgres проверяет новое
+-- условие по ВСЕМ существующим строкам и отвечает
+--   23514: check constraint "ai_usage_period_check" of relation "ai_usage"
+--          is violated by some row
+-- потому что в таблице лежат строки старого, месячного формата ('2026-08').
+-- Ошибка вылезала на середине setup_all.sql и роняла весь прогон.
+--
+-- Строки не выбрасываем: ai_usage — единственный источник правды о том,
+-- сколько стоил каждый тариф, и терять накопленный расход ради смены формата
+-- нельзя. Месяц переносим на его первое число: суммы сохраняются полностью,
+-- меняется только гранулярность, которой у этих строк и так не было.
+--
+-- Порядок обязателен: сначала снять старое ограничение, потом переносить
+-- (иначе вставка '2026-08-01' упрётся в ещё живой месячный CHECK), и только
+-- потом ставить новое.
+
 alter table public.ai_usage
   drop constraint if exists ai_usage_period_check;
+
+-- Если у человека уже есть строка за первое число месяца, склеиваем: первичный
+-- ключ (user_id, period) не допускает двух, а расход должен сойтись.
+insert into public.ai_usage (user_id, period, spent_micro, requests, updated_at)
+select user_id, period || '-01', spent_micro, requests, updated_at
+from public.ai_usage
+where period ~ '^\d{4}-\d{2}$'
+on conflict (user_id, period) do update
+  set spent_micro = public.ai_usage.spent_micro + excluded.spent_micro,
+      requests    = public.ai_usage.requests    + excluded.requests,
+      updated_at  = greatest(public.ai_usage.updated_at, excluded.updated_at);
+
+delete from public.ai_usage where period ~ '^\d{4}-\d{2}$';
+
+-- Всё, что не месяц и не день, — не наш формат вовсе. Молча удалять учётные
+-- строки нельзя, поэтому останавливаемся с внятным сообщением: разбираться с
+-- ними должен человек, а не миграция.
+do $$
+declare
+  v_bad int;
+begin
+  select count(*) into v_bad from public.ai_usage where period !~ '^\d{4}-\d{2}-\d{2}$';
+  if v_bad > 0 then
+    raise exception
+      'ai_usage: % строк с периодом неизвестного формата. Посмотрите: select distinct period from public.ai_usage where period !~ ''^\d{4}-\d{2}-\d{2}$'';',
+      v_bad;
+  end if;
+end $$;
+
 alter table public.ai_usage
   add constraint ai_usage_period_check
   check (period ~ '^\d{4}-\d{2}-\d{2}$');

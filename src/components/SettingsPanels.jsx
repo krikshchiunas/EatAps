@@ -9,23 +9,24 @@
 // принятая дружба), нет блокировки пользователей (её не существует) и нет
 // выбора языка (локализации в проекте нет вовсе).
 // ─────────────────────────────────────────────────────────────────────────────
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store.jsx'
 import { SYNC } from '../lib/syncEngine.js'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
-import { deleteAccount, listFriends } from '../lib/supabase.js'
+import { deleteAccount } from '../lib/supabase.js'
 import {
   notificationsSupported, notificationPermission, requestNotificationPermission,
-  getMutedFriends, toggleFriendMuted,
+  setMutedMessageUsers,
 } from '../lib/notifications.js'
 import { normalizeError } from '../lib/authErrors.js'
+import { listRelation, setMute } from '../lib/social.js'
 import { TOUR_PREF, TIPS, resetTips, seenCount } from '../lib/tour.js'
 import PushScreen from './PushScreen.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import PromoRedeemForm from './PromoRedeemForm.jsx'
 import LegalSheet from './LegalSheet.jsx'
-import { Avatar } from './FriendsScreen.jsx'
+import { Avatar } from './Avatar.jsx'
 import { planByTier } from '../lib/subscription.js'
 
 // Версию подставляет сборка из package.json (см. vite.config.js). Фолбэк —
@@ -316,74 +317,33 @@ export function AccountPanel({ onClose, onOpenAuth }) {
 }
 
 // ── Приватность ───────────────────────────────────────────────────────────────
-// Здесь нет ни одного переключателя, и это не упущение. В базе ровно одна
-// модель доступа: строку состояния читает только принятый друг, и отдаёт её
-// RPC friend_state с фиксированным списком полей. Публичного профиля,
-// подписчиков и раздельной видимости дневника не существует — тумблер
-// «кто видит дневник» был бы декорацией поверх неизменного правила.
+// Переключатель здесь ровно один, и он настоящий: круг доступа к дневнику
+// выбирает владелец, а хранится выбор в profiles.diary_visibility и
+// проверяется в базе функцией can_view_diary. Интерфейс им не управляет —
+// он его показывает.
 //
-// Поэтому экран делает единственное, что здесь честно и полезно: показывает,
-// что именно уходит другу, а что не уходит никогда. Список совпадает с
-// friendView.js и friend_state — если однажды разойдётся, это баг.
-export function PrivacyPanel({ onClose, onOpenFriends }) {
-  const { user, supabaseEnabled } = useStore()
-  const [friendsCount, setFriendsCount] = useState(null)
-
-  useEffect(() => {
-    if (!user?.id) return
-    let cancelled = false
-    listFriends(user.id)
-      .then((l) => { if (!cancelled) setFriendsCount(l.length) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [user?.id])
-
-  const Item = ({ children, ok }) => (
-    <div className="set-row" style={{ alignItems: 'flex-start', fontSize: 14.5 }}>
-      <span style={{ flex: '0 0 auto', color: ok ? 'var(--good)' : 'var(--ink-3)' }}>{ok ? '✓' : '—'}</span>
-      <span>{children}</span>
-    </div>
-  )
-
-  return (
-    <Panel title="Приватность" onClose={onClose}>
-      <Group
-        title="Кто видит ваш профиль"
-        note="Другой модели доступа в EatAps нет: посторонний не может открыть ваш профиль, даже зная ссылку или ваш ID — по ID можно только отправить заявку."
-      >
-        <Row label="Принятые друзья" value={friendsCount != null ? `${friendsCount}` : (supabaseEnabled && user ? '…' : '0')} chevron={false} />
-        {onOpenFriends && <Row label="Управлять списком друзей" onClick={onOpenFriends} />}
-      </Group>
-
-      <Group title="Что видит друг">
-        <Item ok>Имя, фото и «о себе»</Item>
-        <Item ok>Списки «не ем» и «люблю»</Item>
-        <Item ok>Любимый ресторан и блюдо</Item>
-        <Item ok>Дневник питания и норму калорий</Item>
-        <Item ok>Мысли, реакции и ответы</Item>
-      </Group>
-
-      <Group title="Что не видит никто, кроме вас" note="Это ограничение стоит в базе, а не в интерфейсе: сервер просто не отдаёт эти поля.">
-        <Item>Вес, рост, возраст и пол</Item>
-        <Item>Цель и уровень активности</Item>
-        <Item>Настроение, самочувствие и заметки дня</Item>
-        <Item>Свои продукты, история поиска и настройки</Item>
-      </Group>
-
-      <p className="set-note">
-        Чтобы закрыть доступ, удалите человека из друзей — вместе с дружбой пропадает и видимость.
-      </p>
-    </Panel>
-  )
-}
+// Значение по умолчанию — «подписчикам». Это осознанно широкий круг: подписка
+// односторонняя и согласия не требует, то есть любой человек открывает себе
+// доступ к дневнику одним нажатием. Кому это не подходит, ставит «взаимным
+// подпискам» — прежнее поведение — или «никому».
+//
+// Остальное на экране — не настройки, а честный список того, что уходит и что
+// не уходит никогда. Он совпадает с friendView.js и visible_diary; если
+// однажды разойдётся — это баг.
+// Приватность живёт в отдельном файле — social/PrivacyHub.jsx. Раньше она
+// была здесь одной панелью с единственным вопросом «кто видит дневник»;
+// теперь вопросов четыре (аккаунт, общение, связи, дневник), и каждый со
+// своими подэкранами. Держать это рядом с темой оформления и выгрузкой
+// данных значило бы спрятать закрытый аккаунт между тумблерами.
 
 // ── Уведомления ───────────────────────────────────────────────────────────────
 export function NotificationsPanel({ onClose }) {
   const { prefs, setPref, user } = useStore()
   const [perm, setPerm] = useState(() => notificationPermission())
   const [busy, setBusy] = useState(false)
-  const [muted, setMuted] = useState(getMutedFriends)
-  const [mutedBriefs, setMutedBriefs] = useState({})
+  // Заглушённые приезжают с сервера: список общий для всех устройств, и
+  // заглушив человека на телефоне, на ноутбуке от него тоже тихо.
+  const [muted, setMuted] = useState([])
 
   useEffect(() => {
     // Возврат из настроек браузера — переспросить статус разрешения.
@@ -392,21 +352,28 @@ export function NotificationsPanel({ onClose }) {
     return () => window.removeEventListener('focus', onFocus)
   }, [])
 
-  // Имена заглушённых берём из списка друзей — отдельного запроса для этого
-  // в проекте нет, а list_friends уже отдаёт имя и фото.
-  useEffect(() => {
-    if (!user?.id || muted.length === 0) return
-    let cancelled = false
-    listFriends(user.id)
-      .then((l) => {
-        if (cancelled) return
-        const map = {}
-        for (const f of l) map[f.id] = f
-        setMutedBriefs(map)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [user?.id, muted.length])
+  // Имена приходят вместе со списком: заглушить можно кого угодно, включая
+  // тех, на кого вы не подписаны, — в любом списке связей их бы просто не
+  // оказалось, и вместо имени человек видел бы «Пользователь».
+  const loadMuted = useCallback(async () => {
+    if (!user?.id) { setMuted([]); return }
+    try {
+      const rows = await listRelation('muted')
+      const onlyMessages = rows.filter((r) => r.mute_messages)
+      setMuted(onlyMessages)
+      // Кэш для обработчика входящих: решение «показывать пуш» принимается
+      // синхронно, и ходить за списком в этот момент уже поздно.
+      setMutedMessageUsers(onlyMessages.map((r) => r.user_id))
+    } catch { setMuted([]) }
+  }, [user?.id])
+
+  useEffect(() => { loadMuted() }, [loadMuted])
+
+  const unmute = async (row) => {
+    setMuted((cur) => cur.filter((x) => x.user_id !== row.user_id))
+    await setMute(row.user_id, { posts: row.mute_posts, messages: false })
+    loadMuted()
+  }
 
   const enable = async () => {
     setBusy(true)
@@ -474,22 +441,38 @@ export function NotificationsPanel({ onClose }) {
           onChange={(v) => setPref('notifMessages', v)}
         />
       </Group>
+      <Group title="Социальные события">
+        <SwitchRow
+          label="Подписки и запросы"
+          hint="Новый подписчик, просьба о подписке, одобрение"
+          checked={on('notifFollows')}
+          disabled={!granted}
+          onChange={(v) => setPref('notifFollows', v)}
+        />
+        <SwitchRow
+          label="Реакции и ответы"
+          hint="На ваши записи и сообщения"
+          checked={on('notifReactions')}
+          disabled={!granted}
+          onChange={(v) => setPref('notifReactions', v)}
+        />
+      </Group>
       <p className="set-note" style={{ marginTop: -14, marginBottom: 22 }}>
-        Это все уведомления, которые есть в EatAps. Заявки в друзья, реакции и
-        ответы пока не присылаются — переключателей для них здесь нет намеренно.
+        Уведомление не приходит из диалога, который открыт прямо сейчас, и от
+        заглушённых людей — в обоих случаях оно было бы шумом.
       </p>
 
       {muted.length > 0 && (
-        <Group title="Заглушённые" note="От этих людей не приходят пуши о сообщениях. На то, что они видят в вашем профиле, это не влияет.">
-          {muted.map((id) => (
-            <div key={id} className="set-row">
-              <Avatar src={mutedBriefs[id]?.avatar} name={mutedBriefs[id]?.name} size={30} />
+        <Group title="Заглушённые" note="От этих людей не приходят уведомления о сообщениях. На то, что они видят в вашем профиле, это не влияет. Полный список — в «Приватность → Заглушённые».">
+          {muted.map((row) => (
+            <div key={row.user_id} className="set-row">
+              <Avatar src={row.avatar_url} name={row.display_name || row.username} size={30} />
               <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {mutedBriefs[id]?.name || 'Пользователь'}
+                {row.display_name || row.username || 'Пользователь'}
               </span>
               <button
                 style={{ marginLeft: 'auto', fontSize: 14, color: 'var(--primary)', fontWeight: 600, flex: '0 0 auto' }}
-                onClick={() => setMuted(toggleFriendMuted(id))}
+                onClick={() => unmute(row)}
               >
                 Включить
               </button>

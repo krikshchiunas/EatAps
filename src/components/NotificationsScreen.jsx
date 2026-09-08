@@ -11,11 +11,12 @@ import {
   listNotifications, markNotificationRead, markAllNotificationsRead,
   subscribeToNotifications,
 } from '../lib/social.js'
+import { acceptFollowRequest, declineFollowRequest, follow } from '../lib/social.js'
 import {
-  notificationText, notificationTarget, groupNotifications,
-  NOTIFICATION_GROUPS,
+  notificationText, notificationTarget, notificationActions,
+  groupNotifications, groupByTime, NOTIFICATION_GROUPS, TIME_BUCKETS,
 } from '../lib/notificationModel.js'
-import { Avatar } from './FriendsScreen.jsx'
+import { Avatar } from './Avatar.jsx'
 import { timeAgo } from './ThoughtsFeed.jsx'
 
 const PAGE = 40
@@ -30,6 +31,7 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
   const [err, setErr] = useState(null)
   const [more, setMore] = useState(false)      // есть ли что догружать
   const [loadingMore, setLoadingMore] = useState(false)
+  const [busyId, setBusyId] = useState(null)
 
   const load = useCallback(async () => {
     if (!supabaseEnabled || !myId) { setItems([]); return }
@@ -119,11 +121,90 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
     </p>
   }
 
+  // Решение по просьбе прямо в строке. Строка исчезает оптимистично: решение
+  // уже принято, и держать её на экране «до подтверждения» значит предлагать
+  // нажать второй раз.
+  // «Подписаться в ответ» показываем только там, где это ещё имеет смысл:
+  // после нажатия строка остаётся, и вторая кнопка на ней была бы обманом.
+  // Отношение здесь не спрашиваем — это стоило бы запроса на каждую строку
+  // списка; вместо этого кнопка исчезает после нажатия.
+  const [followed, setFollowed] = useState(() => new Set())
+  const rowActions = (n) => notificationActions(n)
+    .filter((a) => !(a.key === 'follow' && followed.has(n.actor_id)))
+
+  const decide = async (n, what) => {
+    if (busyId) return
+    setBusyId(n.id)
+    const prev = items
+    // Просьба разобрана — строка уходит. Подписка в ответ строку НЕ убирает:
+    // событие «на вас подписались» осталось правдой.
+    if (what !== 'follow') setItems((list) => (list || []).filter((x) => x.id !== n.id))
+    const res = what === 'accept' ? await acceptFollowRequest(n.actor_id)
+      : what === 'decline' ? await declineFollowRequest(n.actor_id)
+      : await follow(n.actor_id)
+    setBusyId(null)
+    if (res?.error) { setErr(res.error); if (what !== 'follow') setItems(prev); return }
+    if (what === 'follow') setFollowed((s) => new Set(s).add(n.actor_id))
+    onChanged?.()
+  }
+
   const grouped = groupNotifications(items || [])
   const shown = filter === 'all'
     ? (items || [])
     : (grouped[filter] || [])
   const unread = (items || []).filter((n) => !n.read_at).length
+  // Внутри выбранного фильтра события разложены по давности. Это единственная
+  // группировка, которая не требует от человека ничего выбирать: свежее всегда
+  // сверху и всегда отделено от старого.
+  const byTime = groupByTime(shown)
+
+  const renderRow = (n) => (
+    <div key={n.id} style={{ marginBottom: 2 }}>
+      <button
+        onClick={() => open(n)}
+        className="row gap10"
+        style={{
+          width: '100%', alignItems: 'center', textAlign: 'left',
+          padding: '11px 10px', borderRadius: 14, border: 0,
+          background: n.read_at ? 'transparent' : 'var(--primary-weak)',
+          color: 'inherit', cursor: 'pointer',
+        }}
+      >
+        <Avatar src={n.actor_avatar} name={n.actor_name || n.actor_username} size={40} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 14.5, lineHeight: 1.4 }}>
+            <span style={{ fontWeight: 640 }}>{n.actor_name || n.actor_username || 'Кто-то'}</span>
+            {' '}
+            <span style={{ color: 'var(--ink-2)' }}>{notificationText(n)}</span>
+          </div>
+          <div className="muted" style={{ fontSize: 11.5 }}>{timeAgo(n.created_at)}</div>
+        </div>
+        {!n.read_at && (
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--primary)', flex: '0 0 auto' }} />
+        )}
+      </button>
+
+      {/* Решение прямо в строке — там, где событие требует ответа, а не
+          просто перехода. Набор кнопок задаёт модель события, а не этот
+          экран: иначе список «у каких типов есть кнопки» жил бы в двух
+          местах и однажды разошёлся бы. */}
+      {rowActions(n).length > 0 && (
+        <div className="row gap8" style={{ padding: '0 10px 10px 60px' }}>
+          {rowActions(n).map((a) => (
+            <button
+              key={a.key}
+              className={`btn${a.tone === 'primary' ? '' : ' ghost'}`}
+              style={{ width: 'auto', height: 32, padding: '0 14px', fontSize: 13.5 }}
+              disabled={busyId === n.id}
+              onClick={() => decide(n, a.key)}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div>
@@ -174,31 +255,22 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
         </div>
       )}
 
-      {shown.map((n) => (
-        <button
-          key={n.id}
-          onClick={() => open(n)}
-          className="row gap10"
-          style={{
-            width: '100%', alignItems: 'center', textAlign: 'left',
-            padding: '11px 10px', marginBottom: 2, borderRadius: 14, border: 0,
-            background: n.read_at ? 'transparent' : 'var(--primary-weak)',
-            color: 'inherit', cursor: 'pointer',
-          }}
-        >
-          <Avatar src={n.actor_avatar} name={n.actor_name || n.actor_username} size={40} />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 14.5, lineHeight: 1.4 }}>
-              <span style={{ fontWeight: 640 }}>{n.actor_name || n.actor_username || 'Кто-то'}</span>
-              {' '}
-              <span style={{ color: 'var(--ink-2)' }}>{notificationText(n)}</span>
+      {err && items?.length > 0 && (
+        <p style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 10 }}>{err}</p>
+      )}
+
+      {TIME_BUCKETS.map((b) => (
+        byTime[b.key].length > 0 && (
+          <div key={b.key}>
+            <div className="muted" style={{
+              fontSize: 12, fontWeight: 700, letterSpacing: 0.4,
+              textTransform: 'uppercase', margin: '14px 10px 6px',
+            }}>
+              {b.label}
             </div>
-            <div className="muted" style={{ fontSize: 11.5 }}>{timeAgo(n.created_at)}</div>
+            {byTime[b.key].map(renderRow)}
           </div>
-          {!n.read_at && (
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--primary)', flex: '0 0 auto' }} />
-          )}
-        </button>
+        )
       ))}
 
       {/* Догрузка только в общем списке: фильтр показывает уже загруженное, и
@@ -212,10 +284,6 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
         >
           {loadingMore ? 'Загружаем…' : 'Показать ещё'}
         </button>
-      )}
-
-      {err && items?.length > 0 && (
-        <p style={{ fontSize: 13, color: 'var(--danger)', marginTop: 10 }}>{err}</p>
       )}
     </div>
   )

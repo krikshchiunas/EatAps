@@ -35,7 +35,8 @@ globalThis.localStorage = {
 asIPhoneSafari()
 const {
   startScheduler, notifyIncomingMessage, notificationsSupported, notificationPermission,
-  toggleFriendMuted, isFriendMuted, setActiveChat,
+  setMutedMessageUsers, isUserMuted, setActiveChat, notifySocialEvent,
+  setNotificationPrefs,
 } = await import('./notifications.js')
 
 afterEach(() => { store.clear() })
@@ -101,21 +102,80 @@ test('заглушённый собеседник не присылает пуш
   N.requestPermission = async () => 'granted'
   globalThis.Notification = N
   globalThis.window = { Notification: N }
-  setActiveChat(null)
+  setActiveChat({})
+  setMutedMessageUsers([])
 
   notifyIncomingMessage({ senderId: 'u2', senderName: 'Аня', unreadCount: 1 })
   assert.equal(shown.length, 1, 'обычный собеседник — пуш приходит')
 
-  toggleFriendMuted('u2')
-  assert.equal(isFriendMuted('u2'), true)
+  setMutedMessageUsers(['u2'])
+  assert.equal(isUserMuted('u2'), true)
   notifyIncomingMessage({ senderId: 'u2', senderName: 'Аня', unreadCount: 2 })
   assert.equal(shown.length, 1, 'от заглушённого пуша больше нет')
 
   notifyIncomingMessage({ senderId: 'u3', senderName: 'Борис', unreadCount: 1 })
   assert.equal(shown.length, 2, 'заглушение точечное, а не глобальное выключение')
 
-  toggleFriendMuted('u2')
-  assert.equal(isFriendMuted('u2'), false, 'повторное нажатие снимает заглушение')
+  setMutedMessageUsers([])
+  assert.equal(isUserMuted('u2'), false, 'снятие заглушения возвращает пуши')
   notifyIncomingMessage({ senderId: 'u2', senderName: 'Аня', unreadCount: 3 })
   assert.equal(shown.length, 3)
+})
+
+// Открытый диалог не должен звенеть: человек и так смотрит на это сообщение.
+// Различаем личный диалог (по собеседнику) и групповой (по id диалога) —
+// в группе отправителей много, и подавлять надо не по ним.
+test('пуш не приходит из диалога, который сейчас открыт', () => {
+  const shown = []
+  function N(title, options) { shown.push({ title, options }) }
+  N.permission = 'granted'
+  globalThis.Notification = N
+  globalThis.window = { Notification: N }
+  setMutedMessageUsers([])
+
+  setActiveChat({ peerId: 'u2' })
+  notifyIncomingMessage({ senderId: 'u2', senderName: 'Аня', unreadCount: 1 })
+  assert.equal(shown.length, 0, 'личный диалог открыт — пуша нет')
+
+  notifyIncomingMessage({ senderId: 'u3', senderName: 'Борис', unreadCount: 1 })
+  assert.equal(shown.length, 1, 'из другого диалога пуш приходит')
+
+  setActiveChat({ conversationId: 'c9' })
+  notifyIncomingMessage({ senderId: 'u4', senderName: 'Вера', unreadCount: 1, conversationId: 'c9' })
+  assert.equal(shown.length, 1, 'групповой диалог открыт — пуша нет')
+
+  notifyIncomingMessage({ senderId: 'u4', senderName: 'Вера', unreadCount: 1, conversationId: 'c8', groupTitle: 'Беговой клуб' })
+  assert.equal(shown.length, 2, 'из другой группы пуш приходит')
+  assert.match(shown[1].options.body, /Беговой клуб/, 'в теле пуша видно, в какую группу написали')
+})
+
+// Социальные события раньше не доходили до пуша вовсе — они появлялись только
+// в колокольчике внутри приложения, то есть их видел лишь тот, кто и так
+// открыл EatAps.
+test('социальные события уходят в пуш и слушаются своих переключателей', () => {
+  const shown = []
+  function N(title, options) { shown.push({ title, options }) }
+  N.permission = 'granted'
+  globalThis.Notification = N
+  globalThis.window = { Notification: N }
+  setMutedMessageUsers([])
+  setNotificationPrefs({})
+
+  notifySocialEvent({ type: 'FOLLOW', actorId: 'u2', actorName: 'Аня' })
+  assert.equal(shown.length, 1)
+  assert.match(shown[0].options.body, /подписался/)
+
+  notifySocialEvent({ type: 'ЧТО_ТО_НОВОЕ', actorId: 'u2', actorName: 'Аня' })
+  assert.equal(shown.length, 1, 'неизвестный тип не роняет и не шлёт пустой пуш')
+
+  setNotificationPrefs({ notifFollows: false })
+  notifySocialEvent({ type: 'FOLLOW', actorId: 'u2', actorName: 'Аня' })
+  assert.equal(shown.length, 1, 'выключенные подписки молчат')
+
+  notifySocialEvent({ type: 'POST_REACTION', actorId: 'u2', actorName: 'Аня' })
+  assert.equal(shown.length, 2, 'реакции управляются отдельным переключателем')
+
+  setMutedMessageUsers(['u2'])
+  notifySocialEvent({ type: 'POST_REACTION', actorId: 'u2', actorName: 'Аня' })
+  assert.equal(shown.length, 2, 'заглушённый молчит и здесь')
 })

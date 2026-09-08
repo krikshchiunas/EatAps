@@ -7,7 +7,13 @@
     "dev": "vite",
     "build": "vite build && node scripts/inject-precache.mjs",
     "preview": "vite preview",
-    "test": "node --test src/lib/*.test.js api/stripe/*.test.js api/telegram/*.test.js api/ai/*.test.js"
+    "test": "node --test src/lib/*.test.js api/stripe/*.test.js api/telegram/*.test.js api/ai/*.test.js",
+    "sql:build": "node scripts/build-setup-all.mjs",
+    "sql:catalog": "node scripts/sql-catalog.mjs",
+    "sql:check": "node scripts/check-sql.mjs",
+    "sql:policies": "node scripts/policy-audit.mjs",
+    "sql:idem": "node scripts/sql-idempotency.mjs",
+    "sql:verify": "node scripts/build-setup-all.mjs --check && node scripts/sql-catalog.mjs --check && node scripts/sql-idempotency.mjs && node scripts/check-sql.mjs"
   },
   "dependencies": {
     "@reown/appkit": "^1.8.23",

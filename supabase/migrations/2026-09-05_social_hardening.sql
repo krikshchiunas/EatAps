@@ -384,6 +384,7 @@ grant execute on function public.list_friends(uuid, int, int) to authenticated;
 -- продуктовую модель — чужие подписчики по-прежнему видны через RPC, но уже с
 -- проверкой блокировки.
 drop policy if exists "follows select" on public.follows;
+drop policy if exists "follows select own" on public.follows;
 create policy "follows select own" on public.follows
   for select using (auth.uid() = follower_id or auth.uid() = following_id);
 
@@ -1407,7 +1408,7 @@ grant execute on function public.list_conversations(int) to authenticated;
 -- ─────────────────────────────────────────────────────────────────────────
 -- 14. Realtime
 -- ─────────────────────────────────────────────────────────────────────────
--- messages и notifications уже в публикации (schema.sql и 2026-08-25).
+-- messages и notifications уже в публикации (2026-08-05_initial.sql и 2026-08-25).
 -- Здесь только страховка на случай базы, поднятой в другом порядке.
 do $$
 begin

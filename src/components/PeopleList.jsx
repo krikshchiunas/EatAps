@@ -1,26 +1,30 @@
-// Список людей: результаты поиска, подписчики, подписки, друзья.
+// Список людей: результаты поиска, подписчики, подписки, друзья, близкие
+// друзья, заблокированные, просьбы о подписке.
 //
-// Строка показывает имя и под ним ник — без приставки «@»: ник в EatAps
-// пишется так же, как хранится и как его вводят в поиске.
+// Один компонент на все случаи намеренно — раньше каждый список рисовал строку
+// человека сам, и они успели разойтись в мелочах. Отличаются списки только
+// источником данных и набором действий в строке.
 //
-// Один компонент на все четыре случая намеренно — раньше каждый список рисовал
-// строку человека сам, и они успели разойтись в мелочах. Отличаются списки
-// только источником данных и тем, показывать ли кнопку подписки.
+// ─────────────────────────────────────────────────────────────────────────────
+// ДВА ПРАВИЛА, БЕЗ КОТОРЫХ СПИСОК ЛЮДЕЙ НЕ РАБОТАЕТ
 //
-// Отношения подгружаются ОДНИМ запросом на весь список.
+// 1. ОТНОШЕНИЯ ПОДГРУЖАЮТСЯ ОДНИМ ЗАПРОСОМ. Раньше здесь стоял Promise.all по
+//    getRelationship на каждого человека: пятьдесят строк означали пятьдесят
+//    запросов к базе. Параллельность делала это терпимым по времени ожидания,
+//    но не по нагрузке.
 //
-// Раньше здесь стоял Promise.all по getRelationship на каждого человека —
-// пятьдесят строк означали пятьдесят запросов к базе. Параллельность делала
-// это терпимым по времени ожидания, но не по нагрузке: открытая страница
-// подписчиков стоила базе полсотни вызовов SECURITY DEFINER-функции. Теперь
-// это один relationships_with.
-import { useState, useEffect } from 'react'
-import { Avatar } from './FriendsScreen.jsx'
+// 2. СПИСОК ГРУЗИТСЯ СТРАНИЦАМИ. У аккаунта с тысячей подписчиков «показать
+//    всех сразу» — это мегабайты аватаров в одном ответе.
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { Avatar, LockBadge } from './Avatar.jsx'
 import FollowButton from './FollowButton.jsx'
 import { relationshipsWith } from '../lib/social.js'
 import { EMPTY_RELATIONSHIP, relationshipLabel } from '../lib/relationship.js'
 
-export function PersonRow({ person, myId, rel, onRelChange, onOpen, showFollow = true, onRemove }) {
+export function PersonRow({
+  person, myId, rel, onRelChange, onOpen, showFollow = true,
+  actions = null, context = 'profile', onRefresh,
+}) {
   const name = person.display_name || person.username || 'Без имени'
   const label = rel ? relationshipLabel(rel) : null
 
@@ -39,38 +43,33 @@ export function PersonRow({ person, myId, rel, onRelChange, onOpen, showFollow =
       >
         <Avatar src={person.avatar_url} name={name} size={44} />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {name}
+          <div className="row gap8" style={{ alignItems: 'center', minWidth: 0 }}>
+            <span style={{ fontSize: 15, fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {name}
+            </span>
+            {(person.is_private || rel?.targetIsPrivate) && <LockBadge />}
           </div>
           <div className="muted" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {person.username}{label ? ` · ${label}` : ''}
           </div>
         </div>
       </button>
-      {/* «Убрать» — снять чужую подписку на себя, не блокируя человека.
-          Сервер это умел с самого начала (политика follows разрешает удаление
-          и объекту подписки), но в интерфейсе не было ни одной кнопки: убрать
-          подписчика можно было только блокировкой, то есть гораздо более
-          грубым действием, чем требовалось. */}
-      {onRemove && person.user_id !== myId && (
-        <button
-          onClick={() => onRemove(person)}
-          className="btn ghost"
-          style={{
-            width: 'auto', height: 32, padding: '0 12px', fontSize: 13,
-            flex: '0 0 auto', color: 'var(--ink-3)',
-          }}
-        >
-          Убрать
-        </button>
-      )}
+
+      {/* Особые действия строки (принять просьбу, убрать подписчика, снять
+          блокировку). Их набор задаёт вызывающий экран: он один знает, ЧЕЙ
+          это список и что в нём уместно. */}
+      {actions?.(person)}
+
       {showFollow && rel && person.user_id !== myId && (
         <FollowButton
           myId={myId}
           userId={person.user_id}
           rel={rel}
+          name={name}
           size="small"
+          context={context}
           onChange={(next) => onRelChange?.(person.user_id, next)}
+          onRefresh={onRefresh}
         />
       )}
     </div>
@@ -92,10 +91,19 @@ export function PersonRowSkeleton() {
   )
 }
 
+// searchable — фильтр по УЖЕ загруженному списку; включается сам, когда людей
+// много: искать глазами в списке на двести имён нельзя, а на пяти — не нужно.
+// onLoadMore — догрузка следующей страницы; null означает «догружать нечего».
 export default function PeopleList({
-  people, myId, onOpen, showFollow = true, empty = 'Пусто', loading = false, onRemove = null,
+  people, myId, onOpen, showFollow = true, empty = 'Пусто', loading = false,
+  actions = null, context = 'profile', onRefresh = null,
+  searchable = false, searchPlaceholder = 'Поиск по списку…',
+  onLoadMore = null, hasMore = false, loadingMore = false,
+  error = null, onRetry = null,
 }) {
   const [rels, setRels] = useState({})
+  const [query, setQuery] = useState('')
+  const sentinel = useRef(null)
 
   useEffect(() => {
     let alive = true
@@ -115,12 +123,45 @@ export default function PeopleList({
     return () => { alive = false }
   }, [people, myId])
 
-  if (loading) {
+  // Бесконечная прокрутка. Кнопка «Показать ещё» осталась бы запасным путём,
+  // но на телефоне долистывать и нажимать — лишнее движение.
+  const loadMore = useCallback(() => {
+    if (onLoadMore && hasMore && !loadingMore) onLoadMore()
+  }, [onLoadMore, hasMore, loadingMore])
+
+  useEffect(() => {
+    const el = sentinel.current
+    if (!el || !hasMore) return
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMore()
+    }, { rootMargin: '240px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, loadMore])
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase().replace(/^@+/, '')
+    if (!q) return people || []
+    return (people || []).filter((p) =>
+      (p.display_name || '').toLowerCase().includes(q) || (p.username || '').includes(q))
+  }, [people, query])
+
+  if (error) {
     return (
-      <div>
-        {[0, 1, 2, 3, 4].map((i) => <PersonRowSkeleton key={i} />)}
+      <div style={{ textAlign: 'center', padding: '28px 8px' }}>
+        <div style={{ fontSize: 30, marginBottom: 10 }}>📡</div>
+        <p style={{ fontSize: 14, color: 'var(--danger)', marginBottom: 14 }}>{error}</p>
+        {onRetry && (
+          <button className="btn ghost" style={{ width: 'auto', padding: '0 22px', margin: '0 auto' }} onClick={onRetry}>
+            Повторить
+          </button>
+        )}
       </div>
     )
+  }
+
+  if (loading) {
+    return <div>{[0, 1, 2, 3, 4].map((i) => <PersonRowSkeleton key={i} />)}</div>
   }
 
   if (!people?.length) {
@@ -129,7 +170,23 @@ export default function PeopleList({
 
   return (
     <div>
-      {people.map((p) => (
+      {searchable && people.length > 8 && (
+        <input
+          className="input"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={searchPlaceholder}
+          aria-label={searchPlaceholder}
+          style={{ marginBottom: 10, height: 42, fontSize: 14.5 }}
+        />
+      )}
+
+      {shown.length === 0 ? (
+        <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '24px 0' }}>
+          В этом списке никого не нашли.
+        </p>
+      ) : shown.map((p) => (
         <PersonRow
           key={p.user_id}
           person={p}
@@ -138,9 +195,23 @@ export default function PeopleList({
           onRelChange={(id, next) => setRels((r) => ({ ...r, [id]: next }))}
           onOpen={onOpen}
           showFollow={showFollow}
-          onRemove={onRemove}
+          actions={actions}
+          context={context}
+          onRefresh={onRefresh}
         />
       ))}
+
+      {/* Догрузка идёт только по полному списку: под фильтром «показать ещё»
+          обещало бы не то, что делает. */}
+      {hasMore && !query && (
+        <div ref={sentinel} style={{ padding: '10px 0' }}>
+          {loadingMore
+            ? <PersonRowSkeleton />
+            : <button className="btn ghost" style={{ width: 'auto', padding: '0 22px', margin: '0 auto' }} onClick={loadMore}>
+                Показать ещё
+              </button>}
+        </div>
+      )}
     </div>
   )
 }

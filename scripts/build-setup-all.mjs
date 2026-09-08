@@ -25,7 +25,7 @@ const rel = (p) => join(root, p)
 // ПОРЯДОК ОБЯЗАТЕЛЕН. Каждая миграция рассчитывает на состояние базы после
 // предыдущих; перестановка ломает установку молча.
 export const SOURCES = [
-  'supabase/schema.sql',
+  'supabase/migrations/2026-08-05_initial.sql',
   'supabase/migrations/2026-08-06_account_sync.sql',
   'supabase/migrations/2026-08-07_friend_privacy.sql',
   'supabase/migrations/2026-08-08_hardening.sql',
@@ -44,6 +44,10 @@ export const SOURCES = [
   'supabase/migrations/2026-08-26_admin_subscriptions_writable.sql',
   'supabase/migrations/2026-08-28_profile_rework.sql',
   'supabase/migrations/2026-09-05_social_hardening.sql',
+  'supabase/migrations/2026-09-07_open_messaging_and_diary_privacy.sql',
+  'supabase/migrations/2026-09-08_notification_upsert_fix.sql',
+  'supabase/migrations/2026-09-09_social_graph_v2.sql',
+  'supabase/migrations/2026-09-09_conversations.sql',
 ]
 
 const HEADER = `-- ═══════════════════════════════════════════════════════════════════════════
@@ -54,7 +58,7 @@ const HEADER = `-- ════════════════════�
 --   файл невыполнимым. Правьте ИСТОЧНИКИ (список ниже) и запускайте
 --       node scripts/build-setup-all.mjs
 --
--- Что это: schema.sql и все миграции, склеенные в правильном порядке.
+-- Что это: все миграции, склеенные в правильном порядке, от самой первой.
 -- Вставить целиком в Supabase → SQL Editor → Run. Одного прогона достаточно.
 --
 -- Безопасно для базы с данными. Файл идемпотентен целиком:
@@ -100,6 +104,12 @@ function build() {
   return parts.join('')
 }
 
+// Точка входа выполняется только при прямом запуске: скрипт ещё и экспортирует
+// SOURCES, и импорт этого списка из соседнего инструмента не должен молча
+// переписывать setup_all.sql.
+if (import.meta.url === `file://${process.argv[1]}`) main()
+
+function main() {
 const out = build()
 const target = rel('supabase/setup_all.sql')
 
@@ -114,4 +124,5 @@ if (process.argv.includes('--check')) {
 } else {
   writeFileSync(target, out)
   console.log(`supabase/setup_all.sql собран из ${SOURCES.length} файлов, ${out.split('\n').length} строк`)
+}
 }

@@ -1,4 +1,4 @@
-// Вкладка «Лента» — теперь корневой раздел приложения.
+// Вкладка «Лента» — корневой раздел приложения.
 //
 // Раньше на её месте в нижней навигации была зелёная кнопка «＋», которая
 // открывала лист добавления приёма пищи. Это дублировало то, что уже есть на
@@ -7,17 +7,35 @@
 // времени суток и потому регулярно угадывала неправильно.
 //
 // Лента живёт здесь, а не внутри экрана «Общение», чтобы не существовать в
-// двух местах одновременно: в хабе вкладки «Лента» больше нет.
+// двух местах одновременно.
 import { useState } from 'react'
 import { useStore } from '../store.jsx'
+import { openDirect } from '../lib/messaging.js'
 import FeedScreen from './FeedScreen.jsx'
 import PublicProfile from './PublicProfile.jsx'
-import ChatView from './ChatView.jsx'
+import ChatScreen from './messaging/ChatScreen.jsx'
 
 export default function FeedTab({ onChatClosed }) {
   const { supabaseEnabled, user } = useStore()
   const [profileUser, setProfileUser] = useState(null)
-  const [chatFriend, setChatFriend] = useState(null)
+  const [chat, setChat] = useState(null)
+
+  // Из ленты можно написать автору — и диалог заводится тем же способом, что
+  // и везде: сервер находит или создаёт его по собеседнику. Второй путь к
+  // созданию переписки завёл бы вторую трактовку «когда диалог существует».
+  const openChat = async (peer) => {
+    setProfileUser(null)
+    const res = await openDirect(peer.id)
+    if (res?.error) return
+    setChat({
+      id: res.ok,
+      kind: 'direct',
+      title: peer.name || peer.display_name || peer.username || 'Диалог',
+      avatarUrl: peer.avatar || peer.avatar_url || null,
+      peerId: peer.id,
+      state: 'accepted',
+    })
+  }
 
   if (!supabaseEnabled || !user) {
     return (
@@ -43,14 +61,16 @@ export default function FeedTab({ onChatClosed }) {
           userId={profileUser}
           onClose={() => setProfileUser(null)}
           onOpenProfile={setProfileUser}
-          onOpenChat={(friend) => { setProfileUser(null); setChatFriend(friend) }}
+          onOpenChat={openChat}
         />
       )}
 
-      {chatFriend && (
-        <ChatView
-          friend={chatFriend}
-          onClose={() => { setChatFriend(null); onChatClosed?.() }}
+      {chat && (
+        <ChatScreen
+          conversation={chat}
+          onClose={() => { setChat(null); onChatClosed?.() }}
+          onOpenProfile={setProfileUser}
+          onChanged={onChatClosed}
         />
       )}
     </div>
