@@ -17,11 +17,10 @@
 // комментарием: еда в дневнике — не пост, и обсуждать её при всех человек не
 // просил. Публичные реакции есть только у «Мыслей».
 // ─────────────────────────────────────────────────────────────────────────────
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { sumDay } from '../lib/nutrition.js'
 import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { groupDayByMeal, resolvedTime } from '../lib/meals.js'
-import { foodHabits } from '../lib/stats.js'
 import { Avatar } from './FriendsScreen.jsx'
 import ThoughtsFeed from './ThoughtsFeed.jsx'
 
@@ -182,13 +181,7 @@ export default function UserProfileView({
   const groups = groupDayByMeal(day)
   const dayEmpty = groups.every((g) => g.foods.length === 0)
 
-  // «Я это обожаю» / «Ок» — не поля анкеты, а факт из дневника. Считаются
-  // здесь, потому что дневник есть в обоих режимах: свой — из стора, друга — из
-  // friend_state. Отдельного переключателя приватности у них нет: еда друга и
-  // так видна на вкладке «Питание», и это тот же самый круг людей.
-  const habits = useMemo(() => foodHabits(days), [days])
-
-  const hasSelfDetails = Boolean(p.bio || p.guiltyPleasure || habits.most || habits.rare)
+  const hasSelfDetails = Boolean(p.bio || p.guiltyPleasure || p.favRestaurant)
 
   return (
     <>
@@ -234,9 +227,25 @@ export default function UserProfileView({
                завести, ни отредактировать, и в профиле их больше нет. */
             <div className="card" style={{ display: 'grid', gap: 16 }}>
               <ProfileRow label="Био" value={p.bio} multiline />
-              <ProfileRow label="Я это обожаю" value={habits.most?.name} />
-              <ProfileRow label="Ок" value={habits.rare?.name} />
               <ProfileRow label="MY guilty pleasure" value={p.guiltyPleasure} />
+              {p.favRestaurant && (
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.3 }}>Мой любимый ресторан</div>
+                  <div style={{ fontSize: 15, lineHeight: 1.45, marginTop: 3, color: 'var(--ink)' }}>
+                    {p.favRestaurant}
+                    {p.favRestaurantGeo && (
+                      <a
+                        href={`https://maps.google.com/?q=${p.favRestaurantGeo.lat},${p.favRestaurantGeo.lng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ marginLeft: 8, fontSize: 13, color: 'var(--primary)' }}
+                      >
+                        📍 На карте
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="card">

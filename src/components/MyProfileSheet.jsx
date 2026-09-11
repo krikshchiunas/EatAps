@@ -39,7 +39,10 @@ export default function MyProfileSheet({ onClose }) {
     avatar: profile?.avatar || null,
     bio: profile?.bio || '',
     guiltyPleasure: profile?.guiltyPleasure || '',
+    favRestaurant: profile?.favRestaurant || '',
+    favRestaurantGeo: profile?.favRestaurantGeo || null,
   })
+  const [geoLoading, setGeoLoading] = useState(false)
 
   const set = (p) => setDraft((d) => ({ ...d, ...p }))
 
@@ -69,7 +72,8 @@ export default function MyProfileSheet({ onClose }) {
       avatar: draft.avatar || undefined,
       bio: draft.bio.trim() || undefined,
       guiltyPleasure: draft.guiltyPleasure.trim() || undefined,
-      favRestaurant: undefined,
+      favRestaurant: draft.favRestaurant.trim() || undefined,
+      favRestaurantGeo: draft.favRestaurantGeo || undefined,
       favDish: undefined,
       noGos: undefined,
       toGos: undefined,
@@ -151,6 +155,57 @@ export default function MyProfileSheet({ onClose }) {
             onChange={(e) => set({ guiltyPleasure: e.target.value })}
             maxLength={60}
           />
+        </div>
+
+        <div className="field">
+          <label>Мой любимый ресторан</label>
+          <input
+            className="input"
+            placeholder="Напр. Кофемания"
+            value={draft.favRestaurant}
+            onChange={(e) => set({ favRestaurant: e.target.value })}
+            maxLength={60}
+          />
+          {draft.favRestaurant.trim() && (
+            <div style={{ marginTop: 8 }}>
+              {draft.favRestaurantGeo ? (
+                <div className="row gap8" style={{ alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+                    📍 {draft.favRestaurantGeo.lat.toFixed(4)}, {draft.favRestaurantGeo.lng.toFixed(4)}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    style={{ fontSize: 12, padding: '4px 10px' }}
+                    onClick={() => set({ favRestaurantGeo: null })}
+                  >
+                    Убрать
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ fontSize: 13 }}
+                  disabled={geoLoading}
+                  onClick={() => {
+                    if (!navigator.geolocation) return
+                    setGeoLoading(true)
+                    navigator.geolocation.getCurrentPosition(
+                      (pos) => {
+                        set({ favRestaurantGeo: { lat: pos.coords.latitude, lng: pos.coords.longitude } })
+                        setGeoLoading(false)
+                      },
+                      () => setGeoLoading(false),
+                      { timeout: 10000 },
+                    )
+                  }}
+                >
+                  {geoLoading ? 'Определяем…' : '📍 Добавить геолокацию'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <button className="btn" style={{ marginTop: 10 }} onClick={save} disabled={busy}>
