@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { microDef, rdaFor, formatMicro } from '../lib/micronutrients.js'
-import { sanitizeAmount } from '../lib/foods.js'
+import { sanitizeAmount } from '../lib/foodFormat.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Личная норма по одному веществу.

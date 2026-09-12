@@ -22,7 +22,7 @@ export default class RootErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // В консоль — для отладки. Секретов в стеке нет, данные пользователя сюда
     // не попадают.
-    // eslint-disable-next-line no-console
+     
     console.error('[eataps] сбой рендера', error?.message || error, info?.componentStack?.slice(0, 400))
   }
 

@@ -16,6 +16,8 @@ import { normalizeMealCard } from '../../lib/mealCard.js'
 import { timeShort, isSameDay, dayLabel } from '../../lib/chatFormat.js'
 import { Avatar } from '../Avatar.jsx'
 import MediaBubble from './MediaBubble.jsx'
+import PrivateImage from '../PrivateImage.jsx'
+import { signedChatImage } from '../../lib/supabase.js'
 
 const REDUCED_MOTION = typeof window !== 'undefined'
   && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -180,11 +182,17 @@ export function MessageRow({
             {m.meal_ref && <MealRefCard meal={m.meal_ref} onOpen={onOpenMeal} />}
             {/* Открытие блокируем, только пока фото не на сервере: при 'sending'
                 в href лежит blob:, при 'failed' грузить нечего. */}
+            {/* Фото СТАРЫХ сообщений: бакет chat-images закрыт, поэтому адрес
+                из строки сообщения сначала меняется на подписанную ссылку.
+                Новые вложения сюда не попадают — они уходят в m.media. */}
             {m.image_url && (
-              <a href={m.image_url} target="_blank" rel="noreferrer" className="msg-img-wrap"
-                 onClick={(e) => { if (status === 'sending' || status === 'failed') e.preventDefault() }}>
-                <img src={m.image_url} alt="" className="msg-img" onLoad={onImgLoad} draggable={false} />
-              </a>
+              <PrivateImage
+                source={m.image_url}
+                resolve={signedChatImage}
+                className="msg-img"
+                onLoad={onImgLoad}
+                onClick={(url) => onOpenMedia?.({ url, kind: 'image' })}
+              />
             )}
             {m.media && (
               <MediaBubble

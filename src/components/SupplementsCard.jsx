@@ -3,7 +3,7 @@ import { buildMicroSummary, STATUS } from '../lib/microSummary.js'
 import { formatMicro } from '../lib/micronutrients.js'
 import { topSourcesFor } from '../lib/foodMicros.js'
 import { doseLabel, scaleProvides } from '../lib/supplements.js'
-import { sanitizeAmount } from '../lib/foods.js'
+import { sanitizeAmount } from '../lib/foodFormat.js'
 import { perUnitOf, stackKey, stackMicroKeys, suppEntryFromStack, takenMap, takenCount } from '../lib/suppStack.js'
 import { plural } from '../lib/text.js'
 
@@ -59,8 +59,10 @@ export default function SupplementsCard({
   addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, onOpenAdd, onOpenGoal, onToast,
 }) {
   const [open, setOpen] = useState(false)
-  const meals = day?.meals || []
-  const supps = day?.supps || []
+  // `day?.meals || []` создаёт НОВЫЙ пустой массив на каждый рендер, поэтому
+  // useMemo ниже пересчитывался всегда — то есть не выполнял свою работу.
+  const meals = useMemo(() => day?.meals || [], [day])
+  const supps = useMemo(() => day?.supps || [], [day])
 
   const summary = useMemo(() => buildMicroSummary({
     meals,

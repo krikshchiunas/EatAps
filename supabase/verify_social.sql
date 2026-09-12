@@ -67,12 +67,17 @@ with checks(порядок, проверка, ok, деталь) as (
     ),
     coalesce((select string_agg(distinct visibility, ', ') from public.posts), 'постов нет')
 
-  union all select 9, 'старые посты переведены в followers',
+  -- Проверка изменена в 2026-09-12_restore_post_visibility. Раньше здесь
+  -- утверждалось, что все помеченные записи стоят в 'followers'. Именно это и
+  -- оказалось ошибкой: миграция 2026-08-25 расширила круг старых записей с
+  -- «друзей» до «подписчиков» задним числом. Теперь верно обратное — ни одна
+  -- запись, переведённая автоматически, не должна остаться в расширенном круге.
+  union all select 9, 'автоматически расширенных записей не осталось',
     not exists (
       select 1 from public.posts
-      where visibility_migrated = true and visibility <> 'followers'
+      where visibility_migrated = true and visibility = 'followers'
     ),
-    coalesce((select count(*)::text || ' постов мигрировано'
+    coalesce((select count(*)::text || ' записей ещё с пометкой миграции'
       from public.posts where visibility_migrated), '0')
 
   -- Круг дневника с 2026-09-07 задаёт владелец, а с 2026-09-09 к нему

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { makeTemplate, templateTotals, MAX_TEMPLATE_ITEMS } from '../lib/library.js'
-import { macroLabel } from '../lib/foods.js'
+import { macroLabel } from '../lib/foodFormat.js'
 
 // Сохранение приёма пищи как шаблона («моё блюдо»).
 //

@@ -69,7 +69,7 @@ function GearIcon() {
   )
 }
 
-export default function ProfileScreen({ setTab, onOpenChat }) {
+export default function ProfileScreen({ onOpenChat }) {
   const { profile, days, dayOf, customFoods, user, supabaseEnabled } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)

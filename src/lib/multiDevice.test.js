@@ -9,7 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { SYNC } from './syncEngine.js'
-import { DATE, createServer, createTimers, createDevice, serverMeals } from './syncTestKit.js'
+import { createServer, createTimers, createDevice, serverMeals } from './syncTestKit.js'
 
 test('три устройства одного аккаунта работают одновременно и не мешают друг другу', async () => {
   const server = createServer()

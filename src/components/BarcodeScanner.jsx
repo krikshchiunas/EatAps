@@ -72,11 +72,24 @@ export default function BarcodeScanner({ onClose, onFound, onManual }) {
   const nativeErrorsRef = useRef(0)
   const startedRef = useRef(0)
 
+  // Остановить камеру полностью. Идемпотентна: вызывается и из обработчиков,
+  // и из очистки эффекта, и оба раза подряд — это нормально.
+  //
+  // Обнулять srcObject обязательно, а не «на всякий случай»: пока <video>
+  // ссылается на поток, Safari (и iOS, и macOS) держит камеру занятой и не
+  // гасит индикатор, даже когда все дорожки уже остановлены. Снаружи это
+  // выглядит так, будто приложение подсматривает после закрытия сканера.
   const stopCamera = useCallback(() => {
     cancelAnimationFrame(rafRef.current)
+    rafRef.current = 0
     const stream = streamRef.current
     streamRef.current = null
     if (stream) for (const track of stream.getTracks()) track.stop()
+    const video = videoRef.current
+    if (video) {
+      try { video.pause() } catch { /* элемент уже снят с дерева */ }
+      video.srcObject = null
+    }
   }, [])
 
   const close = useCallback(() => {
@@ -146,15 +159,24 @@ export default function BarcodeScanner({ onClose, onFound, onManual }) {
         audio: false,
       }
       let stream
+      let failure = null
       try {
         stream = await navigator.mediaDevices.getUserMedia(constraints)
       } catch (e) {
+        failure = e
+        // Запрошенные параметры не поддержаны (например, на ноутбуке нет
+        // задней камеры) — пробуем без них. Причину отказа держим в отдельной
+        // переменной: переприсваивать параметр catch нельзя, иначе теряется
+        // исходная ошибка, если и вторая попытка не удалась.
         if (e?.name === 'OverconstrainedError') {
-          try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }) } catch (e2) { e = e2 }
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+            failure = null
+          } catch (e2) { failure = e2 }
         }
         if (!stream) {
           if (cancelled) return
-          const name = e?.name
+          const name = failure?.name
           if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') setPhase('denied')
           else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') setPhase('nocamera')
           else if (name === 'NotReadableError' || name === 'TrackStartError') setPhase('busy')

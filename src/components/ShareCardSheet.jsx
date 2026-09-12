@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { buildShareData, renderShareCard, cardToBlob } from '../lib/shareCard.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
@@ -17,11 +17,18 @@ export default function ShareCardSheet({ date, onClose }) {
   const [theme, setTheme] = useState(resolvedTheme === 'light' ? 'light' : 'dark')
 
   const day = dayOf(date)
-  const data = buildShareData(day, date, { name: profile?.name })
+  // data считается через useMemo, чтобы её можно было честно указать
+  // зависимостью эффекта ниже. Без этого она пересоздавалась на каждый рендер,
+  // и список зависимостей приходилось повторять руками — то есть держать в
+  // двух местах то, что должно быть в одном.
+  const data = useMemo(
+    () => buildShareData(day, date, { name: profile?.name }),
+    [day, date, profile?.name],
+  )
 
   useEffect(() => {
     if (canvasRef.current) renderShareCard(canvasRef.current, data, theme)
-  }, [date, theme, day, profile?.name])
+  }, [data, theme])
 
   // Системное «Поделиться» доступно не везде (десктопные браузеры, старый
   // Android). Там, где его нет, честно сохраняем файл — а не показываем

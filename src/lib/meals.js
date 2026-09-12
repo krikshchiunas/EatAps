@@ -13,7 +13,7 @@
 // хранятся в day.mealSections, пока пользователь не поменяет им время/показ времени.
 // Пользовательские секции хранятся в day.mealSections с момента создания.
 // ─────────────────────────────────────────────────────────────────────────────
-import { MEAL_TYPES } from './foods.js'
+import { MEAL_TYPES } from './foodFormat.js'
 import { newId } from './uuid.js'
 
 export const STANDARD_TYPES = ['breakfast', 'lunch', 'dinner', 'snack']

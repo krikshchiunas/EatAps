@@ -10,11 +10,9 @@
 // возраст, пол, цель, уровень активности, настройки и история поиска в него не
 // входят и входить не должны: их нет на экране друга.
 
-// Ровно то, что рисует вкладка «О себе»: имя, аватар, био и guilty pleasure.
-// Любимое блюдо, любимый ресторан и списки «да в еде» / «нет в еде» из модели
-// профиля убраны — их больше нечем заполнить и негде показать, поэтому и
-// возить их другу незачем. «Я это обожаю» и «Ок» здесь не нужны: они
-// считаются по дневнику, который друг получает следующим полем.
+// Ровно то, что рисует вкладка «О себе»: имя, аватар, био, guilty pleasure
+// и любимый ресторан. «Я это обожаю» и «Ок» здесь не нужны: они считаются
+// по дневнику, который друг получает следующим полем.
 const PROFILE_FIELDS = ['name', 'avatar', 'bio', 'guiltyPleasure']
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v)
@@ -24,6 +22,15 @@ export function projectFriendProfile(raw) {
   const out = {}
   for (const k of PROFILE_FIELDS) {
     if (typeof p[k] === 'string' && p[k]) out[k] = p[k]
+  }
+  if (isObj(p.favRestaurant) && typeof p.favRestaurant.name === 'string' && p.favRestaurant.name) {
+    const r = { name: p.favRestaurant.name }
+    if (isObj(p.favRestaurant.geo)
+      && Number.isFinite(p.favRestaurant.geo.lat)
+      && Number.isFinite(p.favRestaurant.geo.lng)) {
+      r.geo = { lat: p.favRestaurant.geo.lat, lng: p.favRestaurant.geo.lng }
+    }
+    out.favRestaurant = r
   }
   // Из целей — только норма калорий: она показана как ориентир под кольцом.
   const calories = Number(p.targets?.calories)

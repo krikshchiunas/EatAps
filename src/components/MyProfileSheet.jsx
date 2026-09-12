@@ -1,9 +1,7 @@
 // Редактор своего профиля.
 //
-// Полей ровно столько, сколько рисует витрина: имя, аватар, ник, био и
-// guilty pleasure. Списки «да в еде» / «нет в еде», любимое блюдо и любимый
-// ресторан убраны вместе со старой моделью профиля — «Я это обожаю» и «Ок»
-// теперь считаются по дневнику, а не заполняются руками.
+// Полей ровно столько, сколько рисует витрина: имя, аватар, ник, био,
+// guilty pleasure и любимый ресторан (с необязательной геолокацией).
 import { useState, useEffect } from 'react'
 import { useStore } from '../store.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
@@ -39,7 +37,10 @@ export default function MyProfileSheet({ onClose }) {
     avatar: profile?.avatar || null,
     bio: profile?.bio || '',
     guiltyPleasure: profile?.guiltyPleasure || '',
+    favRestaurant: profile?.favRestaurant || { name: '' },
   })
+  const [geoLoading, setGeoLoading] = useState(false)
+  const [geoError, setGeoError] = useState(null)
 
   const set = (p) => setDraft((d) => ({ ...d, ...p }))
 
@@ -57,19 +58,19 @@ export default function MyProfileSheet({ onClose }) {
       setNick(res.ok)
     }
 
-    // Пустое поле пишем как undefined, а не '': профиль — обычный объект в
-    // синхронизируемом состоянии, и пустые ключи там ни к чему.
-    //
-    // Поля старой модели (любимое блюдо, ресторан, списки «да/нет в еде»)
-    // затираются здесь же. Их больше нигде не видно и негде завести, а молча
-    // возить их в блобе и отдавать друзьям — раздача данных без причины.
+    const restName = draft.favRestaurant?.name?.trim()
+    const restGeo = draft.favRestaurant?.geo
+    const favRestaurant = restName
+      ? { name: restName, ...(restGeo ? { geo: restGeo } : {}) }
+      : undefined
+
     setProfile({
       ...(profile || {}),
       name: draft.name.trim() || undefined,
       avatar: draft.avatar || undefined,
       bio: draft.bio.trim() || undefined,
       guiltyPleasure: draft.guiltyPleasure.trim() || undefined,
-      favRestaurant: undefined,
+      favRestaurant,
       favDish: undefined,
       noGos: undefined,
       toGos: undefined,
@@ -139,9 +140,6 @@ export default function MyProfileSheet({ onClose }) {
           />
         </div>
 
-        {/* Единственное поле профиля, которое человек заполняет про еду сам.
-            «Я это обожаю» и «Ок» рядом с ним в профиле считаются по дневнику —
-            их здесь нет и быть не должно. */}
         <div className="field">
           <label>MY guilty pleasure</label>
           <input
@@ -151,6 +149,55 @@ export default function MyProfileSheet({ onClose }) {
             onChange={(e) => set({ guiltyPleasure: e.target.value })}
             maxLength={60}
           />
+        </div>
+
+        <div className="field">
+          <label>Любимый ресторан</label>
+          <input
+            className="input"
+            placeholder="Название ресторана"
+            value={draft.favRestaurant?.name || ''}
+            onChange={(e) => set({ favRestaurant: { ...draft.favRestaurant, name: e.target.value } })}
+            maxLength={60}
+          />
+          {draft.favRestaurant?.geo ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>📍 Геолокация добавлена</span>
+              <button
+                type="button"
+                style={{ fontSize: 12, color: 'var(--danger)', background: 'none', padding: '2px 6px' }}
+                onClick={() => set({ favRestaurant: { ...draft.favRestaurant, geo: undefined } })}
+              >
+                Убрать
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ marginTop: 8, fontSize: 13 }}
+                disabled={geoLoading}
+                onClick={() => {
+                  setGeoError(null)
+                  setGeoLoading(true)
+                  navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                      set({ favRestaurant: { ...draft.favRestaurant, geo: { lat: pos.coords.latitude, lng: pos.coords.longitude } } })
+                      setGeoLoading(false)
+                    },
+                    () => {
+                      setGeoError('Не удалось определить местоположение')
+                      setGeoLoading(false)
+                    },
+                  )
+                }}
+              >
+                {geoLoading ? 'Определяем…' : '📍 Добавить геолокацию'}
+              </button>
+              {geoError && <p style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6 }}>{geoError}</p>}
+            </>
+          )}
         </div>
 
         <button className="btn" style={{ marginTop: 10 }} onClick={save} disabled={busy}>

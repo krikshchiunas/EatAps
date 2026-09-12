@@ -1,10 +1,10 @@
-import { macroLabel, amountLabel } from '../lib/foods.js'
+import { macroLabel, amountLabel } from '../lib/foodFormat.js'
 import { plural } from '../lib/text.js'
-import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, Suspense } from 'react'
 import { useStore } from '../store.jsx'
-import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
+import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, BUCKET_LABEL } from '../lib/nutrition.js'
 import {
-  targetsForDay, baselineTargetsForDay, profileScore, dayWeight, hasDayActivity, effectiveActivity,
+  targetsForDay, baselineTargetsForDay, profileScore, dayWeight,
   ACTIVITY_LEVELS, activityLevelFor, strengthDeltaForDay,
 } from '../lib/body.js'
 import { isLowLogged } from '../lib/stats.js'
@@ -12,15 +12,24 @@ import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { getMealSections, foodsForMeal, resolvedTime, newCustomSection } from '../lib/meals.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import SupplementsCard from './SupplementsCard.jsx'
-import SupplementSheet from './SupplementSheet.jsx'
-import MicroGoalSheet from './MicroGoalSheet.jsx'
-import FoodInfoSheet from './FoodInfoSheet.jsx'
 import { buildMicroSummary } from '../lib/microSummary.js'
 import { stackMicroKeys } from '../lib/suppStack.js'
-import MealSectionSheet from './MealSectionSheet.jsx'
-import SaveTemplateSheet from './SaveTemplateSheet.jsx'
-import ShareCardSheet from './ShareCardSheet.jsx'
 import CoachMark from './CoachMark.jsx'
+import LazyBoundary from './LazyBoundary.jsx'
+import { lazyWithReload } from '../lib/lazyWithReload.js'
+
+// ── Листы дневника грузятся по требованию ────────────────────────────────────
+// Все шесть открываются нажатием, то есть заведомо после первой отрисовки.
+// Пока они импортировались статически, вместе с ними в главный чанк уезжали
+// справочник продуктов, таблица микронутриентов и отрисовка карточки на канве —
+// ради экранов, которые большинство за сессию не открывает ни разу.
+// SupplementsCard остаётся статической: это карточка НА самом дневнике.
+const FoodInfoSheet = lazyWithReload(() => import('./FoodInfoSheet.jsx'))
+const SupplementSheet = lazyWithReload(() => import('./SupplementSheet.jsx'))
+const MicroGoalSheet = lazyWithReload(() => import('./MicroGoalSheet.jsx'))
+const MealSectionSheet = lazyWithReload(() => import('./MealSectionSheet.jsx'))
+const SaveTemplateSheet = lazyWithReload(() => import('./SaveTemplateSheet.jsx'))
+const ShareCardSheet = lazyWithReload(() => import('./ShareCardSheet.jsx'))
 import Ring from './Ring.jsx'
 import MacroBar from './MacroBar.jsx'
 
@@ -331,6 +340,10 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
         </div>
       </div>
 
+      {/* Один Suspense на все листы: одновременно открыт максимум один, а
+          отдельная граница у каждого только размножала бы одинаковый код. */}
+      <LazyBoundary onClose={() => { setInfoFood(null); setSuppOpen(false); setGoalKey(null); setShareOpen(false) }}>
+      <Suspense fallback={null}>
       {infoFood && (
         <FoodInfoSheet
           food={infoFood}
@@ -412,6 +425,8 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
           onClose={closeSectionSheet}
         />
       )}
+      </Suspense>
+      </LazyBoundary>
     </div>
   )
 }
@@ -419,8 +434,8 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
 // ── Контент одного дня (переиспользуется тремя страницами пейджера) ────────────
 function DayBody({
   date, interactive, profile, days, dayOf, removeFood, addFood, moveMealSection,
-  clipboard, setClipboard, onOpenAdd, onEditFood, onFoodInfo, onEditSection, onCreateSection, today,
-  setDayWeight, setDayActivity, setDayActivityScore, setDayStrength, setDefaultActivityScore,
+  clipboard, setClipboard, onOpenAdd, onEditFood, onFoodInfo, onEditSection, onCreateSection,
+  setDayWeight, setDayActivityScore, setDayStrength, setDefaultActivityScore,
   setDayStatsExcluded, confirmDayStats,
   repeatMeal, prevDate, onToast, onSaveTemplate,
   supplements, microGoals, addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, onOpenSupp, onOpenGoal,
@@ -710,7 +725,7 @@ const GRADE = {
   bad: { color: 'var(--danger)', bg: 'rgba(192,104,78,0.12)', emoji: '🔴', title: 'Много сахара' },
 }
 
-function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal }) {
+function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft }) {
   const [open, setOpen] = useState(false)
   const g = GRADE[grade.level] || GRADE.ok
   const buckets = Object.entries(quality.buckets).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
@@ -803,7 +818,7 @@ function QualityBar({ label, value, max, invert, hint }) {
 // подписи. Здесь — только показ.
 
 function BodyCard({
-  date, day, days, profile, targets, baseTargets, calGoal,
+  date, day, days, profile, targets, baseTargets,
   setDayWeight, setDayActivityScore, setDayStrength, setDefaultActivityScore,
 }) {
   const [open, setOpen] = useState(false)

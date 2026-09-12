@@ -9,7 +9,7 @@
 // требовала помнить про обе. Теперь строим и рисуем только v2, а старые записи
 // из БД поднимаем в него через normalizeMealCard — переписка не ломается.
 
-import { mealMeta } from './foods.js'
+import { mealMeta } from './foodFormat.js'
 
 const num = (x) => Math.round(Number(x) || 0)
 

@@ -1,88 +1,102 @@
+// «Совет по приложению» — короткое анонимное сообщение владельцу.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧТО БЫЛО НЕ ТАК
+//
+// Точка не требовала входа, а единственным заслоном служил заголовок Origin.
+// Против чужой СТРАНИЦЫ это работает: браузер ставит Origin сам и подделать
+// его из JavaScript нельзя. Против curl не работает вовсе — там заголовок
+// пишется рукой. То есть заслона не было.
+//
+// Ограничение частоты жило в `const hits = new Map()` — в памяти экземпляра
+// функции. Экземпляров на бессерверной платформе много, общей памяти у них
+// нет, и параллельные запросы просто попадали в разные счётчики. Ключом при
+// этом был ЛЕВЫЙ элемент X-Forwarded-For, то есть значение, которое клиент
+// дописывает сам: достаточно было менять заголовок, чтобы всегда начинать
+// с нуля.
+//
+// Итог: личный телеграм владельца затапливался одной командой в цикле.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// КАК СДЕЛАНО СЕЙЧАС
+//
+// Анонимность сохранена намеренно: это «совет по приложению», и требовать
+// ради него регистрации значит не получить ни одного совета. Вместо этого:
+//
+//   • счётчик переехал в Postgres — он общий для всех экземпляров;
+//   • ключом служит адрес от доверенного узла, а не от отправителя;
+//   • у вошедшего пользователя ключ — его идентификатор: смена адреса не
+//     даёт новой корзины;
+//   • при недоступном счётчике запрос НЕ проходит: писать наружу без
+//     работающего лимита нельзя;
+//   • Origin остался как дополнительный слой против чужих страниц.
 import { isAllowedOrigin } from './stripe/origin.js'
+import { rateLimit, callerKey } from './_ratelimit.js'
+import { getUserFromRequest } from './_auth.js'
+import { ADMIN_CHAT_IDS, sendMessage } from './telegram/_tg.js'
 
-const CHAT_IDS = [571138125, 938539456]
 const MAX_LEN = 2000
-const WINDOW_MS = 60_000
-const MAX_PER_WINDOW = 3
+const MIN_LEN = 2
 
-// Ограничение частоты в памяти процесса. Оговорка честная: на бессерверной
-// платформе экземпляров несколько и они перезапускаются, поэтому это не
-// строгая квота, а заслон от простого перебора в один поток. Строгий лимит
-// требует общего хранилища (Vercel Firewall, Upstash) — вынесено в задачи.
-const hits = new Map()
-
-function tooOften(key) {
-  const now = Date.now()
-  const list = (hits.get(key) || []).filter((t) => now - t < WINDOW_MS)
-  if (list.length >= MAX_PER_WINDOW) {
-    hits.set(key, list)
-    return true
-  }
-  list.push(now)
-  hits.set(key, list)
-  // Не даём карте расти бесконечно на долгоживущем экземпляре.
-  if (hits.size > 500) {
-    for (const [k, v] of hits) {
-      if (!v.length || now - v[v.length - 1] > WINDOW_MS) hits.delete(k)
-    }
-  }
-  return false
-}
+// Три сообщения в минуту и двадцать в сутки с одного источника. Живому
+// человеку, которому есть что сказать, этого с запасом; потоку — нет.
+const PER_MINUTE = 3
+const PER_DAY = 20
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  // Точка была полностью открытой: любой мог слать неограниченное число
-  // сообщений в телеграм владельца проекта. Заголовок Origin ставит браузер,
-  // и со страницы чужого сайта его не подделать — это отсекает вызовы
-  // «со стороны», не мешая обычной кнопке в приложении.
-  //
-  // Отсутствие заголовка тоже отклоняем. Раньше проверка пропускала запрос без
-  // Origin — то есть обходилась простым удалением заголовка, и единственный
-  // слой защиты становился необязательным. Браузеры шлют Origin на любом POST,
-  // включая свой же источник, поэтому кнопку в приложении это не задевает.
   const origin = req.headers.origin || req.headers.referer || ''
   if (!isAllowedOrigin(origin)) {
     return res.status(403).json({ error: 'Forbidden' })
   }
 
-  const raw = (req.body || {}).text
-  const text = String(raw ?? '').trim()
-  if (!text) {
-    return res.status(400).json({ error: 'Missing text' })
+  const text = String((req.body || {}).text ?? '').trim()
+  if (text.length < MIN_LEN) {
+    return res.status(400).json({ error: 'Напишите пару слов' })
   }
   if (text.length > MAX_LEN) {
     return res.status(413).json({ error: 'Слишком длинное сообщение' })
   }
 
-  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown'
-  if (tooOften(ip)) {
-    return res.status(429).json({ error: 'Слишком часто — попробуйте через минуту' })
+  // Вход не обязателен, но если он есть — ключом становится пользователь:
+  // это честнее адреса (общий Wi-Fi не наказывает соседей) и надёжнее
+  // (смена сети не обнуляет счётчик).
+  const user = await getUserFromRequest(req).catch(() => null)
+  const key = callerKey(req, user?.id)
+
+  for (const [bucket, limit, windowSeconds, message] of [
+    ['feedback:min', PER_MINUTE, 60, 'Слишком часто — попробуйте через минуту'],
+    ['feedback:day', PER_DAY, 86400, 'На сегодня достаточно. Спасибо за советы!'],
+  ]) {
+    // failOpen: false — недоступный счётчик закрывает точку. Это осознанно:
+    // единственное, что здесь происходит, — отправка сообщения владельцу, и
+    // временно не отправить его безопаснее, чем временно снять лимит.
+    const { allowed, retryAfter } = await rateLimit({ bucket, key, limit, windowSeconds })
+    if (!allowed) {
+      res.setHeader('Retry-After', String(retryAfter))
+      return res.status(429).json({ error: message, retryAfter })
+    }
   }
 
-  const token = process.env.TG_TOKEN
-  if (!token) {
+  if (!process.env.TG_TOKEN) {
     // Наружу не сообщаем, что именно не настроено.
-    console.error('[feedback] TG_TOKEN is not set')
+    console.error('[feedback] TG_TOKEN не задан')
+    return res.status(500).json({ error: 'Не удалось отправить' })
+  }
+  if (!ADMIN_CHAT_IDS.length) {
+    console.error('[feedback] TG_ADMIN_CHAT_IDS не задан — отправлять некому')
     return res.status(500).json({ error: 'Не удалось отправить' })
   }
 
-  const msg = `💬 Совет от пользователя EatAps:\n\n${text}`
+  // parse_mode не задаём намеренно: текст уходит как есть, и разметку из
+  // пользовательского ввода телеграм не интерпретирует.
+  const header = user ? '💬 Совет от пользователя EatAps (вошёл)' : '💬 Совет от пользователя EatAps'
+  const msg = `${header}:\n\n${text}`
 
-  const results = await Promise.all(
-    CHAT_IDS.map((chat_id) =>
-      fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // parse_mode не задаём намеренно: текст уходит как есть, разметку из
-        // пользовательского ввода телеграм не интерпретирует.
-        body: JSON.stringify({ chat_id, text: msg, disable_web_page_preview: true }),
-      }).then((r) => r.ok).catch(() => false)
-    )
-  )
-
+  const results = await Promise.all(ADMIN_CHAT_IDS.map((id) => sendMessage(id, msg)))
   if (!results.some(Boolean)) {
     return res.status(502).json({ error: 'Не удалось отправить' })
   }

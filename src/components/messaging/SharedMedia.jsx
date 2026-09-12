@@ -8,20 +8,26 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { conversationMedia, mediaUrl } from '../../lib/messaging.js'
 import PushScreen from '../PushScreen.jsx'
+import { signedChatImage } from '../../lib/supabase.js'
 
 const PAGE = 60
 
 function Tile({ item, onOpen }) {
-  const [url, setUrl] = useState(item.image_url || null)
+  // Готового адреса нет ни у нового вложения, ни у старого фото: dm-media и
+  // chat-images оба закрыты, и оба открываются подписанной ссылкой.
+  const [url, setUrl] = useState(null)
   const ref = useRef(null)
 
   useEffect(() => {
-    if (url || !item.media?.path) return
+    if (url) return
+    if (!item.media?.path && !item.image_url) return
     let alive = true
     const io = new IntersectionObserver(async (entries) => {
       if (!entries.some((e) => e.isIntersecting)) return
       io.disconnect()
-      const signed = await mediaUrl(item.media)
+      const signed = item.media?.path
+        ? await mediaUrl(item.media)
+        : await signedChatImage(item.image_url)
       if (alive) setUrl(signed)
     }, { rootMargin: '200px' })
     if (ref.current) io.observe(ref.current)

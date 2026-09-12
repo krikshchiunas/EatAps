@@ -45,7 +45,7 @@ function safe(data) {
 function emit(scope, event, data) {
   if (!enabled) return
   const payload = data === undefined ? '' : safe(data)
-  // eslint-disable-next-line no-console
+   
   console.debug(`[eataps:${scope}] ${event}`, payload)
 }
 
@@ -73,7 +73,7 @@ export const log = {
       const v = err?.[k]
       if (v != null && v !== '') info[k] = typeof v === 'string' && v.length > 300 ? `${v.slice(0, 300)}…` : v
     }
-    // eslint-disable-next-line no-console
+     
     console.warn(`[eataps:${scope}] ${event}`, Object.keys(info).length ? info : (err ?? 'ошибка'))
   },
   enabled,

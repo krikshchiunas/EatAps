@@ -56,6 +56,13 @@
 --   supabase/migrations/2026-09-08_notification_upsert_fix.sql
 --   supabase/migrations/2026-09-09_social_graph_v2.sql
 --   supabase/migrations/2026-09-09_conversations.sql
+--   supabase/migrations/2026-09-11_fav_restaurant.sql
+--   supabase/migrations/2026-09-12_private_media.sql
+--   supabase/migrations/2026-09-12_stripe_events.sql
+--   supabase/migrations/2026-09-12_ai_ledger.sql
+--   supabase/migrations/2026-09-12_rate_limits.sql
+--   supabase/migrations/2026-09-12_restore_post_visibility.sql
+--   supabase/migrations/2026-09-12_media_path_ownership.sql
 -- ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -12531,3 +12538,1321 @@ end $$;
 
 alter table public.conversations replica identity full;
 alter table public.conversation_members replica identity full;
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-11_fav_restaurant.sql
+-- ###########################################################################
+
+-- Любимый ресторан — новое поле профиля с необязательной геолокацией.
+-- Добавляем его в visible_diary (и, через неё, в friend_state).
+
+create or replace function public.visible_diary(p_user_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when public.can_view_diary(p_user_id)
+    then jsonb_strip_nulls(jsonb_build_object(
+      'profile', jsonb_build_object(
+        'name',           a.state->'profile'->'name',
+        'avatar',         a.state->'profile'->'avatar',
+        'bio',            a.state->'profile'->'bio',
+        'guiltyPleasure', a.state->'profile'->'guiltyPleasure',
+        'favRestaurant',  a.state->'profile'->'favRestaurant',
+        'targets',        jsonb_build_object('calories', a.state->'profile'->'targets'->'calories')
+      ),
+      'days', coalesce((
+        select jsonb_object_agg(d.key, jsonb_build_object('meals', coalesce(d.value->'meals', '[]'::jsonb)))
+        from jsonb_each(coalesce(a.state->'days', '{}'::jsonb)) d
+      ), '{}'::jsonb),
+      'customFoods', coalesce((
+        select jsonb_agg(f)
+        from jsonb_array_elements(coalesce(a.state->'customFoods', '[]'::jsonb)) f
+        where f->>'kind' = 'composite' and f ? 'recipe'
+      ), '[]'::jsonb)
+    ))
+    else null
+  end
+  from public.app_state a
+  where a.user_id = p_user_id;
+$$;
+
+revoke all on function public.visible_diary(uuid) from public, anon;
+grant execute on function public.visible_diary(uuid) to authenticated;
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-12_private_media.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — вложения перестают быть публичными.
+--
+-- ЧТО БЫЛО НЕ ТАК
+--
+-- Бакеты chat-images и post-images создавались с public = true, а политика
+-- чтения выглядела так:
+--
+--     create policy "chat-images read" on storage.objects
+--       for select using (bucket_id = 'chat-images');
+--
+-- То есть предиката не было вовсе: файл отдавался кому угодно, включая
+-- неаутентифицированного, по прямой ссылке. Защитой служила только
+-- неугадываемость адреса (uuid v4 в пути). Это «ссылка-пропуск»: она не
+-- отзывается никогда. Один раз показанное подписчику фото оставалось
+-- доступным ему и после отписки, и после блокировки, и после удаления
+-- записи, и после удаления всего аккаунта.
+--
+-- Политика записи при этом проверяла ЗАГРУЖАЮЩЕГО (первый сегмент пути равен
+-- auth.uid()), но чтение не проверяло ЧИТАЮЩЕГО вообще. Это две разные
+-- проверки, и наличие первой не заменяет вторую.
+--
+-- ИНВАРИАНТ, КОТОРЫЙ ВВОДИТ ЭТА МИГРАЦИЯ
+--
+--   Вложение личной переписки может прочитать только участник того
+--   сообщения, к которому вложение прикреплено.
+--
+--   Изображение записи может прочитать только тот, кому видна сама запись.
+--
+-- Обе проверки выполняет база, а не интерфейс, и обе опираются на ту же
+-- функцию видимости, что и остальное приложение (can_view_post), либо на
+-- прямое участие в сообщении.
+--
+-- КАК СВЯЗАТЬ ФАЙЛ С СООБЩЕНИЕМ
+--
+-- В сообщении хранится готовый публичный URL, а политике хранилища нужен путь
+-- внутри бакета (storage.objects.name). Вытаскивать путь подстрокой прямо в
+-- политике нельзя: это означало бы LIKE с ведущим шаблоном и полный проход по
+-- messages на КАЖДОЕ чтение файла.
+--
+-- Поэтому заводится ВЫЧИСЛЯЕМАЯ колонка image_path. Она:
+--   • заполняется сама и для старых строк, и для будущих — бэкфилл не нужен;
+--   • не может разъехаться с image_url, потому что вычисляется из него;
+--   • индексируется, и политика превращается в точечный поиск по индексу.
+--
+-- Клиент по-прежнему хранит в сообщении полный URL — менять состав колонок,
+-- которые отдают list_messages и send_message, эта миграция не требует.
+--
+-- ДАННЫЕ НЕ УДАЛЯЮТСЯ. Ни один объект хранилища эта миграция не трогает,
+-- меняются только флаг публичности бакета и политики чтения.
+--
+-- ПОРЯДОК ВЫКАТКИ. Клиент, который запрашивает подписанную ссылку, работает и
+-- с публичным бакетом (подписанная ссылка на публичный объект тоже валидна).
+-- Поэтому безопасный порядок: сначала выкатить фронтенд, затем эту миграцию.
+-- Обратный порядок оставит старые фото недоступными до выкатки фронтенда.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- 1. Путь файла, выведенный из сохранённого URL
+-- ---------------------------------------------------------------------------
+-- substring(text from pattern) неизменяема, поэтому колонку можно объявить
+-- stored — она посчитается один раз при записи строки, а не на каждое чтение.
+alter table public.messages
+  add column if not exists image_path text
+  generated always as (substring(image_url from '/chat-images/(.*)$')) stored;
+
+create index if not exists messages_image_path_idx
+  on public.messages (image_path) where image_path is not null;
+
+alter table public.posts
+  add column if not exists image_path text
+  generated always as (substring(image_url from '/post-images/(.*)$')) stored;
+
+create index if not exists posts_image_path_idx
+  on public.posts (image_path) where image_path is not null;
+
+-- ---------------------------------------------------------------------------
+-- 2. Кто вправе прочитать вложение переписки
+-- ---------------------------------------------------------------------------
+-- security definer здесь нужен по существу, а не для удобства: политика
+-- хранилища обязана дать однозначный ответ независимо от того, как в будущем
+-- изменится RLS на messages. Проверка участия и блокировки выписана явно.
+create or replace function public.can_read_chat_image(p_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.messages m
+    where m.image_path = p_name
+      and auth.uid() is not null
+      and (
+        m.sender = auth.uid()
+        or m.recipient = auth.uid()
+        or (m.conversation_id is not null
+            and public.is_conversation_member(m.conversation_id, auth.uid()))
+      )
+      -- Блокировка перекрывает участие — ровно как в политике чтения самих
+      -- сообщений: заблокировавший не должен видеть и вложения.
+      and not public.is_blocked_between(m.sender, auth.uid())
+  );
+$$;
+
+revoke all on function public.can_read_chat_image(text) from public, anon;
+grant execute on function public.can_read_chat_image(text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. Кто вправе прочитать изображение записи
+-- ---------------------------------------------------------------------------
+-- Здесь переиспользуется can_view_post — та же функция, которой пользуются
+-- политики самих записей, ответов и реакций. Расходиться им нельзя: иначе
+-- «запись не видна, а картинка видна» вернётся другим путём.
+create or replace function public.can_read_post_image(p_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.posts p
+    where p.image_path = p_name
+      and auth.uid() is not null
+      and public.can_view_post(p.id)
+  );
+$$;
+
+revoke all on function public.can_read_post_image(text) from public, anon;
+grant execute on function public.can_read_post_image(text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 4. Бакеты становятся закрытыми
+-- ---------------------------------------------------------------------------
+-- Ограничения на размер и типы уже стояли — сохраняем их и здесь, чтобы
+-- повторный прогон на чистой базе давал тот же результат.
+update storage.buckets
+set public = false,
+    file_size_limit = 3 * 1024 * 1024,
+    allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp']
+where id in ('chat-images', 'post-images');
+
+-- ---------------------------------------------------------------------------
+-- 5. Политики чтения
+-- ---------------------------------------------------------------------------
+drop policy if exists "chat-images read" on storage.objects;
+drop policy if exists "chat-images read participants" on storage.objects;
+create policy "chat-images read participants" on storage.objects
+  for select using (
+    bucket_id = 'chat-images'
+    and public.can_read_chat_image(name)
+  );
+
+drop policy if exists "post-images read" on storage.objects;
+drop policy if exists "post-images read visible" on storage.objects;
+create policy "post-images read visible" on storage.objects
+  for select using (
+    bucket_id = 'post-images'
+    and public.can_read_post_image(name)
+  );
+
+-- ---------------------------------------------------------------------------
+-- 6. Политики записи: подтверждаем прежние правила явно
+-- ---------------------------------------------------------------------------
+-- Менять их не нужно, но пересоздаём вместе с чтением, чтобы весь набор правил
+-- по этим бакетам читался в одном месте, а не был разбросан по трём миграциям.
+-- Путь обязан начинаться с папки автора: имя файла приходит от клиента, и
+-- доверять ему нельзя.
+drop policy if exists "chat-images write own" on storage.objects;
+create policy "chat-images write own" on storage.objects
+  for insert with check (
+    bucket_id = 'chat-images'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "post-images write own" on storage.objects;
+create policy "post-images write own" on storage.objects
+  for insert with check (
+    bucket_id = 'post-images'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- ---------------------------------------------------------------------------
+-- 7. Уборка за удалёнными данными
+-- ---------------------------------------------------------------------------
+-- Прежде объект хранилища не удалялся НИКОГДА: ни при удалении записи, ни при
+-- отмене сообщения, ни при удалении аккаунта. Фотографии оставались на сервере
+-- и — при публичном бакете — оставались доступны. Теперь бакеты закрыты, и
+-- висящий объект уже не утекает, но хранить его вечно всё равно неправильно:
+-- право на удаление означает фактическое удаление, а не потерю ссылки.
+--
+-- Удалять файл прямо из триггера нельзя: расширение storage не даёт SQL-доступа
+-- к содержимому бакета, а http-вызов из триггера — плохая идея (он выполнялся
+-- бы внутри транзакции пользователя и мог её подвесить). Поэтому триггер лишь
+-- отмечает объект к удалению, а выносит его отдельный проход.
+create table if not exists public.storage_cleanup_queue (
+  id         bigserial primary key,
+  bucket     text not null check (bucket in ('chat-images', 'post-images', 'dm-media')),
+  path       text not null,
+  reason     text,
+  created_at timestamptz not null default now(),
+  unique (bucket, path)
+);
+
+alter table public.storage_cleanup_queue enable row level security;
+-- Политик нет намеренно: очередь читает и чистит только сервер под
+-- service_role, которому RLS не писан. Клиенту она не нужна ни в каком виде.
+
+create or replace function public.enqueue_storage_cleanup(p_bucket text, p_path text, p_reason text)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into public.storage_cleanup_queue (bucket, path, reason)
+  select p_bucket, p_path, p_reason
+  where p_path is not null and p_path <> ''
+  on conflict (bucket, path) do nothing;
+$$;
+
+revoke all on function public.enqueue_storage_cleanup(text, text, text) from public, anon, authenticated;
+
+create or replace function public.queue_post_image_cleanup()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Удаление записи и замена картинки при правке — оба случая оставляют
+  -- осиротевший файл.
+  if tg_op = 'DELETE' then
+    perform public.enqueue_storage_cleanup('post-images', old.image_path, 'post deleted');
+  elsif old.image_path is distinct from new.image_path then
+    perform public.enqueue_storage_cleanup('post-images', old.image_path, 'post image replaced');
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists posts_image_cleanup on public.posts;
+create trigger posts_image_cleanup
+  after update or delete on public.posts
+  for each row execute function public.queue_post_image_cleanup();
+
+create or replace function public.queue_message_image_cleanup()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform public.enqueue_storage_cleanup('chat-images', old.image_path, 'message deleted');
+    if old.media ? 'path' then
+      perform public.enqueue_storage_cleanup('dm-media', old.media->>'path', 'message deleted');
+    end if;
+  elsif old.unsent_at is null and new.unsent_at is not null then
+    -- Отмена сообщения обнуляет image_url и media, поэтому путь берём из OLD.
+    perform public.enqueue_storage_cleanup('chat-images', old.image_path, 'message unsent');
+    if old.media ? 'path' then
+      perform public.enqueue_storage_cleanup('dm-media', old.media->>'path', 'message unsent');
+    end if;
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists messages_image_cleanup on public.messages;
+create trigger messages_image_cleanup
+  after update or delete on public.messages
+  for each row execute function public.queue_message_image_cleanup();
+
+comment on table public.storage_cleanup_queue is
+  'Пути в хранилище, оставшиеся без владеющей строки. Разбирает серверный проход под service_role; RLS-политик нет намеренно.';
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-12_stripe_events.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — вебхук Stripe становится устойчивым к повторам и переупорядочиванию.
+--
+-- ЧТО БЫЛО НЕ ТАК
+--
+-- Обработчик делал безусловный upsert строки подписки на каждое событие:
+--
+--     await admin().from('subscriptions').upsert({ user_id, tier, status, ... })
+--
+-- Ни идентификатор события, ни время его создания нигде не хранились. Отсюда
+-- два разных отказа:
+--
+--   1. ПОВТОРНАЯ ДОСТАВКА. Stripe повторяет событие, пока не получит 200.
+--      Повтор проходил весь путь заново. Для upsert это, как правило,
+--      безобидно, но любой побочный эффект (а они появляются) выполнился бы
+--      дважды.
+--
+--   2. ПЕРЕУПОРЯДОЧИВАНИЕ. Stripe прямо предупреждает, что порядок доставки
+--      не гарантирован. Последовательность «updated (active) → deleted
+--      (canceled)», пришедшая наоборот, оставляла в базе ЖИВОЙ тариф у
+--      отменённой подписки. Платный доступ после отмены — это уже деньги.
+--
+-- ЧТО ВВОДИТСЯ
+--
+--   • Журнал обработанных событий: одно событие обрабатывается один раз.
+--     Заявка и завершение разнесены, поэтому падение на середине НЕ помечает
+--     событие обработанным — следующая доставка подхватит его заново.
+--
+--   • Время последнего применённого события прямо в строке подписки. Запись
+--     более старого события отбрасывается — это и есть защита от
+--     переупорядочивания, и работает она независимо от того, сколько
+--     экземпляров функции выполняются одновременно.
+--
+-- Проверка подписи запроса в обработчике остаётся как была — она отсекает
+-- подделку, а этот журнал отвечает только за доставку.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- 1. Журнал событий
+-- ---------------------------------------------------------------------------
+-- Полезную нагрузку события НЕ храним: в ней платёжные и персональные данные,
+-- а для идемпотентности достаточно идентификатора. Храним ровно столько,
+-- сколько нужно, чтобы разобраться, почему событие не применилось.
+create table if not exists public.stripe_webhook_events (
+  event_id      text primary key,
+  event_type    text not null,
+  event_created timestamptz,
+  status        text not null default 'processing'
+                check (status in ('processing', 'processed', 'failed')),
+  attempts      integer not null default 1,
+  last_error    text,
+  received_at   timestamptz not null default now(),
+  processed_at  timestamptz
+);
+
+alter table public.stripe_webhook_events enable row level security;
+-- Политик нет намеренно: журнал принадлежит серверу (service_role, которому
+-- RLS не писан). Клиенту он не нужен ни на чтение, ни на запись.
+
+create index if not exists stripe_webhook_events_unfinished_idx
+  on public.stripe_webhook_events (received_at)
+  where status <> 'processed';
+
+-- ---------------------------------------------------------------------------
+-- 2. Заявка на обработку
+-- ---------------------------------------------------------------------------
+-- Возвращает, что делать вызывающему:
+--   'claimed'   — событие новое, обрабатываем;
+--   'duplicate' — уже обработано, второй раз не надо (отвечаем Stripe 200);
+--   'retry'     — заявка была, но обработка не завершилась; пробуем снова.
+--
+-- Ключевое свойство — атомарность: insert ... on conflict выполняется одним
+-- оператором, поэтому два параллельных экземпляра функции не могут оба
+-- получить 'claimed' на одно событие.
+create or replace function public.stripe_event_claim(
+  p_event_id   text,
+  p_event_type text,
+  p_created    timestamptz
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_status text;
+begin
+  if p_event_id is null or p_event_id = '' then
+    raise exception 'event id is required' using errcode = '22023';
+  end if;
+
+  insert into public.stripe_webhook_events (event_id, event_type, event_created)
+  values (p_event_id, coalesce(p_event_type, 'unknown'), p_created)
+  on conflict (event_id) do nothing;
+
+  if found then
+    return 'claimed';
+  end if;
+
+  -- Строка уже была. Смотрим, чем кончилась прошлая попытка.
+  update public.stripe_webhook_events
+     set attempts = attempts + 1,
+         status = case when status = 'processed' then 'processed' else 'processing' end
+   where event_id = p_event_id
+  returning status into v_status;
+
+  return case when v_status = 'processed' then 'duplicate' else 'retry' end;
+end;
+$$;
+
+create or replace function public.stripe_event_finish(
+  p_event_id text,
+  p_ok       boolean,
+  p_error    text default null
+)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.stripe_webhook_events
+     set status = case when p_ok then 'processed' else 'failed' end,
+         processed_at = case when p_ok then now() else processed_at end,
+         last_error = case when p_ok then null else left(coalesce(p_error, ''), 500) end
+   where event_id = p_event_id;
+$$;
+
+revoke all on function public.stripe_event_claim(text, text, timestamptz) from public, anon, authenticated;
+revoke all on function public.stripe_event_finish(text, boolean, text) from public, anon, authenticated;
+grant execute on function public.stripe_event_claim(text, text, timestamptz) to service_role;
+grant execute on function public.stripe_event_finish(text, boolean, text) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 3. Время последнего применённого события — прямо в подписке
+-- ---------------------------------------------------------------------------
+alter table public.subscriptions
+  add column if not exists last_event_created timestamptz;
+alter table public.subscriptions
+  add column if not exists last_event_id text;
+
+-- ---------------------------------------------------------------------------
+-- 4. Запись подписки с защитой от устаревшего события
+-- ---------------------------------------------------------------------------
+-- Вся проверка и запись — один оператор. Именно поэтому здесь функция, а не
+-- «прочитать, сравнить в JavaScript, записать»: между чтением и записью
+-- успевает вклиниться параллельный экземпляр, и более старое событие затирает
+-- более новое. Ровно та же ошибка, что уже была разобрана в save_app_state.
+--
+-- Возвращает true, если состояние применено, и false, если отброшено как
+-- устаревшее. Отброшенное событие — это НЕ ошибка: обработчик отвечает Stripe
+-- успехом, иначе тот будет повторять его до бесконечности.
+create or replace function public.stripe_subscription_sync(
+  p_user_id              uuid,
+  p_tier                 text,
+  p_status               text,
+  p_customer_id          text,
+  p_subscription_id      text,
+  p_current_period_end   timestamptz,
+  p_cancel_at_period_end boolean,
+  p_event_created        timestamptz,
+  p_event_id             text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_applied boolean := false;
+begin
+  if p_user_id is null then
+    raise exception 'user id is required' using errcode = '22023';
+  end if;
+
+  insert into public.subscriptions as s (
+    user_id, tier, status, stripe_customer_id, stripe_subscription_id,
+    current_period_end, cancel_at_period_end, updated_at,
+    last_event_created, last_event_id
+  )
+  values (
+    p_user_id, coalesce(p_tier, 'FREE'), coalesce(p_status, 'inactive'),
+    p_customer_id, p_subscription_id,
+    p_current_period_end, coalesce(p_cancel_at_period_end, false), now(),
+    p_event_created, p_event_id
+  )
+  on conflict (user_id) do update
+    set tier                 = excluded.tier,
+        status               = excluded.status,
+        -- Идентификатор клиента Stripe не затираем пустым значением: часть
+        -- событий приходит без него, а потерять связь с клиентом значит
+        -- потерять возможность открыть человеку портал управления подпиской.
+        stripe_customer_id   = coalesce(excluded.stripe_customer_id, s.stripe_customer_id),
+        stripe_subscription_id = excluded.stripe_subscription_id,
+        current_period_end   = excluded.current_period_end,
+        cancel_at_period_end = excluded.cancel_at_period_end,
+        updated_at           = now(),
+        last_event_created   = excluded.last_event_created,
+        last_event_id        = excluded.last_event_id
+    where s.last_event_created is null
+       or excluded.last_event_created is null
+       or excluded.last_event_created >= s.last_event_created
+  returning true into v_applied;
+
+  return coalesce(v_applied, false);
+end;
+$$;
+
+revoke all on function public.stripe_subscription_sync(uuid, text, text, text, text, timestamptz, boolean, timestamptz, text)
+  from public, anon, authenticated;
+grant execute on function public.stripe_subscription_sync(uuid, text, text, text, text, timestamptz, boolean, timestamptz, text)
+  to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 5. Один клиент Stripe на пользователя
+-- ---------------------------------------------------------------------------
+-- Прежний порядок в checkout был: прочитать stripe_customer_id → если пусто,
+-- создать клиента в Stripe → записать. Два одновременных нажатия «оплатить»
+-- читали пустоту оба и создавали ДВУХ клиентов; второй затирал первого, и у
+-- человека оставалась подписка, привязанная к потерянному клиенту.
+--
+-- Эта функция делает шаг «записать, если ещё не записано» атомарным и всегда
+-- возвращает ПОБЕДИВШЕЕ значение. Проигравшая гонку сторона получает чужой
+-- (первый) идентификатор и обязана свой лишний объект в Stripe не
+-- использовать. Вторая половина защиты — ключ идемпотентности при создании
+-- клиента на стороне Stripe, см. api/stripe/checkout.js.
+create or replace function public.stripe_customer_claim(p_user_id uuid, p_customer_id text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_existing text;
+begin
+  if p_user_id is null or p_customer_id is null or p_customer_id = '' then
+    raise exception 'user id and customer id are required' using errcode = '22023';
+  end if;
+
+  insert into public.subscriptions (user_id, tier, status, stripe_customer_id, updated_at)
+  values (p_user_id, 'FREE', 'inactive', p_customer_id, now())
+  on conflict (user_id) do update
+    set stripe_customer_id = coalesce(public.subscriptions.stripe_customer_id, excluded.stripe_customer_id),
+        updated_at = now()
+  returning stripe_customer_id into v_existing;
+
+  return v_existing;
+end;
+$$;
+
+revoke all on function public.stripe_customer_claim(uuid, text) from public, anon, authenticated;
+grant execute on function public.stripe_customer_claim(uuid, text) to service_role;
+
+comment on table public.stripe_webhook_events is
+  'Идемпотентность вебхука Stripe: одно событие обрабатывается один раз. Полезная нагрузка не хранится.';
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-12_ai_ledger.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — учёт расхода AI становится атомарным и переживает обрывы.
+--
+-- ─────────────────────────────────────────────────────────────────────────
+-- ОШИБКА ПЕРВАЯ: РЕШЕНИЕ ПРИНИМАЛОСЬ ПО УСТАРЕВШЕМУ ЧИСЛУ
+--
+-- Порядок в api/ai/* был такой:
+--
+--     spent = await spentThisPeriod(user)     -- 1. прочитали расход
+--     check = checkBudget({ spent, ... })     -- 2. решили по прочитанному
+--     await reserve(user, check.needed)       -- 3. списали
+--
+-- Шаги 1 и 3 разнесены во времени, а между ними нет ничего, что мешало бы
+-- другому запросу прочитать ТО ЖЕ САМОЕ число. Сто запросов, отправленных
+-- одновременно, читали spent = 0, все сто проходили проверку и все сто уходили
+-- в модель. Дневной лимит FREE — три запроса; платил за остальные владелец
+-- ключа.
+--
+-- Самое обидное: атомарный примитив уже существовал. ai_usage_add выполняет
+-- insert ... on conflict do update и ВОЗВРАЩАЕТ новый итог. Но вызывающий код
+-- разбирал ответ как `const { error } = ...` и выбрасывал data. То есть
+-- результат атомарной операции просто терялся по дороге.
+--
+-- ЗДЕСЬ ЭТО ЧИНИТСЯ ТАК: решение принимается ВНУТРИ той же операции, что и
+-- списание. Функция сначала списывает, затем смотрит на получившийся итог и,
+-- если он вышел за потолок, возвращает резерв и отказывает. Гонка невозможна
+-- не потому, что «мы успеваем», а потому, что проверять нечего: число, по
+-- которому принимается решение, получено из самой записи.
+--
+-- ─────────────────────────────────────────────────────────────────────────
+-- ОШИБКА ВТОРАЯ: ОБРЫВ МЕЖДУ РЕЗЕРВОМ И РАСЧЁТОМ
+--
+--     1. резерв списан          — успех
+--     2. запрос к модели        — успех
+--     3. возврат неизрасходованного — НЕ ДОШЁЛ (упала функция, отвалилась база)
+--
+-- Человек терял разницу между верхней оценкой и фактической ценой. Она
+-- намеренно пессимистична, поэтому потеря заметная: списывается максимально
+-- возможный ответ, а тратится обычно втрое меньше.
+--
+-- Отсюда журнал запросов: у каждого резерва есть строка со своим
+-- идентификатором. Не рассчитанные вовремя строки видны, и их возвращает
+-- отдельный проход (ai_reconcile). Расчёт при этом идемпотентен: повторный
+-- вызов по тому же идентификатору ничего не делает, поэтому повтор запроса
+-- не может списать дважды.
+--
+-- Содержимое переписки с моделью здесь НЕ хранится: журнал существует ради
+-- правильного счёта, а не ради логов. Личные данные в него не попадают.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.ai_requests (
+  request_id     uuid primary key,
+  user_id        uuid not null references auth.users(id) on delete cascade,
+  period         text not null,
+  kind           text not null default 'chat' check (kind in ('chat', 'vision', 'digest')),
+  reserved_micro bigint not null check (reserved_micro >= 0),
+  actual_micro   bigint,
+  status         text not null default 'reserved'
+                 check (status in ('reserved', 'settled', 'denied', 'reconciled')),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+alter table public.ai_requests enable row level security;
+
+-- Свои запросы человек видеть вправе: на этом можно построить честный экран
+-- «на что ушёл лимит». Писать в таблицу нельзя никому — только функциям ниже.
+drop policy if exists "ai requests select own" on public.ai_requests;
+create policy "ai requests select own" on public.ai_requests
+  for select using (auth.uid() = user_id);
+
+create index if not exists ai_requests_stale_idx
+  on public.ai_requests (created_at) where status = 'reserved';
+create index if not exists ai_requests_user_period_idx
+  on public.ai_requests (user_id, period);
+
+-- ---------------------------------------------------------------------------
+-- Резерв: списать и тут же решить по получившемуся итогу
+-- ---------------------------------------------------------------------------
+-- p_budget — дневной потолок в микродолларах; null означает «без потолка».
+--
+-- Возвращает jsonb:
+--   { ok: true,  spent, remaining }              — можно звать модель
+--   { ok: false, reason: 'exhausted', spent }    — лимит исчерпан
+--   { ok: true,  duplicate: true, spent }        — повтор того же запроса
+--
+-- Отказ возвращается ЗНАЧЕНИЕМ, а не исключением: «лимит кончился» — обычный
+-- ответ, который нужно показать человеку, а не сбой.
+create or replace function public.ai_reserve(
+  p_request_id uuid,
+  p_user_id    uuid,
+  p_period     text,
+  p_micro      bigint,
+  p_budget     bigint default null,
+  p_kind       text default 'chat'
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_spent bigint;
+begin
+  if p_request_id is null or p_user_id is null or p_period is null then
+    raise exception 'request id, user id and period are required' using errcode = '22023';
+  end if;
+  if p_micro is null or p_micro < 0 then
+    raise exception 'reserve must be non-negative' using errcode = '22023';
+  end if;
+
+  -- Повторная заявка с тем же идентификатором не списывает второй раз.
+  -- Это делает безопасным повтор запроса после сетевого обрыва.
+  insert into public.ai_requests (request_id, user_id, period, reserved_micro, kind)
+  values (p_request_id, p_user_id, p_period, p_micro, coalesce(p_kind, 'chat'))
+  on conflict (request_id) do nothing;
+
+  if not found then
+    select coalesce(spent_micro, 0) into v_spent
+      from public.ai_usage where user_id = p_user_id and period = p_period;
+    return jsonb_build_object('ok', true, 'duplicate', true, 'spent', coalesce(v_spent, 0));
+  end if;
+
+  -- Списание и получение НОВОГО итога — одним оператором. Строка ai_usage
+  -- блокируется на время обновления, поэтому параллельные вызовы выстраиваются
+  -- в очередь и каждый видит результат предыдущего, а не общее старое число.
+  insert into public.ai_usage (user_id, period, spent_micro, requests, updated_at)
+  values (p_user_id, p_period, greatest(0, p_micro), 1, now())
+  on conflict (user_id, period) do update
+    set spent_micro = greatest(0, public.ai_usage.spent_micro + p_micro),
+        requests    = public.ai_usage.requests + 1,
+        updated_at  = now()
+  returning spent_micro into v_spent;
+
+  -- Решение по ФАКТИЧЕСКОМУ итогу, а не по прочитанному заранее.
+  if p_budget is not null and v_spent > p_budget then
+    update public.ai_usage
+       set spent_micro = greatest(0, spent_micro - p_micro),
+           requests    = greatest(0, requests - 1),
+           updated_at  = now()
+     where user_id = p_user_id and period = p_period
+    returning spent_micro into v_spent;
+
+    update public.ai_requests
+       set status = 'denied', actual_micro = 0, updated_at = now()
+     where request_id = p_request_id;
+
+    return jsonb_build_object('ok', false, 'reason', 'exhausted', 'spent', coalesce(v_spent, 0));
+  end if;
+
+  return jsonb_build_object(
+    'ok', true,
+    'spent', v_spent,
+    'remaining', case when p_budget is null then null else greatest(0, p_budget - v_spent) end
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Расчёт по факту
+-- ---------------------------------------------------------------------------
+-- Идемпотентен по построению: строка берётся for update, и рассчитать её
+-- можно ровно один раз. Двойной вызов (повтор, гонка, ретрай) второй раз
+-- ничего не спишет и не вернёт.
+create or replace function public.ai_settle(p_request_id uuid, p_actual_micro bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row    public.ai_requests;
+  v_actual bigint := greatest(0, coalesce(p_actual_micro, 0));
+  v_spent  bigint;
+begin
+  select * into v_row from public.ai_requests
+   where request_id = p_request_id for update;
+
+  if not found then
+    return jsonb_build_object('ok', false, 'reason', 'unknown_request');
+  end if;
+  if v_row.status <> 'reserved' then
+    -- Уже рассчитан (или отказан). Повтор — не ошибка, просто ничего не делаем.
+    return jsonb_build_object('ok', true, 'duplicate', true);
+  end if;
+
+  update public.ai_usage
+     set spent_micro = greatest(0, spent_micro + (v_actual - v_row.reserved_micro)),
+         updated_at  = now()
+   where user_id = v_row.user_id and period = v_row.period
+  returning spent_micro into v_spent;
+
+  update public.ai_requests
+     set status = 'settled', actual_micro = v_actual, updated_at = now()
+   where request_id = p_request_id;
+
+  return jsonb_build_object('ok', true, 'spent', coalesce(v_spent, 0));
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Возврат зависших резервов
+-- ---------------------------------------------------------------------------
+-- Строка остаётся в состоянии 'reserved', если функция не дожила до расчёта:
+-- платформа убила её по таймауту, упала сеть до базы, отключили питание.
+-- Резерв в этом случае списан, а фактическая цена неизвестна — но она заведомо
+-- не больше зарезервированной, и держать разницу на человеке нельзя.
+--
+-- Возвращаем резерв ЦЕЛИКОМ. Это сознательно в пользу пользователя: запрос мог
+-- и не дойти до модели вовсе, а выяснить это задним числом нечем.
+--
+-- Порог по умолчанию — 15 минут: собственный таймаут обращения к модели 60
+-- секунд, так что живых запросов старше этого не бывает.
+create or replace function public.ai_reconcile(p_older_than interval default interval '15 minutes')
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row   public.ai_requests;
+  v_count integer := 0;
+begin
+  for v_row in
+    select * from public.ai_requests
+     where status = 'reserved' and created_at < now() - p_older_than
+     order by created_at
+     limit 500
+     for update skip locked
+  loop
+    update public.ai_usage
+       set spent_micro = greatest(0, spent_micro - v_row.reserved_micro),
+           updated_at  = now()
+     where user_id = v_row.user_id and period = v_row.period;
+
+    update public.ai_requests
+       set status = 'reconciled', actual_micro = 0, updated_at = now()
+     where request_id = v_row.request_id;
+
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end;
+$$;
+
+-- Вызывать всё это может только сервер: клиент не должен уметь ни
+-- резервировать, ни рассчитывать, ни возвращать себе лимит.
+revoke all on function public.ai_reserve(uuid, uuid, text, bigint, bigint, text) from public, anon, authenticated;
+revoke all on function public.ai_settle(uuid, bigint) from public, anon, authenticated;
+revoke all on function public.ai_reconcile(interval) from public, anon, authenticated;
+grant execute on function public.ai_reserve(uuid, uuid, text, bigint, bigint, text) to service_role;
+grant execute on function public.ai_settle(uuid, bigint) to service_role;
+grant execute on function public.ai_reconcile(interval) to service_role;
+
+comment on table public.ai_requests is
+  'Журнал резервов AI: обеспечивает атомарную проверку лимита и возврат зависших резервов. Содержимое запросов не хранится.';
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-12_rate_limits.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — ограничение частоты, которое переживает бессерверную платформу.
+--
+-- ЧТО БЫЛО НЕ ТАК
+--
+-- В api/feedback.js лимит жил в памяти процесса:
+--
+--     const hits = new Map()
+--
+-- На Vercel экземпляров функции много, они создаются под нагрузкой и умирают.
+-- Общей памяти между ними нет, поэтому счётчик обнулялся сам собой, а
+-- параллельные запросы попадали в РАЗНЫЕ экземпляры и не видели друг друга.
+-- Автор честно описал это в комментарии, но заслон от этого работать не начал.
+--
+-- Вторая половина беды: ключом был первый элемент X-Forwarded-For, то есть
+-- значение из заголовка запроса. Подставив свой, можно было получить сколько
+-- угодно свежих корзин.
+--
+-- ЧТО ВВОДИТСЯ
+--
+-- Одна общая таблица счётчиков и одна функция. Намеренно НЕ Redis и не внешний
+-- сервис: для нескольких обращений в минуту отдельный поставщик — лишняя
+-- зависимость, лишние деньги и лишняя точка отказа, а Postgres уже есть.
+--
+-- Окно фиксированное (не скользящее). Для защиты от потока это достаточно:
+-- на границе окон в худшем случае проходит удвоенный лимит, что на порядки
+-- лучше отсутствия лимита. Скользящее окно потребовало бы хранить каждую
+-- попытку отдельно — дороже без практической разницы.
+--
+-- КЛЮЧ ХРАНИТСЯ ХЭШЕМ. По ключу может прийти IP-адрес, а это персональные
+-- данные: складывать их в открытую ради счётчика не нужно. Хэш решает ту же
+-- задачу (различить обратившихся), но не даёт обратного прочтения.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.rate_limits (
+  bucket       text        not null,
+  key_hash     text        not null,
+  window_start timestamptz not null,
+  hits         integer     not null default 0,
+  primary key (bucket, key_hash, window_start)
+);
+
+alter table public.rate_limits enable row level security;
+-- Политик нет намеренно: таблицу трогает только сервер под service_role.
+-- Клиенту нельзя ни читать (это разведка чужой активности), ни писать.
+
+create index if not exists rate_limits_window_idx on public.rate_limits (window_start);
+
+-- ---------------------------------------------------------------------------
+-- Одно обращение к лимиту
+-- ---------------------------------------------------------------------------
+-- Возвращает jsonb: { allowed, hits, limit, reset_at, retry_after }.
+--
+-- Проверка и увеличение — один оператор: иначе два одновременных запроса
+-- прочитали бы одно и то же значение и оба прошли бы (ровно та ошибка, что
+-- была в учёте AI).
+--
+-- Сам лимитер не должен становиться способом положить базу, поэтому:
+--   • строк ровно по числу активных корзин, а не по числу попыток;
+--   • старые окна убираются здесь же, изредка и небольшими порциями.
+create or replace function public.rate_limit_hit(
+  p_bucket text,
+  p_key    text,
+  p_limit  integer,
+  p_window interval default interval '1 minute'
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_seconds numeric := greatest(1, extract(epoch from p_window));
+  v_start   timestamptz;
+  v_hits    integer;
+begin
+  if p_bucket is null or p_key is null or p_key = '' then
+    raise exception 'bucket and key are required' using errcode = '22023';
+  end if;
+  if p_limit is null or p_limit < 1 then
+    raise exception 'limit must be positive' using errcode = '22023';
+  end if;
+
+  -- Начало текущего окна: время, округлённое вниз до размера окна.
+  v_start := to_timestamp(floor(extract(epoch from now()) / v_seconds) * v_seconds);
+
+  insert into public.rate_limits (bucket, key_hash, window_start, hits)
+  values (p_bucket, md5(p_bucket || ':' || p_key), v_start, 1)
+  on conflict (bucket, key_hash, window_start) do update
+    set hits = public.rate_limits.hits + 1
+  returning hits into v_hits;
+
+  -- Уборка прошлых окон. Раз примерно на сотню обращений и не больше тысячи
+  -- строк за раз: полная чистка под нагрузкой сама стала бы помехой.
+  if random() < 0.01 then
+    delete from public.rate_limits
+     where ctid in (
+       select ctid from public.rate_limits
+        where window_start < now() - interval '1 day'
+        limit 1000
+     );
+  end if;
+
+  return jsonb_build_object(
+    'allowed', v_hits <= p_limit,
+    'hits', v_hits,
+    'limit', p_limit,
+    'reset_at', v_start + p_window,
+    'retry_after', greatest(1, ceil(extract(epoch from (v_start + p_window) - now())))
+  );
+end;
+$$;
+
+revoke all on function public.rate_limit_hit(text, text, integer, interval) from public, anon, authenticated;
+grant execute on function public.rate_limit_hit(text, text, integer, interval) to service_role;
+
+comment on table public.rate_limits is
+  'Счётчики частоты обращений. Ключ хранится хэшем: по нему может приходить IP-адрес.';
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-12_restore_post_visibility.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — возврат старым записям того круга, на который рассчитывал автор.
+--
+-- ЧТО ПРОИЗОШЛО
+--
+-- До перехода на социальный граф (2026-08-25_social_graph) «мысли» были видны
+-- ДРУЗЬЯМ, то есть людям со взаимной подпиской. Миграция ввела настройку
+-- видимости и перевела все существующие записи одной строкой:
+--
+--     update public.posts set visibility = 'followers', visibility_migrated = true;
+--
+-- Намерение было аккуратным — автор миграции специально сделал это отдельным
+-- осознанным шагом, а не побочным эффектом значения по умолчанию, и даже
+-- пометил переведённые строки. Но направление выбрано в СТОРОНУ РАСШИРЕНИЯ:
+-- «подписчики» — надмножество «друзей». Односторонний подписчик, которого
+-- автор к себе не добавлял, получил доступ к записям, написанным тогда, когда
+-- такого доступа у него быть не могло.
+--
+-- Это ровно тот случай, когда менять приватность задним числом нельзя. Человек
+-- писал в расчёте на один круг — приложение не вправе молча расширить его.
+--
+-- ЧТО ДЕЛАЕТ ЭТА МИГРАЦИЯ
+--
+--   1. Возвращает всё ещё помеченным записям видимость 'friends'.
+--   2. Заводит триггер, снимающий пометку при ЛЮБОМ явном изменении видимости
+--      автором. С этого момента «выбрал человек» и «перевела миграция»
+--      различимы, и подобный откат больше никогда не заденет осознанный выбор.
+--
+-- ⚠ ЧЕСТНАЯ ОГОВОРКА. Пометка снимается только с этого момента, поэтому если
+-- между августовской миграцией и сегодняшним днём человек СОЗНАТЕЛЬНО поставил
+-- записи «для подписчиков», она тоже сузится до «друзей». Это выбрано
+-- намеренно: сужение человек увидит и вернёт одним касанием, а расширение
+-- он не увидит вовсе. Из двух ошибок выбираем ту, которая не раскрывает
+-- лишнего.
+--
+-- ДАННЫЕ НЕ УДАЛЯЮТСЯ. Меняется одно поле видимости; тексты и изображения
+-- записей не трогаются.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- 1. Явный выбор автора снимает пометку миграции
+-- ---------------------------------------------------------------------------
+-- Триггер создаётся ДО отката: иначе сам откат (update ниже) снял бы пометки,
+-- которые ему же и нужны, чтобы понять, что откатывать.
+create or replace function public.clear_visibility_migrated()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  -- Снимаем пометку только при смене САМОЙ видимости. Правка текста или
+  -- картинки к выбору круга отношения не имеет.
+  if new.visibility is distinct from old.visibility then
+    new.visibility_migrated := false;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists posts_visibility_choice on public.posts;
+create trigger posts_visibility_choice
+  before update on public.posts
+  for each row execute function public.clear_visibility_migrated();
+
+-- ---------------------------------------------------------------------------
+-- 2. Откат автоматического расширения
+-- ---------------------------------------------------------------------------
+-- Условие включает visibility = 'followers': если запись уже стоит в другом
+-- круге, её трогать не за что. Повторный прогон миграции безопасен — после
+-- первого не останется ни одной подходящей строки, а те, что автор поправил
+-- руками, уже лишились пометки триггером выше.
+do $$
+declare
+  v_count integer;
+begin
+  -- Колонки может не быть на базе, поднятой до 2026-08-25. Тогда и откатывать
+  -- нечего: автоматического перевода там не было.
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'posts' and column_name = 'visibility_migrated'
+  ) then
+    update public.posts
+       set visibility = 'friends'
+     where visibility_migrated = true
+       and visibility = 'followers';
+    get diagnostics v_count = row_count;
+    raise notice 'Возвращено к кругу «друзья»: % записей', v_count;
+  end if;
+end $$;
+
+comment on function public.clear_visibility_migrated() is
+  'Снимает posts.visibility_migrated при явной смене круга автором: отличает выбор человека от автоматического перевода миграцией.';
+
+
+-- ###########################################################################
+-- ИСТОЧНИК: supabase/migrations/2026-09-12_media_path_ownership.sql
+-- ###########################################################################
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EatAps — путь вложения обязан принадлежать тому, кто его приложил.
+--
+-- ⚠ ЭТА МИГРАЦИЯ ЗАКРЫВАЕТ ДЫРУ, ОТКРЫТУЮ МИГРАЦИЕЙ 2026-09-12_private_media.
+-- Она обязана применяться вместе с ней. Ниже подробно, в чём было дело, —
+-- ошибка неочевидная, и повторить её легко.
+--
+-- ─────────────────────────────────────────────────────────────────────────
+-- ЧТО БЫЛО НЕ ТАК
+--
+-- Предикат чтения выглядел так:
+--
+--     select exists (
+--       select 1 from public.messages m
+--       where m.image_path = p_name
+--         and (m.sender = auth.uid() or m.recipient = auth.uid() or …)
+--     )
+--
+-- Читается он как «файл виден участнику сообщения, к которому приложен». Но
+-- КТО задаёт `image_url`, из которого выводится `image_path`? Клиент:
+-- send_conversation_message принимает p_image_url параметром и кладёт как есть.
+--
+-- Значит нападающий может отправить сообщение САМОМУ СЕБЕ, подставив в
+-- image_url чужой путь:
+--
+--     .../object/public/chat-images/<чужой-uuid>/<файл>.jpg
+--
+-- Он — отправитель этого сообщения, условие выполняется, и политика выдаёт
+-- подписанную ссылку на ЧУЖОЕ фото. Проверка «ты участник сообщения» ничего
+-- не значит, если сообщение сочинил сам нападающий.
+--
+-- Вторая половина беды — уборка. Триггеры складывали `image_path` удалённого
+-- сообщения в очередь, а разбирает её сервер под service_role, которому RLS не
+-- писан. То есть та же подделка позволяла УДАЛИТЬ чужой файл: приложить чужой
+-- путь к своему сообщению и удалить сообщение.
+--
+-- ─────────────────────────────────────────────────────────────────────────
+-- ПОЧЕМУ ЧИНИТСЯ ИМЕННО ТАК
+--
+-- Путь файла не произволен — его задаёт загрузка, и в нём уже записан владелец:
+--
+--     chat-images / post-images : <id владельца>/<uuid>.<ext>
+--     dm-media                  : <id диалога>/<id автора>/<uuid>.<ext>
+--
+-- Политика записи в хранилище это и проверяет: положить файл можно только в
+-- свою папку. Значит первый (для dm-media — второй) сегмент пути — достоверное
+-- утверждение о том, кто файл загрузил.
+--
+-- Отсюда правило: путь засчитывается, только если его сегмент владельца
+-- совпадает с автором строки, которая на него ссылается. Подделка перестаёт
+-- работать сама собой — чужой путь несёт чужой идентификатор.
+--
+-- Никаких новых таблиц и колонок: проверка опирается на то, что уже записано
+-- в самом пути.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- 1. Владелец пути
+-- ---------------------------------------------------------------------------
+-- Вынесено отдельной функцией, чтобы одно и то же правило не было переписано
+-- в четырёх местах и не разъехалось между ними.
+create or replace function public.media_path_owner(p_path text, p_segment int default 1)
+returns text
+language sql
+immutable
+as $$
+  select case
+    when p_path is null or p_path = '' then null
+    -- split_part вернёт пустую строку, если сегмента нет вовсе; такой путь
+    -- не принадлежит никому и не должен совпасть ни с одним идентификатором.
+    when nullif(split_part(p_path, '/', p_segment), '') is null then null
+    else split_part(p_path, '/', p_segment)
+  end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 2. Чтение вложений переписки
+-- ---------------------------------------------------------------------------
+create or replace function public.can_read_chat_image(p_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.messages m
+    where m.image_path = p_name
+      and auth.uid() is not null
+      -- ⚠ КЛЮЧЕВАЯ СТРОКА. Без неё достаточно приложить чужой путь к своему
+      -- сообщению, чтобы получить подпись на чужой файл.
+      and public.media_path_owner(m.image_path) = m.sender::text
+      and (
+        m.sender = auth.uid()
+        or m.recipient = auth.uid()
+        or (m.conversation_id is not null
+            and public.is_conversation_member(m.conversation_id, auth.uid()))
+      )
+      -- Блокировка перекрывает участие — как и в политике чтения сообщений.
+      and not public.is_blocked_between(m.sender, auth.uid())
+  );
+$$;
+
+revoke all on function public.can_read_chat_image(text) from public, anon;
+grant execute on function public.can_read_chat_image(text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. Чтение изображений записей
+-- ---------------------------------------------------------------------------
+create or replace function public.can_read_post_image(p_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.posts p
+    where p.image_path = p_name
+      and auth.uid() is not null
+      -- То же самое: своя запись с чужим путём не даёт доступа к чужому файлу.
+      and public.media_path_owner(p.image_path) = p.user_id::text
+      and public.can_view_post(p.id)
+  );
+$$;
+
+revoke all on function public.can_read_post_image(text) from public, anon;
+grant execute on function public.can_read_post_image(text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 4. Уборка удаляет только свои файлы
+-- ---------------------------------------------------------------------------
+-- Здесь проверка нужна не меньше, чем на чтении: очередь разбирает сервер под
+-- service_role, для которого политик хранилища не существует. Без неё подделка
+-- пути превращалась в удаление чужого файла.
+create or replace function public.queue_post_image_cleanup()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_path text;
+begin
+  v_path := old.image_path;
+  -- Путь, не принадлежащий автору записи, в очередь не попадает вовсе.
+  if v_path is null or public.media_path_owner(v_path) is distinct from old.user_id::text then
+    return coalesce(new, old);
+  end if;
+
+  if tg_op = 'DELETE' then
+    perform public.enqueue_storage_cleanup('post-images', v_path, 'post deleted');
+  elsif old.image_path is distinct from new.image_path then
+    perform public.enqueue_storage_cleanup('post-images', v_path, 'post image replaced');
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+create or replace function public.queue_message_image_cleanup()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_img   text;
+  v_media text;
+  v_drop  boolean;
+begin
+  v_drop := tg_op = 'DELETE'
+    or (old.unsent_at is null and new.unsent_at is not null);
+  if not v_drop then
+    return coalesce(new, old);
+  end if;
+
+  -- chat-images: путь начинается с папки загрузившего.
+  v_img := old.image_path;
+  if v_img is not null and public.media_path_owner(v_img) = old.sender::text then
+    perform public.enqueue_storage_cleanup('chat-images', v_img, 'message removed');
+  end if;
+
+  -- dm-media: <id диалога>/<id автора>/<файл>. Проверяем ОБА сегмента —
+  -- иначе можно было бы удалить файл соседнего диалога.
+  if old.media ? 'path' then
+    v_media := old.media->>'path';
+    if v_media is not null
+       and public.media_path_owner(v_media, 2) = old.sender::text
+       and (old.conversation_id is null
+            or public.media_path_owner(v_media, 1) = old.conversation_id::text)
+    then
+      perform public.enqueue_storage_cleanup('dm-media', v_media, 'message removed');
+    end if;
+  end if;
+
+  return coalesce(new, old);
+end;
+$$;
+
+-- Триггеры пересоздаём: тела функций заменены через create or replace, но
+-- пересоздание делает связь явной и переживает переименование в будущем.
+drop trigger if exists posts_image_cleanup on public.posts;
+create trigger posts_image_cleanup
+  after update or delete on public.posts
+  for each row execute function public.queue_post_image_cleanup();
+
+drop trigger if exists messages_image_cleanup on public.messages;
+create trigger messages_image_cleanup
+  after update or delete on public.messages
+  for each row execute function public.queue_message_image_cleanup();
+
+-- ---------------------------------------------------------------------------
+-- 5. Разовая чистка очереди от уже подделанного
+-- ---------------------------------------------------------------------------
+-- Если между применением 2026-09-12_private_media и этой миграцией кто-то
+-- успел подложить чужой путь, он уже лежит в очереди и будет удалён первым же
+-- проходом уборки. Выметаем всё, чей владелец не подтверждается строкой-
+-- источником. Записи, подтверждённые источником, остаются.
+delete from public.storage_cleanup_queue q
+where q.bucket in ('chat-images', 'post-images')
+  and not exists (
+    select 1 from public.posts p
+    where q.bucket = 'post-images'
+      and p.image_path = q.path
+      and public.media_path_owner(p.image_path) = p.user_id::text
+  )
+  and not exists (
+    select 1 from public.messages m
+    where q.bucket = 'chat-images'
+      and m.image_path = q.path
+      and public.media_path_owner(m.image_path) = m.sender::text
+  );
+
+comment on function public.media_path_owner(text, int) is
+  'Идентификатор владельца, записанный в пути файла. Политика записи в хранилище гарантирует, что положить файл можно только в свою папку, — поэтому этому сегменту можно верить.';

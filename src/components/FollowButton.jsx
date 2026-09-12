@@ -32,7 +32,7 @@ import { followAction } from '../lib/relationship.js'
 import RelationshipSheet from './social/RelationshipSheet.jsx'
 
 export default function FollowButton({
-  myId, userId, rel, onChange, onRefresh, size = 'normal',
+  userId, rel, onChange, onRefresh, size = 'normal',
   name = '', context = 'profile', onOpenChat = null,
 }) {
   const [busy, setBusy] = useState(false)

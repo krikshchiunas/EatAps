@@ -6,16 +6,21 @@ import {
   pullPromoGrants, redeemPromo,
 } from './lib/supabase.js'
 import { defaultSubscription, checkout as subCheckout, openBillingPortal as subPortal, subFromRow, effectiveSubscription } from './lib/subscription.js'
-import { upsertSection, removeSection, swapCustomOrder, effectiveMealId } from './lib/meals.js'
 import { createClock } from './lib/hlc.js'
 import { getDeviceId } from './lib/deviceId.js'
 import { newId } from './lib/uuid.js'
 import {
   emptyMeta, blankDay, pickSyncable, normalizeState, mergeState, sameSyncable, clearedState,
-  addTombstone, setDayFieldTs, setPrefTs,
-  tombMeal, tombSection, tombCustomFood, tombCustomIngredient, tombFavorite,
-  tombTemplate, tombRecipe, tombSupp, tombSupplement, recentKey,
+  addTombstone, setPrefTs,
+  tombCustomFood, tombFavorite,
+  tombTemplate, tombRecipe, tombSupp, tombSupplement,
 } from './lib/syncModel.js'
+import {
+  makeEntry, withEntries, withoutEntry, withEditedEntry,
+  copiesOfDay, copiesOfMeal,
+  withUpsertedSection, withoutSection, withMovedSection,
+  withDayField, withMood, withToggledWellbeing, withConfirmedStats,
+} from './lib/diaryActions.js'
 import { createSyncEngine, SYNC } from './lib/syncEngine.js'
 import { buildFoodMemory, favoriteKey, foodSnapshot, MAX_FAVORITES } from './lib/library.js'
 import { sanitizeMicroGoal } from './lib/micronutrients.js'
@@ -508,34 +513,15 @@ export function StoreProvider({ children }) {
 
   // Возвращает id созданной записи: по нему «Отменить» убирает ровно то, что
   // только что добавили, а не последнюю запись дня (её мог создать кто-то ещё).
+  //
+  // Сами преобразования состояния живут в lib/diaryActions.js чистыми
+  // функциями. Здесь остаётся то, что чистым быть не может: метка времени,
+  // новый идентификатор и вызов setState.
   const addFood = useCallback((date, food) => {
     const ts = clock.tick()
-    const id = newId()
-    const createdAt = new Date().toISOString()
-    setState((s) => {
-      const day = s.days[date] || blankDay()
-      const entry = { id, createdAt, ...food, updatedAt: ts }
-      const days = { ...s.days, [date]: { ...day, meals: [...day.meals, entry] } }
-      const snap = {
-        name: food.name,
-        emoji: food.emoji || '🍽️',
-        unit: food.unit || 'г',
-        grams: food.grams ?? null,
-        kcal: food.kcal,
-        protein: food.protein,
-        carbs: food.carbs,
-        fat: food.fat,
-      }
-      // Ключ — имя И единица, как в syncModel.recentKey. Раньше сравнивали по
-      // точному имени: «Банан» и «банан» становились двумя строками, а при
-      // нормализации перед отправкой одна из них молча исчезала вместе со счётчиком.
-      const key = recentKey(snap)
-      const prev = (s.recents || []).find((r) => recentKey(r) === key)
-      const rest = (s.recents || []).filter((r) => recentKey(r) !== key)
-      const recents = [{ ...snap, count: (prev?.count || 0) + 1, ts: Date.now() }, ...rest].slice(0, 40)
-      return { ...s, days, recents }
-    })
-    return id
+    const entry = makeEntry(food, { id: newId(), createdAt: new Date().toISOString(), ts })
+    setState((s) => withEntries(s, date, [entry]))
+    return entry.id
   }, [])
 
   // Пакетное добавление продуктов. Одним setState и одной меткой времени:
@@ -546,143 +532,63 @@ export function StoreProvider({ children }) {
     if (list.length === 0) return 0
     const ts = clock.tick()
     const createdAt = new Date().toISOString()
-    const entries = list.map((food) => ({ id: newId(), createdAt, ...food, updatedAt: ts }))
-    setState((s) => {
-      const day = s.days[date] || blankDay()
-      const days = { ...s.days, [date]: { ...day, meals: [...day.meals, ...entries] } }
-      // Недавние обновляем теми же правилами, что и одиночное добавление.
-      let recents = s.recents || []
-      for (const food of list) {
-        const snap = {
-          name: food.name,
-          emoji: food.emoji || '🍽️',
-          unit: food.unit || 'г',
-          grams: food.grams ?? null,
-          kcal: food.kcal,
-          protein: food.protein,
-          carbs: food.carbs,
-          fat: food.fat,
-        }
-        const key = recentKey(snap)
-        const prev = recents.find((r) => recentKey(r) === key)
-        recents = [{ ...snap, count: (prev?.count || 0) + 1, ts: Date.now() }, ...recents.filter((r) => recentKey(r) !== key)]
-      }
-      return { ...s, days, recents: recents.slice(0, 40) }
-    })
+    const entries = list.map((food) => makeEntry(food, { id: newId(), createdAt, ts }))
+    setState((s) => withEntries(s, date, entries))
     return entries.length
   }, [])
 
   // ── Повторить прошлый день / приём пищи ─────────────────────────────────────
-  // Копируем СНИМКИ продуктов, а не ссылки: новые записи получают свои id,
-  // время и метку, поэтому правка копии не трогает оригинал в прошлом дне.
-  // Поля синхронизации (id/updatedAt/createdAt) специально отбрасываем — иначе
-  // копия унесла бы чужой id и слияние сочло бы её тем же самым продуктом.
-  const repeatDay = useCallback((fromDate, toDate) => {
-    const src = stateRef.current.days?.[fromDate]
-    if (!src?.meals?.length) return 0
-    const copies = src.meals.map(({ id, createdAt, updatedAt, ...rest }) => rest)
-    return addFoods(toDate, copies)
-  }, [addFoods])
-
   // targetMealId позволяет перенести «вчерашний обед» в сегодняшний ужин.
-  const repeatMeal = useCallback((fromDate, toDate, mealId, targetMealId) => {
-    const src = stateRef.current.days?.[fromDate]
-    if (!src?.meals?.length) return 0
-    const copies = src.meals
-      .filter((m) => effectiveMealId(m) === mealId)
-      .map(({ id, createdAt, updatedAt, ...rest }) => ({ ...rest, mealId: targetMealId || mealId }))
-    return addFoods(toDate, copies)
-  }, [addFoods])
+  const repeatDay = useCallback((fromDate, toDate) => (
+    addFoods(toDate, copiesOfDay(stateRef.current, fromDate))
+  ), [addFoods])
 
-  // Удаление оставляет тумбстоун: без него запись «воскресала» из копии другого
-  // устройства при следующем слиянии.
+  const repeatMeal = useCallback((fromDate, toDate, mealId, targetMealId) => (
+    addFoods(toDate, copiesOfMeal(stateRef.current, fromDate, mealId, targetMealId))
+  ), [addFoods])
+
   const removeFood = useCallback((date, id) => {
     const ts = clock.tick()
-    setState((s) => {
-      const day = s.days[date] || blankDay()
-      const days = { ...s.days, [date]: { ...day, meals: day.meals.filter((m) => m.id !== id) } }
-      return { ...s, days, meta: addTombstone(s.meta, tombMeal(date, id), ts) }
-    })
+    setState((s) => withoutEntry(s, date, id, ts))
   }, [])
 
   const editFood = useCallback((date, updatedFood) => {
-    editDay(date, (d, ts) => ({
-      ...d,
-      meals: d.meals.map((m) => (m.id === updatedFood.id ? { ...updatedFood, updatedAt: ts } : m)),
-    }))
-  }, [editDay])
+    const ts = clock.tick()
+    setState((s) => withEditedEntry(s, date, updatedFood, ts))
+  }, [])
 
   const upsertMealSection = useCallback((date, section) => {
-    editDay(date, (d, ts) => ({ ...d, mealSections: upsertSection(d, { ...section, updatedAt: ts }) }))
-  }, [editDay])
+    const ts = clock.tick()
+    setState((s) => withUpsertedSection(s, date, section, ts))
+  }, [])
 
-  // Удаление пользовательского приёма — вместе со всеми его продуктами.
   const deleteMealSection = useCallback((date, mealId) => {
     const ts = clock.tick()
-    setState((s) => {
-      const day = s.days[date] || blankDay()
-      const doomed = day.meals.filter((m) => effectiveMealId(m) === mealId)
-      let meta = addTombstone(s.meta, tombSection(date, mealId), ts)
-      for (const m of doomed) meta = addTombstone(meta, tombMeal(date, m.id), ts)
-      const next = {
-        ...day,
-        mealSections: removeSection(day, mealId),
-        meals: day.meals.filter((m) => effectiveMealId(m) !== mealId),
-      }
-      return { ...s, days: { ...s.days, [date]: next }, meta }
-    })
+    setState((s) => withoutSection(s, date, mealId, ts))
   }, [])
 
   const moveMealSection = useCallback((date, mealId, dir) => {
-    editDay(date, (d, ts) => ({
-      ...d,
-      mealSections: swapCustomOrder(d, mealId, dir).map((sec) => ({ ...sec, updatedAt: ts })),
-    }))
-  }, [editDay])
+    const ts = clock.tick()
+    setState((s) => withMovedSection(s, date, mealId, dir, ts))
+  }, [])
 
   // Скаляры дня версионируются отдельно от списка продуктов: правка настроения
   // на телефоне не должна конфликтовать с добавлением еды на компьютере.
   const setMood = useCallback((date, mood) => {
     const ts = clock.tick()
-    setState((s) => {
-      const day = s.days[date] || blankDay()
-      return {
-        ...s,
-        days: { ...s.days, [date]: { ...day, mood } },
-        meta: setDayFieldTs(s.meta, date, 'mood', ts),
-      }
-    })
+    setState((s) => withMood(s, date, mood, ts))
   }, [])
 
   const toggleWellbeing = useCallback((date, tag) => {
     const ts = clock.tick()
-    setState((s) => {
-      const day = s.days[date] || blankDay()
-      const wellbeing = day.wellbeing.includes(tag)
-        ? day.wellbeing.filter((t) => t !== tag)
-        : [...day.wellbeing, tag]
-      return {
-        ...s,
-        days: { ...s.days, [date]: { ...day, wellbeing } },
-        meta: setDayFieldTs(s.meta, date, 'wellbeing', ts),
-      }
-    })
+    setState((s) => withToggledWellbeing(s, date, tag, ts))
   }, [])
 
   // Один общий помощник для всех скаляров дня: кладёт значение и метку времени
-  // именно этого поля. Отдельная метка на поле — то, ради чего существует
-  // dayFieldTs: взвешивание на телефоне не конфликтует с едой на компьютере.
+  // именно этого поля.
   const setDayField = useCallback((date, field, value) => {
     const ts = clock.tick()
-    setState((s) => {
-      const day = s.days[date] || blankDay()
-      if (day[field] === value) return s // ничего не изменилось — не жжём метку
-      return {
-        ...s,
-        days: { ...s.days, [date]: { ...day, [field]: value } },
-        meta: setDayFieldTs(s.meta, date, field, ts),
-      }
-    })
+    setState((s) => withDayField(s, date, field, value, ts))
   }, [])
 
   // ── Тело и режим дня ──────────────────────────────────────────────────────
@@ -737,16 +643,7 @@ export function StoreProvider({ children }) {
   // «Учитывать всё равно» для дня, который выглядит недозаполненным.
   const confirmDayStats = useCallback((date) => {
     const ts = clock.tick()
-    setState((s) => {
-      const day = s.days[date] || blankDay()
-      let meta = setDayFieldTs(s.meta, date, 'statsConfirmed', ts)
-      meta = setDayFieldTs(meta, date, 'statsExcluded', ts)
-      return {
-        ...s,
-        days: { ...s.days, [date]: { ...day, statsConfirmed: true, statsExcluded: false } },
-        meta,
-      }
-    })
+    setState((s) => withConfirmedStats(s, date, ts))
   }, [])
 
   // Целевой вес — долгая цель, поэтому живёт в профиле, а не в дне.

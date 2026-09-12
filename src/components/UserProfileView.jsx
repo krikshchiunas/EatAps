@@ -188,7 +188,7 @@ export default function UserProfileView({
   // так видна на вкладке «Питание», и это тот же самый круг людей.
   const habits = useMemo(() => foodHabits(days), [days])
 
-  const hasSelfDetails = Boolean(p.bio || p.guiltyPleasure || habits.most || habits.rare)
+  const hasSelfDetails = Boolean(p.bio || p.guiltyPleasure || p.favRestaurant?.name || habits.rare)
 
   return (
     <>
@@ -234,9 +234,24 @@ export default function UserProfileView({
                завести, ни отредактировать, и в профиле их больше нет. */
             <div className="card" style={{ display: 'grid', gap: 16 }}>
               <ProfileRow label="Био" value={p.bio} multiline />
-              <ProfileRow label="Я это обожаю" value={habits.most?.name} />
               <ProfileRow label="Ок" value={habits.rare?.name} />
               <ProfileRow label="MY guilty pleasure" value={p.guiltyPleasure} />
+              {p.favRestaurant?.name && (
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.3 }}>Любимый ресторан</div>
+                  <div style={{ fontSize: 15, lineHeight: 1.45, marginTop: 3, color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {p.favRestaurant.name}
+                    {p.favRestaurant.geo && (
+                      <a
+                        href={`https://maps.google.com/?q=${p.favRestaurant.geo.lat},${p.favRestaurant.geo.lng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ textDecoration: 'none', fontSize: 16, lineHeight: 1 }}
+                      >📍</a>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="card">

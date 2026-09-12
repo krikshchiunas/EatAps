@@ -80,7 +80,9 @@ export function createTimers() {
   let now = 0
   let seq = 1
   const tasks = new Map()
-  const flush = () => new Promise((r) => setImmediate(r))
+  // setTimeout(0), а не setImmediate: последний есть только в Node, а этот
+  // набор используется и из браузерных сценариев.
+  const flush = () => new Promise((r) => setTimeout(r, 0))
 
   return {
     api: {

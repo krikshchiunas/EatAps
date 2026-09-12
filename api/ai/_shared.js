@@ -14,9 +14,10 @@
 // не записать их — значит подарить обходной путь через оборванные запросы.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { randomUUID } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import {
-  modelForTier, budgetForTier, checkBudget, costOf, periodKey, effortFor,
+  modelForTier, budgetForTier, checkBudget, costOf, periodKey, effortFor, estimateCost,
   MAX_OUTPUT_TOKENS, roughTokens, IMAGE_TOKENS,
 } from '../../src/lib/aiBudget.js'
 import { buildSystemPrompt, buildUserContext, resolveTone } from '../../src/lib/aiPrompt.js'
@@ -84,41 +85,115 @@ export async function spentThisPeriod(userId, period = periodKey()) {
   return Number(data?.spent_micro || 0)
 }
 
-// Дельта расхода. Может быть отрицательной — это возврат неизрасходованного
-// резерва (см. reserve/settle ниже). count = false у корректировок: запрос уже
-// посчитан при резервировании.
-export async function recordSpend(userId, micro, period = periodKey(), { count = true } = {}) {
-  const delta = Math.round(Number(micro) || 0)
-  if (!delta) return
-  const { error } = await admin().rpc('ai_usage_add', {
+// ── Учёт расхода ─────────────────────────────────────────────────────────────
+//
+// ⚠ ЗДЕСЬ БЫЛА ГОНКА, И ОНА СТОИЛА ДЕНЕГ.
+//
+// Прежний порядок — прочитать расход, решить по прочитанному, списать —
+// не атомарен: между чтением и списанием любое число параллельных запросов
+// проходит проверку по ОДНОМУ И ТОМУ ЖЕ остатку. Сто одновременных запросов
+// на тарифе с лимитом в три проходили все сто.
+//
+// Теперь решение принимает БАЗА, внутри той же операции, что и списание
+// (см. ai_reserve в миграции 2026-09-12_ai_ledger). Здесь остаётся только
+// передать потолок и разобрать ответ.
+//
+// Второе свойство — идемпотентность. У каждого запроса свой идентификатор:
+// повторная заявка с тем же id не списывает дважды, а повторный расчёт не
+// возвращает дважды.
+
+export function newRequestId() {
+  return randomUUID()
+}
+
+// Резерв верхней оценки. Возвращает:
+//   { ok: true, spent, remaining } — можно звать модель;
+//   { ok: false, reason: 'exhausted' } — лимит исчерпан;
+//   { ok: false, reason: 'unavailable' } — учёт недоступен, звать нельзя.
+export async function reserve({ requestId, userId, period, micro, budget, kind, db = null }) {
+  const { data, error } = await (db || admin()).rpc('ai_reserve', {
+    p_request_id: requestId,
     p_user_id: userId,
     p_period: period,
-    p_micro: delta,
-    p_count: count,
+    p_micro: Math.max(0, Math.round(Number(micro) || 0)),
+    p_budget: budget === null || budget === undefined ? null : Math.round(budget),
+    p_kind: kind || 'chat',
   })
-  // Провал записи не должен ронять ответ, который пользователь уже оплатил
-  // своим лимитом, но обязан быть виден в логах: это дыра в учёте.
   if (error) {
-    console.error('ai_usage_add failed', { userId, micro: delta, error: error.message })
-    return false
+    // Учёт недоступен — отказываем. Пустить запрос значило бы работать без
+    // лимита за счёт владельца ключа: отказать дешевле.
+    console.error('[ai] резерв не записан', { userId, error: error.message })
+    return { ok: false, reason: 'unavailable' }
   }
-  return true
+  return data || { ok: false, reason: 'unavailable' }
 }
 
-// Резерв: списываем верхнюю оценку ДО обращения к модели. Без этого проверка
-// «хватает ли остатка» и списание разнесены во времени, и несколько запросов,
-// отправленных одновременно, проходят её по одному и тому же остатку.
-// Возвращает false, если резерв не записался. Вызывающий обязан прерваться:
-// без записи резерва лимит не действует, а деньги уже начнут тратиться.
-export function reserve(userId, micro, period) {
-  return recordSpend(userId, micro, period, { count: true })
+// Расчёт по факту. Провал записи не должен ронять уже полученный ответ, но
+// обязан быть виден в логах: зависший резерв вернёт ai_reconcile.
+export async function settle({ requestId, actualMicro, db = null }) {
+  const { data, error } = await (db || admin()).rpc('ai_settle', {
+    p_request_id: requestId,
+    p_actual_micro: Math.max(0, Math.round(Number(actualMicro) || 0)),
+  })
+  if (error) {
+    console.error('[ai] расчёт не записан — резерв вернёт сверка', {
+      requestId, error: error.message,
+    })
+    return { ok: false }
+  }
+  return data || { ok: true }
 }
 
-// Расчёт по факту: возвращаем разницу между резервом и реальной ценой.
-// Отдельная функция, потому что знак тут неочевиден и легко перепутать
-// направление — а перепутанный знак означает потерянные или подаренные деньги.
-export function settle(userId, { reserved, actual }, period) {
-  return recordSpend(userId, actual - reserved, period, { count: false })
+// ── Полный путь одного обращения к модели ────────────────────────────────────
+// Резерв → вызов → расчёт. Вынесено сюда, потому что chat и vision отличаются
+// только составом сообщений: держать эту последовательность в двух местах
+// значит рано или поздно поправить её в одном.
+//
+// Резерв возвращается ВСЕГДА, в том числе при ошибке модели: часть токенов
+// могла сгореть, за них платит пользователь, остальное возвращается. Не
+// списать вовсе — значит сделать обрыв на середине способом обойти лимит.
+export async function callWithBudget({
+  userId, tier, kind, model, system, messages, inputTokens, maxOutputTokens,
+  // Зависимости приходят параметрами, чтобы весь путь можно было прогнать
+  // тестом без настоящей базы и без обращения к модели.
+  db = null, call = callClaude,
+}) {
+  const period = periodKey()
+  const budget = budgetForTier(tier)
+  const needed = estimateCost({ inputTokens, maxOutputTokens, model })
+  const requestId = newRequestId()
+
+  const reserved = await reserve({
+    requestId, userId, period, micro: needed, budget, kind, db,
+  })
+  if (!reserved.ok) {
+    return { denied: reserved.reason || 'unavailable', period, budget, spent: reserved.spent ?? 0 }
+  }
+
+  let data
+  try {
+    data = await call({ model, system, messages, maxTokens: maxOutputTokens })
+  } catch (e) {
+    const burned = e.usage ? costOf(e.usage, model) : 0
+    await settle({ requestId, actualMicro: burned, db })
+    throw e
+  }
+
+  const cost = costOf(data.usage, model)
+  const settled = await settle({ requestId, actualMicro: cost, db })
+  // spent берём из ответа расчёта — это фактическое состояние счётчика после
+  // записи, а не наша оценка.
+  const spent = typeof settled?.spent === 'number' ? settled.spent : (reserved.spent ?? 0)
+
+  return {
+    data,
+    usage: {
+      spentMicro: spent,
+      remainingMicro: budget === null ? null : Math.max(0, budget - spent),
+      budgetMicro: budget,
+      period,
+    },
+  }
 }
 
 // Свой таймаут, заметно короче платформенного. Дело не в вежливости к
@@ -276,7 +351,7 @@ export function budgetError(res, check, tier) {
 }
 
 export {
-  modelForTier, budgetForTier, checkBudget, costOf, periodKey, effortFor,
+  modelForTier, budgetForTier, checkBudget, costOf, periodKey, effortFor, estimateCost,
   MAX_OUTPUT_TOKENS, roughTokens, IMAGE_TOKENS,
   buildSystemPrompt, buildUserContext, resolveTone,
 }

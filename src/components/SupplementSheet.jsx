@@ -7,7 +7,7 @@ import {
 } from '../lib/supplements.js'
 import { MICRONUTRIENTS, MICRO_GROUPS, formatMicro } from '../lib/micronutrients.js'
 import { previewSupplement } from '../lib/microSummary.js'
-import { sanitizeAmount } from '../lib/foods.js'
+import { sanitizeAmount } from '../lib/foodFormat.js'
 import { stackItemFromSupplement } from '../lib/suppStack.js'
 import { plural } from '../lib/text.js'
 

@@ -12,6 +12,7 @@
 
 | Таблица | Заведена в | Realtime |
 |---|---|---|
+| `ai_requests` | 2026-09-12_ai_ledger.sql | — |
 | `ai_usage` | 2026-08-24_ai_usage.sql | — |
 | `app_state` | 2026-08-05_initial.sql | да |
 | `bans` | 2026-08-23_moderation_and_coach.sql | — |
@@ -41,7 +42,10 @@
 | `profiles` | 2026-08-05_initial.sql | — |
 | `promo_codes` | 2026-08-25_promo_codes.sql | — |
 | `promo_grants` | 2026-08-25_promo_codes.sql | — |
+| `rate_limits` | 2026-09-12_rate_limits.sql | — |
 | `restricted_users` | 2026-09-09_social_graph_v2.sql | — |
+| `storage_cleanup_queue` | 2026-09-12_private_media.sql | — |
+| `stripe_webhook_events` | 2026-09-12_stripe_events.sql | — |
 | `subscriptions` | 2026-08-05_initial.sql | да |
 | `support_messages` | 2026-08-23_moderation_and_coach.sql | — |
 | `user_mutes` | 2026-09-09_social_graph_v2.sql | — |
@@ -63,8 +67,10 @@
 | `messages` | `edited_at` | timestamptz | 2026-09-09_conversations.sql |
 | `messages` | `media` | jsonb | 2026-09-09_conversations.sql |
 | `messages` | `forwarded_from` | uuid references auth.users(id) on delete set null | 2026-09-09_conversations.sql |
+| `messages` | `image_path` | text | 2026-09-12_private_media.sql |
 | `posts` | `visibility` | public.post_visibility not null default 'friends' | 2026-08-25_social_graph.sql |
 | `posts` | `visibility_migrated` | boolean not null default false | 2026-08-25_social_graph.sql |
+| `posts` | `image_path` | text | 2026-09-12_private_media.sql |
 | `profiles` | `username` | text | 2026-08-25_social_graph.sql |
 | `profiles` | `display_name` | text | 2026-08-25_social_graph.sql |
 | `profiles` | `avatar_url` | text | 2026-08-25_social_graph.sql |
@@ -78,6 +84,8 @@
 | `profiles` | `group_invites` | text not null default 'following' | 2026-09-09_social_graph_v2.sql |
 | `profiles` | `show_activity` | boolean not null default true | 2026-09-09_social_graph_v2.sql |
 | `profiles` | `read_receipts` | boolean not null default true | 2026-09-09_social_graph_v2.sql |
+| `subscriptions` | `last_event_created` | timestamptz | 2026-09-12_stripe_events.sql |
+| `subscriptions` | `last_event_id` | text | 2026-09-12_stripe_events.sql |
 
 Перечисления:
 
@@ -87,6 +95,13 @@
 
 ## RLS-политики (итоговые)
 
+
+### ai_requests
+
+- **SELECT** `"ai requests select own"`
+  ```sql
+  for select using (auth.uid() = user_id)
+  ```
 
 ### ai_usage
 
@@ -481,6 +496,10 @@
   ```sql
   .objects for delete using ( bucket_id = 'dm-media' and (storage.foldername(name))[2] = auth.uid()::text )
   ```
+- **INSERT** `"dm-media write members"`
+  ```sql
+  .objects for insert with check ( bucket_id = 'dm-media' and auth.role() = 'authenticated' and public.is_conversation_member( public.safe_uuid((storage.foldername(name))[1]), auth.uid() ) and (storage.foldername(name))[2] = auth.uid()::text )
+  ```
 - **INSERT** `"chat-images write own"`
   ```sql
   .objects for insert with check ( bucket_id = 'chat-images' and auth.role() = 'authenticated' and (storage.foldername(name))[1] = auth.uid()::text )
@@ -489,21 +508,17 @@
   ```sql
   .objects for insert with check ( bucket_id = 'post-images' and auth.role() = 'authenticated' and (storage.foldername(name))[1] = auth.uid()::text )
   ```
-- **INSERT** `"dm-media write members"`
-  ```sql
-  .objects for insert with check ( bucket_id = 'dm-media' and auth.role() = 'authenticated' and public.is_conversation_member( public.safe_uuid((storage.foldername(name))[1]), auth.uid() ) and (storage.foldername(name))[2] = auth.uid()::text )
-  ```
-- **SELECT** `"chat-images read"`
-  ```sql
-  .objects for select using (bucket_id = 'chat-images')
-  ```
-- **SELECT** `"post-images read"`
-  ```sql
-  .objects for select using (bucket_id = 'post-images')
-  ```
 - **SELECT** `"dm-media read members"`
   ```sql
   .objects for select using ( bucket_id = 'dm-media' and public.is_conversation_member( public.safe_uuid((storage.foldername(name))[1]), auth.uid() ) )
+  ```
+- **SELECT** `"chat-images read participants"`
+  ```sql
+  .objects for select using ( bucket_id = 'chat-images' and public.can_read_chat_image(name) )
+  ```
+- **SELECT** `"post-images read visible"`
+  ```sql
+  .objects for select using ( bucket_id = 'post-images' and public.can_read_post_image(name) )
   ```
 
 ### subscriptions
@@ -550,10 +565,15 @@
 | `accept_follow_request` | `p_requester uuid` | text | definer | authenticated | 2026-09-09_social_graph_v2.sql | — |
 | `accept_message_request` | `p_peer uuid` | text | definer | authenticated | 2026-09-09_conversations.sql | — |
 | `add_conversation_members` | `p_conversation uuid, p_members uuid[]` | int | definer | authenticated | 2026-09-09_conversations.sql | — |
-| `ai_usage_add` | `p_user_id uuid, p_period text, p_micro bigint, p_count boolean default true` | bigint | definer | service_role | 2026-08-24_ai_usage.sql | api/ai/_shared.js |
+| `ai_reconcile` | `p_older_than interval default interval '15 minutes'` | integer | definer | service_role | 2026-09-12_ai_ledger.sql | api/maintenance.js |
+| `ai_reserve` | `p_request_id uuid, p_user_id uuid, p_period text, p_micro bigint, p_budget bigint default null, p_kind text default 'chat'` | jsonb | definer | service_role | 2026-09-12_ai_ledger.sql | api/ai/_shared.js |
+| `ai_settle` | `p_request_id uuid, p_actual_micro bigint` | jsonb | definer | service_role | 2026-09-12_ai_ledger.sql | api/ai/_shared.js |
+| `ai_usage_add` | `p_user_id uuid, p_period text, p_micro bigint, p_count boolean default true` | bigint | definer | service_role | 2026-08-24_ai_usage.sql | — |
 | `block_user` | `p_user uuid` | text | definer | authenticated | 2026-09-09_social_graph_v2.sql | — |
 | `can_invite_to_group` | `p_inviter uuid, p_invitee uuid` | boolean | definer, stable | authenticated | 2026-09-09_conversations.sql | — |
 | `can_message` | `p_sender uuid, p_recipient uuid` | boolean | definer, stable | authenticated | 2026-09-09_social_graph_v2.sql | — |
+| `can_read_chat_image` | `p_name text` | boolean | definer, stable | authenticated | 2026-09-12_media_path_ownership.sql | — |
+| `can_read_post_image` | `p_name text` | boolean | definer, stable | authenticated | 2026-09-12_media_path_ownership.sql | — |
 | `can_see_activity` | `p_owner uuid` | boolean | definer, stable | authenticated | 2026-09-09_social_graph_v2.sql | — |
 | `can_view_diary` | `p_owner uuid` | boolean | definer, stable | authenticated | 2026-09-09_social_graph_v2.sql | — |
 | `can_view_post` | `p_post_id uuid` | boolean | definer, stable | authenticated | 2026-09-09_social_graph_v2.sql | — |
@@ -573,6 +593,7 @@
 | `delete_current_user` | `` | void | definer | authenticated | 2026-08-05_initial.sql | src/lib/supabase.js |
 | `delete_message_for_me` | `p_message uuid` | void | definer | authenticated | 2026-09-09_conversations.sql | — |
 | `direct_conversation` | `p_peer uuid` | uuid | definer | authenticated | 2026-09-09_conversations.sql | — |
+| `enqueue_storage_cleanup` | `p_bucket text, p_path text, p_reason text` | void | definer | — (никому) | 2026-09-12_private_media.sql | — |
 | `find_user_by_username` | `p_username text` | uuid | definer, stable | authenticated | 2026-08-26_nickname_identity.sql | src/lib/supabase.js |
 | `follow_request_count` | `` | int | definer, stable | authenticated | 2026-09-09_social_graph_v2.sql | src/lib/social.js |
 | `follow_user` | `p_target uuid` | text | definer | authenticated | 2026-09-09_social_graph_v2.sql | — |
@@ -611,11 +632,13 @@
 | `mark_media_viewed` | `p_message uuid` | void | definer | authenticated | 2026-09-09_conversations.sql | — |
 | `mark_messages_read` | `p_sender uuid` | void | definer | authenticated | 2026-09-09_conversations.sql | — |
 | `mark_notification_read` | `p_id uuid` | void | definer | authenticated | 2026-08-25_social_graph.sql | src/lib/social.js |
+| `media_path_owner` | `p_path text, p_segment int default 1` | text | invoker, immutable | PUBLIC (по умолчанию) | 2026-09-12_media_path_ownership.sql | — |
 | `my_ban` | `` | table (until timestamptz, reason text) | definer, stable | authenticated | 2026-08-23_moderation_and_coach.sql | src/lib/supabase.js |
 | `my_diary_visibility` | `` | text | definer, stable | authenticated | 2026-09-07_open_messaging_and_diary_privacy.sql | src/lib/social.js |
 | `my_privacy` | `` | table ( is_private boolean, diary_visibility text, msg_from_following text, msg_from_followers text, msg_from_others text, group_invites text, show_activity boolean, read_receipts boolean, close_friends_count int, blocked_count int, restricted_count int, muted_count int, diary_access_count int ) | definer, stable | authenticated | 2026-09-09_social_graph_v2.sql | src/lib/social.js |
 | `pending_request_count` | `` | int | definer, stable | authenticated | 2026-09-09_conversations.sql | — |
 | `push_notification` | `p_recipient uuid, p_actor uuid, p_type text, p_entity_type text default null, p_entity_id uuid default null, p_metadata jsonb default '{}'::jsonb` | void | definer | — (никому) | 2026-09-09_social_graph_v2.sql | — |
+| `rate_limit_hit` | `p_bucket text, p_key text, p_limit integer, p_window interval default interval '1 minute'` | jsonb | definer | service_role | 2026-09-12_rate_limits.sql | api/_ratelimit.js |
 | `read_receipts_visible` | `p_peer uuid` | boolean | definer, stable | authenticated | 2026-09-09_conversations.sql | — |
 | `reconcile_friendship` | `p_a uuid, p_b uuid` | void | definer | — (никому) | 2026-09-05_social_hardening.sql | — |
 | `redeem_promo` | `p_code text` | jsonb | definer | authenticated | 2026-08-25_promo_codes.sql | src/lib/supabase.js |
@@ -645,6 +668,10 @@
 | `set_user_mute` | `p_user uuid, p_posts boolean default true, p_messages boolean default false` | void | definer | authenticated | 2026-09-09_social_graph_v2.sql | — |
 | `set_username` | `p_username text` | text | definer | authenticated | 2026-09-05_social_hardening.sql | src/lib/social.js |
 | `slugify_username` | `p_raw text` | text | invoker, immutable | PUBLIC (по умолчанию) | 2026-08-25_social_graph.sql | — |
+| `stripe_customer_claim` | `p_user_id uuid, p_customer_id text` | text | definer | service_role | 2026-09-12_stripe_events.sql | api/stripe/checkout.js |
+| `stripe_event_claim` | `p_event_id text, p_event_type text, p_created timestamptz` | text | definer | service_role | 2026-09-12_stripe_events.sql | api/stripe/webhook.js |
+| `stripe_event_finish` | `p_event_id text, p_ok boolean, p_error text default null` | void | definer | service_role | 2026-09-12_stripe_events.sql | api/stripe/webhook.js |
+| `stripe_subscription_sync` | `p_user_id uuid, p_tier text, p_status text, p_customer_id text, p_subscription_id text, p_current_period_end timestamptz, p_cancel_at_period_end boolean, p_event_created timestamptz, p_event_id text` | boolean | definer | service_role | 2026-09-12_stripe_events.sql | api/stripe/webhook.js |
 | `support_next_allowed_at` | `` | timestamptz | definer, stable | authenticated | 2026-08-23_moderation_and_coach.sql | — |
 | `toggle_message_reaction` | `p_message_id uuid, p_emoji text` | jsonb | definer | authenticated | 2026-09-09_conversations.sql | — |
 | `toggle_post_reaction` | `p_post_id uuid, p_reaction text` | table (carrots int, broccoli int, mine text) | definer | authenticated | 2026-08-11_profile_and_thoughts.sql | src/lib/supabase.js |
@@ -657,7 +684,7 @@
 | `user_brief` | `p_user uuid` | table (username text, name text) | definer, stable | authenticated | 2026-08-26_nickname_identity.sql | — |
 | `user_cards` | `p_user_ids uuid[]` | table ( user_id uuid, username text, display_name text, avatar_url text, is_private boolean ) | definer, stable | authenticated | 2026-09-09_social_graph_v2.sql | src/lib/social.js<br>src/lib/supabase.js |
 | `user_profile` | `p_user_id uuid` | table ( user_id uuid, username text, display_name text, avatar_url text, is_private boolean, is_self boolean, can_view_content boolean, followers_count int, following_count int, friends_count int, posts_count int ) | definer, stable | authenticated | 2026-09-09_social_graph_v2.sql | src/lib/social.js |
-| `visible_diary` | `p_user_id uuid` | jsonb | definer, stable | authenticated | 2026-09-07_open_messaging_and_diary_privacy.sql | — |
+| `visible_diary` | `p_user_id uuid` | jsonb | definer, stable | authenticated | 2026-09-11_fav_restaurant.sql | — |
 
 ## Триггерные функции
 
@@ -670,6 +697,7 @@
 | `cleanup_friendship_notifications` | 2026-08-25_social_graph.sql |
 | `cleanup_post_notifications` | 2026-09-05_social_hardening.sql |
 | `cleanup_post_reaction_notification` | 2026-08-25_social_graph.sql |
+| `clear_visibility_migrated` | 2026-09-12_restore_post_visibility.sql |
 | `guard_app_state_update` | 2026-08-06_account_sync.sql |
 | `guard_challenge_day` | 2026-08-23_challenges.sql |
 | `guard_conversation_member_update` | 2026-09-09_conversations.sql |
@@ -691,6 +719,8 @@
 | `notify_on_message` | 2026-09-09_conversations.sql |
 | `notify_on_post_comment` | 2026-08-25_social_graph.sql |
 | `notify_on_post_reaction` | 2026-08-25_social_graph.sql |
+| `queue_message_image_cleanup` | 2026-09-12_media_path_ownership.sql |
+| `queue_post_image_cleanup` | 2026-09-12_media_path_ownership.sql |
 | `sync_friendship_from_follows` | 2026-09-05_social_hardening.sql |
 | `sync_profile_from_state` | 2026-09-05_social_hardening.sql |
 
@@ -767,7 +797,8 @@ BEFORE- и AFTER-триггеры одной таблицы Postgres выпол�
 |---|---|---|---|---|
 | 1 | `messages_request_quota` | BEFORE insert | `limit_unaccepted_messages` | 2026-09-07_open_messaging_and_diary_privacy.sql |
 | 2 | `messages_update_guard` | BEFORE update | `guard_message_update` | 2026-08-05_initial.sql |
-| 3 | `messages_notify` | AFTER insert | `notify_on_message` | 2026-08-25_social_graph.sql |
+| 3 | `messages_image_cleanup` | AFTER update or delete | `queue_message_image_cleanup` | 2026-09-12_media_path_ownership.sql |
+| 4 | `messages_notify` | AFTER insert | `notify_on_message` | 2026-08-25_social_graph.sql |
 
 ### notifications
 
@@ -797,7 +828,9 @@ BEFORE- и AFTER-триггеры одной таблицы Postgres выпол�
 |---|---|---|---|---|
 | 1 | `posts_rate_limit` | BEFORE insert | `limit_posts` | 2026-08-11_profile_and_thoughts.sql |
 | 2 | `posts_update_guard` | BEFORE update | `guard_post_update` | 2026-08-11_profile_and_thoughts.sql |
-| 3 | `posts_notify_cleanup` | AFTER delete | `cleanup_post_notifications` | 2026-09-05_social_hardening.sql |
+| 3 | `posts_visibility_choice` | BEFORE update | `clear_visibility_migrated` | 2026-09-12_restore_post_visibility.sql |
+| 4 | `posts_image_cleanup` | AFTER update or delete | `queue_post_image_cleanup` | 2026-09-12_media_path_ownership.sql |
+| 5 | `posts_notify_cleanup` | AFTER delete | `cleanup_post_notifications` | 2026-09-05_social_hardening.sql |
 
 ### profiles
 
@@ -809,6 +842,8 @@ BEFORE- и AFTER-триггеры одной таблицы Postgres выпол�
 
 | Индекс | Таблица | Определение | Из |
 |---|---|---|---|
+| `ai_requests_stale_idx` | `ai_requests` | `(created_at) where status = 'reserved'` | 2026-09-12_ai_ledger.sql |
+| `ai_requests_user_period_idx` | `ai_requests` | `(user_id, period)` | 2026-09-12_ai_ledger.sql |
 | `ai_usage_period_idx` | `ai_usage` | `(period)` | 2026-08-24_ai_usage.sql |
 | `bans_until_idx` | `bans` | `(until)` | 2026-08-23_moderation_and_coach.sql |
 | `blocks_blocked_idx` | `blocks` | `(blocked_id)` | 2026-08-25_social_graph.sql |
@@ -833,6 +868,7 @@ BEFORE- и AFTER-триггеры одной таблицы Postgres выпол�
 | `message_deletions_user_idx` | `message_deletions` | `(user_id)` | 2026-09-09_conversations.sql |
 | `message_grants_peer_idx` | `message_grants` | `(peer_id, state)` | 2026-09-07_open_messaging_and_diary_privacy.sql |
 | `messages_conversation_idx` | `messages` | `(conversation_id, created_at desc, id desc)` | 2026-09-09_conversations.sql |
+| `messages_image_path_idx` | `messages` | `(image_path) where image_path is not null` | 2026-09-12_private_media.sql |
 | `messages_pair_idx` | `messages` | `(least(sender, recipient), greatest(sender, recipient), created_at desc)` | 2026-08-05_initial.sql |
 | `messages_recipient_idx` | `messages` | `(recipient, created_at desc)` | 2026-08-05_initial.sql |
 | `messages_sender_client_idx` (uniq) | `messages` | `(sender, client_id) where client_id is not null` | 2026-09-05_social_hardening.sql |
@@ -847,11 +883,14 @@ BEFORE- и AFTER-триггеры одной таблицы Postgres выпол�
 | `post_reactions_post_idx` | `post_reactions` | `(post_id)` | 2026-08-11_profile_and_thoughts.sql |
 | `post_reactions_user_time_idx` | `post_reactions` | `(user_id, created_at desc)` | 2026-09-05_social_hardening.sql |
 | `posts_author_created_idx` | `posts` | `(user_id, created_at desc)` | 2026-08-25_social_graph.sql |
+| `posts_image_path_idx` | `posts` | `(image_path) where image_path is not null` | 2026-09-12_private_media.sql |
 | `posts_user_created_idx` | `posts` | `(user_id, created_at desc)` | 2026-08-11_profile_and_thoughts.sql |
 | `profiles_display_name_lower_idx` | `profiles` | `(lower(display_name) text_pattern_ops)` | 2026-09-09_social_graph_v2.sql |
 | `profiles_username_key` (uniq) | `profiles` | `(username)` | 2026-08-25_social_graph.sql |
 | `profiles_username_prefix_idx` | `profiles` | `(username text_pattern_ops)` | 2026-08-25_social_graph.sql |
+| `rate_limits_window_idx` | `rate_limits` | `(window_start)` | 2026-09-12_rate_limits.sql |
 | `restricted_users_target_idx` | `restricted_users` | `(restricted_id)` | 2026-09-09_social_graph_v2.sql |
+| `stripe_webhook_events_unfinished_idx` | `stripe_webhook_events` | `(received_at) where status <> 'processed'` | 2026-09-12_stripe_events.sql |
 | `subs_customer_idx` | `subscriptions` | `(stripe_customer_id)` | 2026-08-05_initial.sql |
 | `support_user_time_idx` | `support_messages` | `(user_id, created_at desc)` | 2026-08-23_moderation_and_coach.sql |
 

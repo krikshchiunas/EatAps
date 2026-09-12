@@ -57,15 +57,27 @@ test('видимая часть профиля сохраняется полно
   assert.equal(p.avatar, 'data:image/jpeg;base64,AAAA')
   assert.equal(p.bio, 'Люблю супы')
   assert.equal(p.guiltyPleasure, 'Шоколадный торт')
+  assert.equal(p.favRestaurant, undefined, 'строковый favRestaurant старой модели не проходит')
 })
 
-// Поля старой модели профиля (любимое блюдо, ресторан, списки «да/нет в еде»)
-// в приложении больше не существуют: их нечем заполнить и негде показать. В
-// блобах давних аккаунтов они ещё лежат — и проекция обязана их отбрасывать,
-// иначе удалённая модель продолжает уезжать к другому человеку.
+test('любимый ресторан объектом проходит к другу', () => {
+  const full = { ...FULL, profile: { ...FULL.profile, favRestaurant: { name: 'У Ашота', geo: { lat: 50.0, lng: 30.0 } } } }
+  const p = projectFriendState(full).profile
+  assert.deepEqual(p.favRestaurant, { name: 'У Ашота', geo: { lat: 50.0, lng: 30.0 } })
+})
+
+test('любимый ресторан без гео тоже проходит', () => {
+  const full = { ...FULL, profile: { ...FULL.profile, favRestaurant: { name: 'Кафе' } } }
+  const p = projectFriendState(full).profile
+  assert.deepEqual(p.favRestaurant, { name: 'Кафе' })
+})
+
+// Поля старой модели профиля (любимое блюдо, списки «да/нет в еде») в
+// приложении больше не существуют. В блобах давних аккаунтов они ещё лежат —
+// и проекция обязана их отбрасывать. favRestaurant строкой — тоже старая модель.
 test('поля старой модели профиля другу не уезжают', () => {
   const p = projectFriendState(FULL).profile
-  for (const field of ['favRestaurant', 'favDish', 'noGos', 'toGos']) {
+  for (const field of ['favDish', 'noGos', 'toGos']) {
     assert.equal(p[field], undefined, `${field} — часть удалённой модели профиля`)
   }
 })

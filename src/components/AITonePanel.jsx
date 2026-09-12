@@ -86,7 +86,7 @@ export default function AITonePanel({ onClose }) {
 }
 
 // ── Гейт согласия ────────────────────────────────────────────────────────────
-function ConsentGate({ toneId, onAccept, onClose }) {
+function ConsentGate({ onAccept, onClose }) {
   const [age, setAge] = useState(false)
   const [terms, setTerms] = useState(false)
   const ready = age && terms

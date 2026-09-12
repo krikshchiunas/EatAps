@@ -48,6 +48,13 @@ export const SOURCES = [
   'supabase/migrations/2026-09-08_notification_upsert_fix.sql',
   'supabase/migrations/2026-09-09_social_graph_v2.sql',
   'supabase/migrations/2026-09-09_conversations.sql',
+  'supabase/migrations/2026-09-11_fav_restaurant.sql',
+  'supabase/migrations/2026-09-12_private_media.sql',
+  'supabase/migrations/2026-09-12_stripe_events.sql',
+  'supabase/migrations/2026-09-12_ai_ledger.sql',
+  'supabase/migrations/2026-09-12_rate_limits.sql',
+  'supabase/migrations/2026-09-12_restore_post_visibility.sql',
+  'supabase/migrations/2026-09-12_media_path_ownership.sql',
 ]
 
 const HEADER = `-- ═══════════════════════════════════════════════════════════════════════════

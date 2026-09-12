@@ -32,6 +32,13 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
   const [more, setMore] = useState(false)      // есть ли что догружать
   const [loadingMore, setLoadingMore] = useState(false)
   const [busyId, setBusyId] = useState(null)
+  // Кому уже ответили подпиской. Объявлено ЗДЕСЬ, вместе с остальными
+  // состояниями, а не ниже по телу компонента, где оно стояло раньше: там
+  // объявление оказалось ПОСЛЕ раннего return для недоступного раздела. Хук,
+  // который на одних отрисовках вызывается, а на других нет, ломает порядок
+  // хуков — React связывает состояние с позицией вызова, и после первой же
+  // отрисовки с недоступным разделом состояния разъезжаются между собой.
+  const [followed, setFollowed] = useState(() => new Set())
 
   const load = useCallback(async () => {
     if (!supabaseEnabled || !myId) { setItems([]); return }
@@ -128,7 +135,6 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
   // после нажатия строка остаётся, и вторая кнопка на ней была бы обманом.
   // Отношение здесь не спрашиваем — это стоило бы запроса на каждую строку
   // списка; вместо этого кнопка исчезает после нажатия.
-  const [followed, setFollowed] = useState(() => new Set())
   const rowActions = (n) => notificationActions(n)
     .filter((a) => !(a.key === 'follow' && followed.has(n.actor_id)))
 

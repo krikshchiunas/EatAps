@@ -1,0 +1,514 @@
+﻿Type,Name,File,Feature,Tested,StaticChecked,RuntimeChecked,Status,FindingIDs,Notes
+Экран,S-01 Онбординг,src/components/Onboarding.jsx,"анкета, цели, расчёт нормы",нет,да,нет,🚨 ISSUE FOUND,BUG-001,"Открывается: первый запуск. Проверено чтением кода; браузерного прогона не было."
+Экран,S-02 День (дневник),src/components/DayScreen.jsx,"приёмы пищи, кольца, вес, активность",нет,да,нет,✅ AUDITED,,"Открывается: вкладка «День». Проверено чтением кода; браузерного прогона не было."
+Экран,S-03 Лист добавления еды,src/components/AddMealSheet.jsx,"поиск, порции, штрихкод, шаблоны, рецепты",нет,да,нет,🚨 ISSUE FOUND,UX-001,"Открывается: кнопка «+» на приёме. Проверено чтением кода; браузерного прогона не было."
+Экран,S-04 История,src/components/HistoryScreen.jsx,"выбор дня, повтор дня",нет,да,нет,✅ AUDITED,,"Открывается: календарь на «Дне». Проверено чтением кода; браузерного прогона не было."
+Экран,S-05 Статистика,src/components/StatsScreen.jsx,"графики, средние, тренды",нет,да,нет,✅ AUDITED,,"Открывается: иконка на «Дне». Проверено чтением кода; браузерного прогона не было."
+Экран,S-06 AI-ассистент,src/components/AITab.jsx → AIHomeScreen,"чат, фото еды, тон, лимиты",нет,да,нет,🚨 ISSUE FOUND,"SEC-001,AI-001","Открывается: вкладка «AI». Проверено чтением кода; браузерного прогона не было."
+Экран,S-07 Тарифы AI,src/components/AIPlansScreen.jsx,"покупка подписки, промокод",нет,да,нет,🚨 ISSUE FOUND,SEC-002,"Открывается: из AI при исчерпании. Проверено чтением кода; браузерного прогона не было."
+Экран,S-08 Лента,src/components/FeedTab.jsx → FeedScreen,"мысли друзей, реакции, ответы",нет,да,нет,✅ AUDITED,,"Открывается: вкладка «Лента». Проверено чтением кода; браузерного прогона не было."
+Экран,S-09 Общение (входящие),src/components/messaging/InboxScreen.jsx,"список диалогов, запросы",нет,да,нет,✅ AUDITED,,"Открывается: вкладка «Общение». Проверено чтением кода; браузерного прогона не было."
+Экран,S-10 Чат,src/components/messaging/ChatScreen.jsx,"сообщения, медиа, реакции, ответы",нет,да,нет,🚨 ISSUE FOUND,"SEC-005,PRIV-002","Открывается: диалог из входящих. Проверено чтением кода; браузерного прогона не было."
+Экран,S-11 Новое сообщение,src/components/messaging/NewMessageScreen.jsx,"выбор адресата, создание группы",нет,да,нет,✅ AUDITED,,"Открывается: из входящих. Проверено чтением кода; браузерного прогона не было."
+Экран,S-12 Запросы на переписку,src/components/messaging/MessageRequestsScreen.jsx,принять/отклонить,нет,да,нет,✅ AUDITED,,"Открывается: из входящих. Проверено чтением кода; браузерного прогона не было."
+Экран,S-13 О диалоге,src/components/messaging/ConversationInfo.jsx,"участники, роли, медиа, выход",нет,да,нет,✅ AUDITED,,"Открывается: шапка чата. Проверено чтением кода; браузерного прогона не было."
+Экран,S-14 Профиль (свой),src/components/ProfileScreen.jsx,"счётчики, разделы, события",нет,да,нет,✅ AUDITED,,"Открывается: вкладка «Профиль». Проверено чтением кода; браузерного прогона не было."
+Экран,S-15 Профиль (чужой),src/components/UserProfileView.jsx,"подписка, мысли, дневник",нет,да,нет,✅ AUDITED,,"Открывается: из поиска/ленты. Проверено чтением кода; браузерного прогона не было."
+Экран,S-16 Публичный профиль,src/components/PublicProfile.jsx,"обзор, действия",нет,да,нет,✅ AUDITED,,"Открывается: из карточки человека. Проверено чтением кода; браузерного прогона не было."
+Экран,S-17 Мои данные профиля,src/components/MyProfileSheet.jsx,"имя, био, ник, аватар",нет,да,нет,✅ AUDITED,,"Открывается: из «Профиля». Проверено чтением кода; браузерного прогона не было."
+Экран,S-18 Настройки,src/components/SettingsScreen.jsx,корень настроек,нет,да,нет,✅ AUDITED,,"Открывается: из «Профиля». Проверено чтением кода; браузерного прогона не было."
+Экран,S-19 Панели настроек,src/components/SettingsPanels.jsx,"тема, данные, аккаунт, выгрузка, удаление",нет,да,нет,🚨 ISSUE FOUND,PRIV-003,"Открывается: из настроек. Проверено чтением кода; браузерного прогона не было."
+Экран,S-20 Приватность,src/components/social/PrivacyHub.jsx,"закрытость, переписка, связи, дневник",нет,да,нет,🚨 ISSUE FOUND,UX-002,"Открывается: из настроек. Проверено чтением кода; браузерного прогона не было."
+Экран,S-21 Списки связей,src/components/social/RelationListScreen.jsx,"подписчики, близкие, заблокированные",нет,да,нет,✅ AUDITED,,"Открывается: из приватности/профиля. Проверено чтением кода; браузерного прогона не было."
+Экран,S-22 Просьбы о подписке,src/components/social/FollowRequestsScreen.jsx,принять/отклонить,нет,да,нет,✅ AUDITED,,"Открывается: из «Профиля». Проверено чтением кода; браузерного прогона не было."
+Экран,S-23 События,src/components/NotificationsScreen.jsx,"уведомления, прочтение",нет,да,нет,✅ AUDITED,,"Открывается: из «Профиля». Проверено чтением кода; браузерного прогона не было."
+Экран,S-24 Поиск людей,src/components/UserSearch.jsx,поиск по нику и имени,нет,да,нет,🚨 ISSUE FOUND,UX-003,"Открывается: из «Профиля»/ленты. Проверено чтением кода; браузерного прогона не было."
+Экран,S-25 Челленджи,src/components/ChallengesScreen.jsx,"создание, участие, таблица",нет,да,нет,✅ AUDITED,,"Открывается: из «Профиля». Проверено чтением кода; браузерного прогона не было."
+Экран,S-26 Тренер,src/components/CoachScreen.jsx,"связь с тренером, комментарии дня",нет,да,нет,✅ AUDITED,,"Открывается: из «Профиля». Проверено чтением кода; браузерного прогона не было."
+Экран,S-27 Добавки,src/components/SupplementSheet.jsx,"стек, дозы, приёмы",нет,да,нет,✅ AUDITED,,"Открывается: из «Дня». Проверено чтением кода; браузерного прогона не было."
+Экран,S-28 Сканер штрихкода,src/components/BarcodeScanner.jsx,"камера, распознавание, ручной ввод",нет,да,нет,✅ AUDITED,,"Открывается: из листа добавления. Проверено чтением кода; браузерного прогона не было."
+Экран,S-29 Вход и регистрация,src/components/AuthSheet.jsx,"почта, магия, Google, Web3",нет,да,нет,🚨 ISSUE FOUND,DEP-001,"Открывается: из «Профиля»/уведомления. Проверено чтением кода; браузерного прогона не было."
+Экран,S-30 Сброс пароля,src/components/ResetPasswordSheet.jsx,смена пароля,нет,да,нет,✅ AUDITED,,"Открывается: ссылка из письма. Проверено чтением кода; браузерного прогона не было."
+Экран,S-31 Редактор рецепта,src/components/RecipeEditorSheet.jsx,"ингредиенты, порции",нет,да,нет,✅ AUDITED,,"Открывается: из листа добавления. Проверено чтением кода; браузерного прогона не было."
+Экран,S-32 Правовая информация,src/components/LegalSheet.jsx,"Impressum, AGB, Datenschutz",нет,да,нет,🚨 ISSUE FOUND,PRIV-001,"Открывается: из настроек. Проверено чтением кода; браузерного прогона не было."
+Экран,S-33 Карточка «поделиться»,src/components/ShareCardSheet.jsx,картинка дня,нет,да,нет,✅ AUDITED,,"Открывается: из «Дня». Проверено чтением кода; браузерного прогона не было."
+Экран,S-34 Мысли (лента профиля),src/components/ThoughtsFeed.jsx,"создание, правка, удаление, ответы",нет,да,нет,🚨 ISSUE FOUND,PRIV-002,"Открывается: профиль. Проверено чтением кода; браузерного прогона не было."
+Экран,S-35 Экран ошибки,src/components/RootErrorBoundary.jsx,объяснение и выход,нет,да,нет,✅ AUDITED,,"Открывается: сбой приложения. Проверено чтением кода; браузерного прогона не было."
+Компонент,AIHomeScreen.jsx,src/components/AIHomeScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,AIPlansScreen.jsx,src/components/AIPlansScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,AITab.jsx,src/components/AITab.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,AITonePanel.jsx,src/components/AITonePanel.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,AddMealSheet.jsx,src/components/AddMealSheet.jsx,UI,частично,да,нет,🚨 ISSUE FOUND,"UX-001,A11Y-001","Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,AuthNotice.jsx,src/components/AuthNotice.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,AuthSheet.jsx,src/components/AuthSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,Avatar.jsx,src/components/Avatar.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,AvatarPicker.jsx,src/components/AvatarPicker.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,BarcodeScanner.jsx,src/components/BarcodeScanner.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,BodyPanel.jsx,src/components/BodyPanel.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,BottomNav.jsx,src/components/BottomNav.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ChallengesScreen.jsx,src/components/ChallengesScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,CoachMark.jsx,src/components/CoachMark.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,CoachScreen.jsx,src/components/CoachScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ConfirmDialog.jsx,src/components/ConfirmDialog.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,DayScreen.jsx,src/components/DayScreen.jsx,UI,частично,да,нет,🚨 ISSUE FOUND,A11Y-001,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,FeedScreen.jsx,src/components/FeedScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,FeedTab.jsx,src/components/FeedTab.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,FollowButton.jsx,src/components/FollowButton.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,FoodInfoSheet.jsx,src/components/FoodInfoSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,FriendsScreen.jsx,src/components/FriendsScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,HistoryScreen.jsx,src/components/HistoryScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,LazyBoundary.jsx,src/components/LazyBoundary.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,LegalSheet.jsx,src/components/LegalSheet.jsx,UI,частично,да,нет,🚨 ISSUE FOUND,PRIV-001,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MacroBar.jsx,src/components/MacroBar.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MealSectionSheet.jsx,src/components/MealSectionSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MicroGoalSheet.jsx,src/components/MicroGoalSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MyProfileSheet.jsx,src/components/MyProfileSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,NotificationsScreen.jsx,src/components/NotificationsScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,Onboarding.jsx,src/components/Onboarding.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,PeopleList.jsx,src/components/PeopleList.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ProfileCounts.jsx,src/components/ProfileCounts.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ProfileScreen.jsx,src/components/ProfileScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,PromoRedeemForm.jsx,src/components/PromoRedeemForm.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,PublicProfile.jsx,src/components/PublicProfile.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,PushScreen.jsx,src/components/PushScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,RecipeEditorSheet.jsx,src/components/RecipeEditorSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ResetPasswordSheet.jsx,src/components/ResetPasswordSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,Ring.jsx,src/components/Ring.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,RootErrorBoundary.jsx,src/components/RootErrorBoundary.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,SaveTemplateSheet.jsx,src/components/SaveTemplateSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,SettingsPanels.jsx,src/components/SettingsPanels.jsx,UI,частично,да,нет,🚨 ISSUE FOUND,PRIV-003,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,SettingsScreen.jsx,src/components/SettingsScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ShareCardSheet.jsx,src/components/ShareCardSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,StatChart.jsx,src/components/StatChart.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,StatsScreen.jsx,src/components/StatsScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,SupplementSheet.jsx,src/components/SupplementSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,SupplementsCard.jsx,src/components/SupplementsCard.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ThoughtsFeed.jsx,src/components/ThoughtsFeed.jsx,UI,частично,да,нет,🚨 ISSUE FOUND,PRIV-002,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,Toast.jsx,src/components/Toast.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,UserProfileView.jsx,src/components/UserProfileView.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,UserSearch.jsx,src/components/UserSearch.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,Web3Button.jsx,src/components/Web3Button.jsx,UI,частично,да,нет,🚨 ISSUE FOUND,DEP-001,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ChatScreen.jsx,src/components/messaging/ChatScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ConversationInfo.jsx,src/components/messaging/ConversationInfo.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ConversationSearch.jsx,src/components/messaging/ConversationSearch.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ForwardSheet.jsx,src/components/messaging/ForwardSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,InboxScreen.jsx,src/components/messaging/InboxScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MealSheets.jsx,src/components/messaging/MealSheets.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MediaBubble.jsx,src/components/messaging/MediaBubble.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MessageActions.jsx,src/components/messaging/MessageActions.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MessageComposer.jsx,src/components/messaging/MessageComposer.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MessageList.jsx,src/components/messaging/MessageList.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,MessageRequestsScreen.jsx,src/components/messaging/MessageRequestsScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,NewMessageScreen.jsx,src/components/messaging/NewMessageScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,SharedMedia.jsx,src/components/messaging/SharedMedia.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ActionSheet.jsx,src/components/social/ActionSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,FollowRequestsScreen.jsx,src/components/social/FollowRequestsScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,PrivacyHub.jsx,src/components/social/PrivacyHub.jsx,UI,частично,да,нет,🚨 ISSUE FOUND,UX-002,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,RelationListScreen.jsx,src/components/social/RelationListScreen.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,RelationshipSheet.jsx,src/components/social/RelationshipSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Компонент,ReportSheet.jsx,src/components/social/ReportSheet.jsx,UI,частично,да,нет,✅ AUDITED,,"Статический разбор: обработчики, состояния, очистка эффектов."
+Модуль,aiBudget.js,src/lib/aiBudget.js,логика,да,да,да (node --test),🚨 ISSUE FOUND,SEC-001,"Покрыт автотестами, все зелёные."
+Модуль,aiClient.js,src/lib/aiClient.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,aiContext.js,src/lib/aiContext.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,aiPrompt.js,src/lib/aiPrompt.js,логика,да,да,да (node --test),🚨 ISSUE FOUND,AI-001,"Покрыт автотестами, все зелёные."
+Модуль,alcohol.js,src/lib/alcohol.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,appkit.js,src/lib/appkit.js,логика,нет,да,нет,🚨 ISSUE FOUND,DEP-001,Автотестов нет — только статический разбор.
+Модуль,authErrors.js,src/lib/authErrors.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,authState.js,src/lib/authState.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,avatar.js,src/lib/avatar.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,barcode.js,src/lib/barcode.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,body.js,src/lib/body.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,challenges.js,src/lib/challenges.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,chatFormat.js,src/lib/chatFormat.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,chatLog.js,src/lib/chatLog.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,conversationModel.js,src/lib/conversationModel.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,date.js,src/lib/date.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,deviceId.js,src/lib/deviceId.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,doubleTap.js,src/lib/doubleTap.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,exchange.js,src/lib/exchange.js,логика,нет,да,нет,🚨 ISSUE FOUND,CODE-001,Автотестов нет — только статический разбор.
+Модуль,foodMicros.js,src/lib/foodMicros.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,foods.js,src/lib/foods.js,логика,да,да,да (node --test),🚨 ISSUE FOUND,UX-001,"Покрыт автотестами, все зелёные."
+Модуль,friendView.js,src/lib/friendView.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,fuzzy.js,src/lib/fuzzy.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,hlc.js,src/lib/hlc.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,insights.js,src/lib/insights.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,lazyWithReload.js,src/lib/lazyWithReload.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,library.js,src/lib/library.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,localCache.js,src/lib/localCache.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,log.js,src/lib/log.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,mealCard.js,src/lib/mealCard.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,meals.js,src/lib/meals.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,messaging.js,src/lib/messaging.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,microSummary.js,src/lib/microSummary.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,micronutrients.js,src/lib/micronutrients.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,notificationModel.js,src/lib/notificationModel.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,notifications.js,src/lib/notifications.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,nutrition.js,src/lib/nutrition.js,логика,да,да,да (node --test),🚨 ISSUE FOUND,BUG-001,"Покрыт автотестами, все зелёные."
+Модуль,nutritionClassification.js,src/lib/nutritionClassification.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,pgErrors.js,src/lib/pgErrors.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,profileLists.js,src/lib/profileLists.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,reactions.js,src/lib/reactions.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,realtime.js,src/lib/realtime.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,relationship.js,src/lib/relationship.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,shareCard.js,src/lib/shareCard.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,social.js,src/lib/social.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,stats.js,src/lib/stats.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,storeContext.js,src/lib/storeContext.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,streaks.js,src/lib/streaks.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,subscription.js,src/lib/subscription.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,supabase.js,src/lib/supabase.js,логика,нет,да,нет,🚨 ISSUE FOUND,PRIV-002,Автотестов нет — только статический разбор.
+Модуль,suppStack.js,src/lib/suppStack.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,supplements.js,src/lib/supplements.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,swUpdate.js,src/lib/swUpdate.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,syncEngine.js,src/lib/syncEngine.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,syncModel.js,src/lib/syncModel.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,syncTestKit.js,src/lib/syncTestKit.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,tabBus.js,src/lib/tabBus.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,text.js,src/lib/text.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,tour.js,src/lib/tour.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,useScrollLock.js,src/lib/useScrollLock.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,useSheetDrag.js,src/lib/useSheetDrag.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,useSwipeBack.js,src/lib/useSwipeBack.js,логика,нет,да,нет,⚠️ PARTIALLY AUDITED,,Автотестов нет — только статический разбор.
+Модуль,uuid.js,src/lib/uuid.js,логика,да,да,да (node --test),✅ AUDITED,,"Покрыт автотестами, все зелёные."
+Модуль,web3Config.js,src/lib/web3Config.js,логика,нет,да,нет,🚨 ISSUE FOUND,DEP-001,Автотестов нет — только статический разбор.
+API,POST /api/ai/chat,api/ai/chat.js,AI-чат,нет,да,нет,🚨 ISSUE FOUND,SEC-001,"Проверено: метод, аутентификация, авторизация, валидация, лимиты, утечка ошибок."
+API,POST /api/ai/vision,api/ai/vision.js,AI-фото,нет,да,нет,🚨 ISSUE FOUND,"SEC-001,SEC-007","Проверено: метод, аутентификация, авторизация, валидация, лимиты, утечка ошибок."
+API,POST /api/stripe/checkout,api/stripe/checkout.js,оплата,нет,да,нет,✅ AUDITED,,"Проверено: метод, аутентификация, авторизация, валидация, лимиты, утечка ошибок."
+API,POST /api/stripe/portal,api/stripe/portal.js,управление подпиской,нет,да,нет,✅ AUDITED,,"Проверено: метод, аутентификация, авторизация, валидация, лимиты, утечка ошибок."
+API,POST /api/stripe/webhook,api/stripe/webhook.js,события Stripe,частично,да,нет,🚨 ISSUE FOUND,"SEC-002,SEC-004","Проверено: метод, аутентификация, авторизация, валидация, лимиты, утечка ошибок."
+API,POST /api/telegram/webhook,api/telegram/webhook.js,модерация,нет,да,нет,✅ AUDITED,,"Проверено: метод, аутентификация, авторизация, валидация, лимиты, утечка ошибок."
+API,POST /api/support,api/support.js,поддержка,нет,да,нет,✅ AUDITED,,"Проверено: метод, аутентификация, авторизация, валидация, лимиты, утечка ошибок."
+API,POST /api/feedback,api/feedback.js,обратная связь,нет,да,нет,🚨 ISSUE FOUND,"SEC-003,CFG-001","Проверено: метод, аутентификация, авторизация, валидация, лимиты, утечка ошибок."
+RPC/функция,accept_conversation_request,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,accept_follow_request,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,accept_message_request,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,add_conversation_members,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,admin_subscriptions_apply,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,ai_usage_add,supabase/setup_all.sql,доступна authenticated,нет,да,нет,🚨 ISSUE FOUND,SEC-001,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,apply_block,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,block_user,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,can_invite_to_group,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,can_message,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,can_see_activity,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,can_view_diary,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,can_view_post,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,can_view_profile_content,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,challenge_board,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,claim_username,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,cleanup_comment_notification,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,cleanup_follow_request_notification,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,cleanup_friendship_notifications,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,cleanup_post_notifications,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,cleanup_post_reaction_notification,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,clear_conversation,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,conversation_info,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,conversation_media,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,conversation_member_list,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,conversation_role,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,conversation_state,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,create_group_conversation,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,decline_conversation_request,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,decline_follow_request,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,decline_message_request,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,delete_current_user,supabase/setup_all.sql,доступна authenticated,нет,да,нет,🚨 ISSUE FOUND,PRIV-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,delete_message_for_me,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,direct_conversation,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,ensure_public_id,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,find_user_by_public_id,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,find_user_by_username,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,follow_request_count,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,follow_user,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,follows_user,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,forward_message,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,friend_briefs,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,friend_state,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,generate_public_id,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,get_last_seen,supabase/setup_all.sql,доступна authenticated,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,get_message_permission,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,get_relationship,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,guard_app_state_update,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,guard_challenge_day,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,guard_conversation_member_update,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,guard_message_update,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,guard_notification_update,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,guard_post_update,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,guard_profile_update,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,handle_new_user,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,in_challenge,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,is_banned,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,is_blocked_between,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,is_close_friend,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,is_conversation_member,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,is_friend_with,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,is_private_account,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,is_restricted,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,issue_promo,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,leave_conversation,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,limit_follow_requests,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,limit_follows,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,limit_friend_requests,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,limit_post_comments,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,limit_post_reactions,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,limit_posts,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,limit_unaccepted_messages,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_conversation_messages,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_conversations,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_conversations_v2,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_feed,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_follow_requests,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_followers,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_following,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_friends,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_messages,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_notifications,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_post_comments,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_posts,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,list_relation,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,lock_follow_pair,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,mark_all_notifications_read,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,mark_conversation_read,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,mark_media_viewed,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,mark_messages_read,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,mark_notification_read,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,my_ban,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,my_diary_visibility,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,my_privacy,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,normalize_public_id,supabase/setup_all.sql,доступна authenticated,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,notify_on_follow,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,notify_on_follow_request,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,notify_on_friendship,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,notify_on_message,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,notify_on_post_comment,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,notify_on_post_reaction,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,pending_request_count,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,push_notification,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,read_receipts_visible,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,reconcile_friendship,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,redeem_promo,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,relationships_with,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,remove_conversation_member,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,remove_follower,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,rename_conversation,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,safe_uuid,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,save_app_state,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,search_messages,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,search_users,supabase/setup_all.sql,доступна authenticated,нет,да,нет,🚨 ISSUE FOUND,UX-003,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,send_conversation_message,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,send_message,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_account_privacy,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_activity_visibility,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_close_friend,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_conversation_archived,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_conversation_muted,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_conversation_role,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_diary_access,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_diary_visibility,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_group_invites,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_message_policy,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_message_reaction,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_read_receipts,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_requester_name,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_restricted,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_user_mute,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,set_username,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,slugify_username,supabase/setup_all.sql,внутренняя,нет,да,нет,🚨 ISSUE FOUND,DB-002,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,support_next_allowed_at,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,sync_friendship_from_follows,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,sync_profile_from_state,supabase/setup_all.sql,внутренняя,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,toggle_message_reaction,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,toggle_post_reaction,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,touch_last_seen,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,unblock_user,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,unfollow_user,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,unread_notification_count,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,unread_totals,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,unsend_message,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,user_brief,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,user_cards,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,user_profile,supabase/setup_all.sql,доступна authenticated,нет,да,нет,✅ AUDITED,,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+RPC/функция,visible_diary,supabase/setup_all.sql,доступна authenticated,нет,да,нет,🚨 ISSUE FOUND,DB-001,"Проверено: security definer, search_path, auth.uid(), проверка прав, гранты."
+Таблица,ai_usage,supabase/setup_all.sql,RLS включён,нет,да,нет,🚨 ISSUE FOUND,SEC-001,"RLS включён; политики разобраны."
+Таблица,app_state,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,bans,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,blocks,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,challenge_days,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,challenge_members,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,challenges,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,close_friends,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,coach_links,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,coaches,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,conversation_members,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,conversations,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,day_comments,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,diary_access,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,follow_requests,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,follows,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,friendships,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,message_deletions,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,message_grants,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,message_views,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,messages,supabase/setup_all.sql,RLS включён,нет,да,нет,🚨 ISSUE FOUND,SEC-005,"RLS включён; политики разобраны."
+Таблица,notifications,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,post_comments,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,post_reactions,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,posts,supabase/setup_all.sql,RLS включён,нет,да,нет,🚨 ISSUE FOUND,PRIV-002,"RLS включён; политики разобраны."
+Таблица,presence,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,profiles,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,promo_codes,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,promo_grants,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,restricted_users,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,subscriptions,supabase/setup_all.sql,RLS включён,нет,да,нет,🚨 ISSUE FOUND,"SEC-002,SEC-004","RLS включён; политики разобраны."
+Таблица,support_messages,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Таблица,user_mutes,supabase/setup_all.sql,RLS включён,нет,да,нет,✅ AUDITED,,"RLS включён; политики разобраны."
+Политика RLS,public.ai_usage :: ai_usage select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.app_state :: own state delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.app_state :: own state insert,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.app_state :: own state select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.app_state :: own state update,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.app_state :: state select by diary visibility,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.app_state :: state select self or friends,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,"public.app_state :: state select self, friends or coach",supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.bans :: ban select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.blocks :: blocks delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.blocks :: blocks insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.blocks :: blocks select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenge_days :: cday delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenge_days :: cday select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenge_days :: cday update,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenge_days :: cday upsert,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenge_members :: member join,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenge_members :: member leave,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenge_members :: member select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenges :: challenge delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenges :: challenge insert,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenges :: challenge select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.challenges :: challenge update,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.close_friends :: close friends delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.close_friends :: close friends insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.close_friends :: close friends select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.coach_links :: coach link accept,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.coach_links :: coach link delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.coach_links :: coach link invite,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.coach_links :: coach link select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.coaches :: coach select all,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.conversation_members :: conversation members select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.conversation_members :: conversation members update own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.conversations :: conversations select member,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.day_comments :: day comment delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.day_comments :: day comment insert,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.day_comments :: day comment select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.diary_access :: diary access delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.diary_access :: diary access insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.diary_access :: diary access select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.follow_requests :: follow requests delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.follow_requests :: follow requests select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.follows :: follows delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.follows :: follows insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.follows :: follows select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.follows :: follows select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.friendships :: friendship delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.friendships :: friendship insert,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.friendships :: friendship select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.friendships :: friendship update,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.message_deletions :: message deletions delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.message_deletions :: message deletions insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.message_deletions :: message deletions own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.message_grants :: message grants select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.message_views :: message views insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.message_views :: message views select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.messages :: messages delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.messages :: messages insert,supabase/setup_all.sql,доступ,нет,да,нет,🚨 ISSUE FOUND,SEC-005,Предикат разобран вручную.
+Политика RLS,public.messages :: messages mark read,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.messages :: messages select,supabase/setup_all.sql,доступ,нет,да,нет,🚨 ISSUE FOUND,SEC-005,Предикат разобран вручную.
+Политика RLS,public.notifications :: notifications delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.notifications :: notifications mark read,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.notifications :: notifications select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.post_comments :: post comments delete,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.post_comments :: post comments insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.post_comments :: post comments select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.post_reactions :: post reactions delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.post_reactions :: post reactions insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.post_reactions :: post reactions select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.post_reactions :: post reactions update own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.posts :: posts delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.posts :: posts insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.posts :: posts select,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.posts :: posts update own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.presence :: presence select by activity setting,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.presence :: presence select by diary visibility,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.presence :: presence select self or friends,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.profiles :: profiles select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.profiles :: profiles update own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.profiles :: read own public_id,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.promo_grants :: promo grants select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.restricted_users :: restricted delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.restricted_users :: restricted insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.restricted_users :: restricted select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.subscriptions :: sub select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.support_messages :: support select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.user_mutes :: mutes delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.user_mutes :: mutes insert own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.user_mutes :: mutes select own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,public.user_mutes :: mutes update own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,storage.objects :: chat-images delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,storage.objects :: chat-images read,supabase/setup_all.sql,доступ,нет,да,нет,🚨 ISSUE FOUND,PRIV-002,Предикат разобран вручную.
+Политика RLS,storage.objects :: chat-images write own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,storage.objects :: dm-media delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,storage.objects :: dm-media read members,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,storage.objects :: dm-media write members,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,storage.objects :: post-images delete own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Политика RLS,storage.objects :: post-images read,supabase/setup_all.sql,доступ,нет,да,нет,🚨 ISSUE FOUND,PRIV-002,Предикат разобран вручную.
+Политика RLS,storage.objects :: post-images write own,supabase/setup_all.sql,доступ,нет,да,нет,✅ AUDITED,,Предикат разобран вручную.
+Миграция,2026-08-05_initial.sql,supabase/migrations/2026-08-05_initial.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-06_account_sync.sql,supabase/migrations/2026-08-06_account_sync.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-07_friend_privacy.sql,supabase/migrations/2026-08-07_friend_privacy.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-08_chat_reactions.sql,supabase/migrations/2026-08-08_chat_reactions.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-08_hardening.sql,supabase/migrations/2026-08-08_hardening.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-09_unpredictable_public_id.sql,supabase/migrations/2026-08-09_unpredictable_public_id.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-11_profile_and_thoughts.sql,supabase/migrations/2026-08-11_profile_and_thoughts.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-23_challenges.sql,supabase/migrations/2026-08-23_challenges.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-23_moderation_and_coach.sql,supabase/migrations/2026-08-23_moderation_and_coach.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-24_ai_usage.sql,supabase/migrations/2026-08-24_ai_usage.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-25_admin_views.sql,supabase/migrations/2026-08-25_admin_views.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-25_promo_codes.sql,supabase/migrations/2026-08-25_promo_codes.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-25_social_graph.sql,supabase/migrations/2026-08-25_social_graph.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-26_admin_subscriptions_writable.sql,supabase/migrations/2026-08-26_admin_subscriptions_writable.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-26_ai_premium_tier.sql,supabase/migrations/2026-08-26_ai_premium_tier.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-26_daily_usage_and_premium_admin.sql,supabase/migrations/2026-08-26_daily_usage_and_premium_admin.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-26_nickname_identity.sql,supabase/migrations/2026-08-26_nickname_identity.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-08-28_profile_rework.sql,supabase/migrations/2026-08-28_profile_rework.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-09-05_social_hardening.sql,supabase/migrations/2026-09-05_social_hardening.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-09-07_open_messaging_and_diary_privacy.sql,supabase/migrations/2026-09-07_open_messaging_and_diary_privacy.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-09-08_notification_upsert_fix.sql,supabase/migrations/2026-09-08_notification_upsert_fix.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-09-09_conversations.sql,supabase/migrations/2026-09-09_conversations.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-09-09_social_graph_v2.sql,supabase/migrations/2026-09-09_social_graph_v2.sql,схема,да (sqlGuard),да,нет,✅ AUDITED,,Идемпотентность и порядок проверены скриптами проекта.
+Миграция,2026-09-11_fav_restaurant.sql,supabase/migrations/2026-09-11_fav_restaurant.sql,схема,да (sqlGuard),да,нет,🚨 ISSUE FOUND,DB-001,Не внесена в SOURCES сборки setup_all.sql.
+Поток,Регистрация и вход (почта),—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Вход по магической ссылке,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Вход через Google (OAuth),—,сценарий,частично,да,нет,⚠️ PARTIALLY AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Вход через кошелёк Web3,—,сценарий,частично,да,нет,❌ NOT TESTABLE,DEP-001,Функция выключена в окружении — проверить нечего.
+Поток,Сброс пароля по ссылке,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Выход (локальный и глобальный),—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Онбординг и расчёт целей,—,сценарий,частично,да,нет,🚨 ISSUE FOUND,BUG-001,Разобран по коду от кнопки до политики RLS.
+Поток,"Добавление еды (поиск, порция)",—,сценарий,частично,да,нет,🚨 ISSUE FOUND,UX-001,Разобран по коду от кнопки до политики RLS.
+Поток,Добавление по штрихкоду,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Шаблоны и рецепты,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Добавки и микронутриенты,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Синхронизация между устройствами,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Работа офлайн и досылка,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Подписка и отписка,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Закрытый аккаунт и просьбы,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Блокировка и её обход,—,сценарий,частично,да,нет,🚨 ISSUE FOUND,SEC-005,Разобран по коду от кнопки до политики RLS.
+Поток,Личная переписка,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Групповые диалоги,—,сценарий,частично,да,нет,🚨 ISSUE FOUND,SEC-005,Разобран по коду от кнопки до политики RLS.
+Поток,"Мысли, реакции, ответы",—,сценарий,частично,да,нет,🚨 ISSUE FOUND,PRIV-002,Разобран по коду от кнопки до политики RLS.
+Поток,Уведомления и события,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,AI-чат и бюджет,—,сценарий,частично,да,нет,🚨 ISSUE FOUND,SEC-001,Разобран по коду от кнопки до политики RLS.
+Поток,AI-распознавание фото,—,сценарий,частично,да,нет,🚨 ISSUE FOUND,"SEC-001,SEC-007",Разобран по коду от кнопки до политики RLS.
+Поток,Покупка подписки Stripe,—,сценарий,частично,да,нет,🚨 ISSUE FOUND,"SEC-002,SEC-004",Разобран по коду от кнопки до политики RLS.
+Поток,Гашение промокода,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Обращение в поддержку,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Модерация из Telegram,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.
+Поток,Выгрузка данных,—,сценарий,частично,да,нет,🚨 ISSUE FOUND,PRIV-003,Разобран по коду от кнопки до политики RLS.
+Поток,Удаление аккаунта,—,сценарий,частично,да,нет,🚨 ISSUE FOUND,PRIV-002,Разобран по коду от кнопки до политики RLS.
+Поток,Обновление PWA и кэш,—,сценарий,частично,да,нет,✅ AUDITED,,Разобран по коду от кнопки до политики RLS.

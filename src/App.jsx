@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useStore } from './store.jsx'
 import { keyOf } from './lib/date.js'
 import { fetchUserBrief, startPresence, touchLastSeen } from './lib/supabase.js'
@@ -12,22 +12,46 @@ import { typeOfMealId } from './lib/meals.js'
 import Onboarding from './components/Onboarding.jsx'
 import AuthNotice from './components/AuthNotice.jsx'
 import DayScreen from './components/DayScreen.jsx'
-import HistoryScreen from './components/HistoryScreen.jsx'
-import StatsScreen from './components/StatsScreen.jsx'
-import ProfileScreen from './components/ProfileScreen.jsx'
-import FriendsScreen from './components/FriendsScreen.jsx'
-import FeedTab from './components/FeedTab.jsx'
 import BottomNav from './components/BottomNav.jsx'
-import AddMealSheet from './components/AddMealSheet.jsx'
 import Toast from './components/Toast.jsx'
-import { amountLabel } from './lib/foods.js'
-import ResetPasswordSheet from './components/ResetPasswordSheet.jsx'
 import PushScreen from './components/PushScreen.jsx'
-import AITab from './components/AITab.jsx'
+import LazyBoundary from './components/LazyBoundary.jsx'
+import { lazyWithReload } from './lib/lazyWithReload.js'
+import { amountLabel } from './lib/foodFormat.js'
+
+// ── Что грузится сразу, а что по требованию ──────────────────────────────────
+//
+// Сразу — только дневник: это первый экран, и ждать его загрузки человек не
+// должен. Всё остальное открывается нажатием, то есть заведомо позже первой
+// отрисовки, и держать это в главном чанке незачем.
+//
+// Раньше в главный чанк попадало ВСЁ: лента, переписка, профиль, ассистент,
+// статистика и лист добавления еды на 2 267 строк. На медленной сети человек
+// ждал загрузки переписки, чтобы увидеть, сколько съел за завтраком.
+//
+// lazyWithReload, а не голый React.lazy: после нового развёртывания старый
+// index ссылается на исчезнувший чанк, и импорт падает. Обёртка один раз
+// перезагружает страницу (с защитой от зацикливания), а LazyBoundary ловит
+// то, что не вылечилось перезагрузкой.
+const AITab = lazyWithReload(() => import('./components/AITab.jsx'))
+const FeedTab = lazyWithReload(() => import('./components/FeedTab.jsx'))
+const FriendsScreen = lazyWithReload(() => import('./components/FriendsScreen.jsx'))
+const ProfileScreen = lazyWithReload(() => import('./components/ProfileScreen.jsx'))
+const HistoryScreen = lazyWithReload(() => import('./components/HistoryScreen.jsx'))
+const StatsScreen = lazyWithReload(() => import('./components/StatsScreen.jsx'))
+const AddMealSheet = lazyWithReload(() => import('./components/AddMealSheet.jsx'))
+const ResetPasswordSheet = lazyWithReload(() => import('./components/ResetPasswordSheet.jsx'))
+
+// Заглушка на время загрузки чанка. Занимает всю область экрана и НЕ рисует
+// ни спиннера, ни текста: чанк приезжает за десятки миллисекунд, и мелькающая
+// надпись «Загрузка…» заметнее самой задержки.
+function TabFallback() {
+  return <div className="screen" aria-busy="true" />
+}
 
 export default function App() {
   const store = useStore()
-  const { profile, days, dayOf, addFood, removeFood, recovery, booting, user, prefs } = store
+  const { profile, days, addFood, removeFood, recovery, booting, user, prefs } = store
   const [tab, setTab] = useState('day')
   const [date, setDate] = useState(keyOf())
   const [sheet, setSheet] = useState(null) // null | { mealId, mealLabel }
@@ -176,7 +200,13 @@ export default function App() {
   // Ссылка «сброс пароля» из письма. Это отдельный режим, а не оверлей поверх
   // приложения: пока пароль не сменён, восстановительная сессия не считается
   // обычным входом и данные аккаунта не грузятся.
-  if (recovery) return <ResetPasswordSheet />
+  if (recovery) {
+    return (
+      <Suspense fallback={null}>
+        <ResetPasswordSheet />
+      </Suspense>
+    )
+  }
 
   // Пока неизвестно, есть ли сессия и чьи данные локально, не рендерим ничего:
   // ни онбординг, ни главный экран с дефолтами — и никакого экрана загрузки.
@@ -201,42 +231,61 @@ export default function App() {
   return (
     <div className="app">
       {tab === 'day' && <DayScreen date={date} setDate={setDate} onOpenAdd={(mealId, mealLabel) => setSheet({ mealId, mealLabel })} onOpenCalendar={() => setCalendarOpen(true)} onOpenStats={() => setStatsOpen(true)} clipboard={clipboard} setClipboard={setClipboard} />}
-      {tab === 'ai' && <AITab />}
-      {tab === 'feed' && <FeedTab onChatClosed={refreshTotals} />}
-      {tab === 'friends' && (
-        <FriendsScreen
-          requestCount={totals.messageRequests}
-          onChanged={refreshTotals}
-          setTab={setTab}
-          openChatWith={chatWith}
-          onChatOpened={() => setChatWith(null)}
-        />
-      )}
-      {tab === 'profile' && (
-        <ProfileScreen
-          setTab={setTab}
-          onOpenChat={(target) => {
-            setChatWith(typeof target === 'string' ? { userId: target } : target)
-            setTab('friends')
-          }}
-        />
+      {tab !== 'day' && (
+        <LazyBoundary onClose={() => setTab('day')}>
+          <Suspense fallback={<TabFallback />}>
+            {tab === 'ai' && <AITab />}
+            {tab === 'feed' && <FeedTab onChatClosed={refreshTotals} />}
+            {tab === 'friends' && (
+              <FriendsScreen
+                requestCount={totals.messageRequests}
+                onChanged={refreshTotals}
+                setTab={setTab}
+                openChatWith={chatWith}
+                onChatOpened={() => setChatWith(null)}
+              />
+            )}
+            {tab === 'profile' && (
+              <ProfileScreen
+                onOpenChat={(target) => {
+                  setChatWith(typeof target === 'string' ? { userId: target } : target)
+                  setTab('friends')
+                }}
+              />
+            )}
+          </Suspense>
+        </LazyBoundary>
       )}
 
       <BottomNav tab={tab} setTab={setTab} friendsUnread={unreadMessages} profileUnread={unreadEvents} />
 
       {calendarOpen && (
         <PushScreen onClose={() => setCalendarOpen(false)}>
-          {(close) => <HistoryScreen onPickDay={pickDay} onClose={close} />}
+          {(close) => (
+            <LazyBoundary onClose={close}>
+              <Suspense fallback={<TabFallback />}>
+                <HistoryScreen onPickDay={pickDay} onClose={close} />
+              </Suspense>
+            </LazyBoundary>
+          )}
         </PushScreen>
       )}
 
       {statsOpen && (
         <PushScreen onClose={() => setStatsOpen(false)}>
-          {(close) => <StatsScreen onClose={close} />}
+          {(close) => (
+            <LazyBoundary onClose={close}>
+              <Suspense fallback={<TabFallback />}>
+                <StatsScreen onClose={close} />
+              </Suspense>
+            </LazyBoundary>
+          )}
         </PushScreen>
       )}
 
       {sheet && (
+        <LazyBoundary onClose={() => setSheet(null)}>
+        <Suspense fallback={null}>
         <AddMealSheet
           mealId={sheet.mealId}
           mealLabel={sheet.mealLabel}
@@ -274,6 +323,8 @@ export default function App() {
             removeFood(date, id)
           }}
         />
+        </Suspense>
+        </LazyBoundary>
       )}
       <Toast toast={addUndo} onDone={() => setAddUndo(null)} />
       <AuthNotice />

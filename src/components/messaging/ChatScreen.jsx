@@ -29,7 +29,7 @@ import {
   acceptRequest, declineRequest, uploadMedia, toMessage, DOUBLE_TAP_REACTION,
 } from '../../lib/messaging.js'
 import { block } from '../../lib/social.js'
-import { watchPresence, fetchLastSeen, uploadChatImage } from '../../lib/supabase.js'
+import { watchPresence, fetchLastSeen } from '../../lib/supabase.js'
 import { useSwipeBack } from '../../lib/useSwipeBack.js'
 import { useScrollLock } from '../../lib/useScrollLock.js'
 import { normalizeError } from '../../lib/authErrors.js'
@@ -173,7 +173,7 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
     vv.addEventListener('resize', apply)
     vv.addEventListener('scroll', apply)
     return () => { vv.removeEventListener('resize', apply); vv.removeEventListener('scroll', apply); el.style.height = '' }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   // Жёсткий запрет выделения в ленте. Одного CSS мало: iOS успевает начать
@@ -450,8 +450,8 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
     const temp = {
       id: tempId, conversation_id: convId, sender: myId, recipient: peerId,
       text: text || null,
-      image_url: kind === 'image' && localUrl ? localUrl : null,
-      media: file && kind !== 'image' ? { kind, localUrl, mode } : null,
+      image_url: null,
+      media: file ? { kind, localUrl, mode } : null,
       meal_ref: null,
       reply_to: r?.id || null, reply_snapshot: r?.snapshot || null, forwarded_name: null,
       created_at: new Date().toISOString(), status: 'sending', _clientId: clientId,
@@ -460,20 +460,18 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
     atBottomRef.current = true
     requestAnimationFrame(() => pinBottom(true))
     try {
-      let imageUrl = null
+      const imageUrl = null
       let media = null
       if (file) {
-        // Обычное фото в личной переписке остаётся в прежнем публичном бакете:
-        // на нём стоит вся старая история, и переезд ради единообразия сломал
-        // бы её отображение. Видео, звук и «посмотреть один раз» идут в
-        // ЗАКРЫТЫЙ dm-media — им публичный адрес противопоказан.
-        if (kind === 'image' && mode === 'keep') {
-          imageUrl = await uploadChatImage(myId, file)
-        } else {
-          const up = await uploadMedia({ conversationId: convId, userId: myId, file, kind, mode })
-          if (up.error) throw new Error(up.error)
-          media = up.ok
-        }
+        // ВСЕ вложения переписки уходят в ЗАКРЫТЫЙ dm-media — включая обычные
+        // фото. Раньше для них делалось исключение ради старой истории, но
+        // цена исключения была в том, что фото личной переписки лежало в
+        // публичном бакете и открывалось по прямой ссылке кому угодно.
+        // Старая история читается по-прежнему (chat-images остался на чтение,
+        // см. MessageList), а новое приватно с первой секунды.
+        const up = await uploadMedia({ conversationId: convId, userId: myId, file, kind, mode })
+        if (up.error) throw new Error(up.error)
+        media = up.ok
       }
       const res = await sendMessage({
         conversationId: convId, text, imageUrl, media,
@@ -520,19 +518,15 @@ export default function ChatScreen({ conversation, onClose, onOpenProfile, onCha
       x.id === m.id ? { ...x, status: 'sending', _clientId: clientId } : x
     )))
     try {
-      let imageUrl = m.image_url && !m.image_url.startsWith('blob:') ? m.image_url : null
+      const imageUrl = m.image_url && !m.image_url.startsWith('blob:') ? m.image_url : null
       let media = m.media && m.media.path ? m.media : null
       if (p.file) {
-        if ((p.kind || 'image') === 'image' && (p.mode || 'keep') === 'keep') {
-          imageUrl = await uploadChatImage(myId, p.file)
-        } else {
-          const up = await uploadMedia({
-            conversationId: convId, userId: myId, file: p.file,
-            kind: p.kind || 'image', mode: p.mode || 'keep',
-          })
-          if (up.error) throw new Error(up.error)
-          media = up.ok
-        }
+        const up = await uploadMedia({
+          conversationId: convId, userId: myId, file: p.file,
+          kind: p.kind || 'image', mode: p.mode || 'keep',
+        })
+        if (up.error) throw new Error(up.error)
+        media = up.ok
       }
       const res = await sendMessage({
         conversationId: convId, text: p.text, imageUrl, media,

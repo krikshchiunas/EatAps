@@ -28,7 +28,7 @@
 
 import { MICRO_BY_KEY } from './micronutrients.js'
 import { rankedSearch } from './fuzzy.js'
-import { normalizeQuery } from './foods.js'
+import { normalizeQuery } from './foodFormat.js'
 
 export const SUPP_GROUPS = [
   { key: 'multi', label: 'Мультивитамины', emoji: '🌈' },

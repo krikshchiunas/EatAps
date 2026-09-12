@@ -8,3 +8,10 @@ dist
 *.log
 brand/logo-animated.mp4
 .env*
+
+# Промежуточные артефакты генератора отчёта аудита: сам PDF версионируется,
+# черновые прогоны и картинки для визуальной проверки — нет.
+audit/.build/*.pdf
+audit/.build/chk/
+audit/.build/pk/
+audit/.build/ql/

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
-import { amountLabel, formatAmount } from '../lib/foods.js'
+import { amountLabel, formatAmount } from '../lib/foodFormat.js'
 import { sumAdvanced, freeSugarShare, fiberRatioOf } from '../lib/nutrition.js'
 import { estimateProteinQuality, usableProteinShare, PROTEIN_QUALITY_LOW } from '../lib/nutritionClassification.js'
 import { microsForEntry, massOf } from '../lib/foodMicros.js'

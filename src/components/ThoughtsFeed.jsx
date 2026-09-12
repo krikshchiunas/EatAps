@@ -20,6 +20,8 @@ import {
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { Avatar } from './Avatar.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import PrivateImage from './PrivateImage.jsx'
+import { signedPostImage } from '../lib/supabase.js'
 import { visibilityLabel, VISIBILITY, DEFAULT_VISIBILITY, canViewPost } from '../lib/relationship.js'
 import { setPostVisibility } from '../lib/social.js'
 import { predictReaction, applyServerReaction } from '../lib/reactions.js'
@@ -109,7 +111,11 @@ export function ComposerSheet({ post, userId, onClose, onSaved }) {
 
         {imageUrl && (
           <div style={{ position: 'relative', marginBottom: 12 }}>
-            <img src={imageUrl} alt="" style={{ width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 14, display: 'block' }} />
+            <PrivateImage
+              source={imageUrl}
+              resolve={signedPostImage}
+              style={{ width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 14, display: 'block' }}
+            />
             <button
               onClick={() => setImageUrl(null)}
               style={{ position: 'absolute', top: 8, right: 8, width: 32, height: 32, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 15 }}
@@ -423,7 +429,11 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
         </p>
       )}
       {post.image_url && (
-        <img src={post.image_url} alt="" loading="lazy" style={{ width: '100%', maxHeight: 380, objectFit: 'cover', borderRadius: 14, display: 'block' }} />
+        <PrivateImage
+          source={post.image_url}
+          resolve={signedPostImage}
+          style={{ width: '100%', maxHeight: 380, objectFit: 'cover', borderRadius: 14, display: 'block' }}
+        />
       )}
 
       <div className="row gap8" style={{ marginTop: 12, flexWrap: 'wrap' }}>

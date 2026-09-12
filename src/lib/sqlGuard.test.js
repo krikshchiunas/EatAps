@@ -192,3 +192,85 @@ test('политика чтения app_state опирается на is_friend_
   assert.ok(!/from public\.friendships/.test(body),
     'политика дневника всё ещё читает таблицу friendships — при потерянной гонке доступ разойдётся с правом переписки')
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Путь вложения обязан принадлежать автору строки, которая на него ссылается.
+//
+// Повод: предикат чтения вложений сначала проверял только «ты участник
+// сообщения». Но image_url задаёт КЛИЕНТ (send_conversation_message принимает
+// его параметром), поэтому нападающий отправлял сообщение самому себе, подставив
+// чужой путь, — и получал подпись на чужое фото. Та же подделка через удаление
+// сообщения позволяла удалить чужой файл: очередь уборки разбирает service_role,
+// которому политики хранилища не писаны.
+//
+// Проверяем итоговые редакции: в базе окажутся именно они.
+test('чтение вложений проверяет владельца пути, а не только участие', () => {
+  const all = readFileSync(join(ROOT, 'supabase', 'setup_all.sql'), 'utf8')
+
+  for (const [fn, owner] of [
+    ['can_read_chat_image', 'm.sender'],
+    ['can_read_post_image', 'p.user_id'],
+  ]) {
+    const marker = `create or replace function public.${fn}(`
+    const last = all.lastIndexOf(marker)
+    assert.ok(last > -1, `${fn} не найдена`)
+    const body = all.slice(last, all.indexOf('$$;', last))
+
+    assert.match(body, /media_path_owner/,
+      `${fn} не проверяет владельца пути: достаточно приложить чужой путь к своей ` +
+      'строке, чтобы получить подпись на чужой файл')
+    assert.ok(body.includes(owner),
+      `${fn} не сверяет владельца пути с ${owner}`)
+  }
+})
+
+test('уборка складывает в очередь только файлы автора строки', () => {
+  const all = readFileSync(join(ROOT, 'supabase', 'setup_all.sql'), 'utf8')
+
+  for (const fn of ['queue_post_image_cleanup', 'queue_message_image_cleanup']) {
+    const marker = `create or replace function public.${fn}()`
+    const last = all.lastIndexOf(marker)
+    assert.ok(last > -1, `${fn} не найдена`)
+    const body = all.slice(last, all.indexOf('$$;', last))
+    assert.match(body, /media_path_owner/,
+      `${fn} кладёт в очередь путь без проверки владельца — подделав его, ` +
+      'можно добиться удаления чужого файла')
+  }
+})
+
+// Бакеты вложений обязаны быть закрыты, а у чтения обязан быть предикат.
+// Политика без условия — `using (bucket_id = '…')` — и была исходной дырой.
+//
+// Смотрим ПОСЛЕДНЮЮ редакцию каждой политики: ранние в файле законны (их
+// отменяют более поздние drop/create), и запрещать их — значит требовать
+// переписывания истории миграций.
+test('бакеты вложений закрыты, а у чтения есть предикат', () => {
+  const all = readFileSync(join(ROOT, 'supabase', 'setup_all.sql'), 'utf8')
+
+  const lastPublicFlag = all.lastIndexOf("where id in ('chat-images', 'post-images')")
+  assert.ok(lastPublicFlag > -1, 'нет перевода бакетов вложений в закрытые')
+  const flagBlock = all.slice(all.lastIndexOf('update storage.buckets', lastPublicFlag), lastPublicFlag)
+  assert.match(flagBlock, /public\s*=\s*false/, 'бакеты вложений остались публичными')
+
+  // Итоговая политика чтения для каждого бакета — последняя в файле.
+  const POLICY = /create policy "([^"]+)" on storage\.objects\s+for select using \(([\s\S]*?)\);/g
+  const finalFor = new Map()
+  for (const m of all.matchAll(POLICY)) {
+    const body = m[2]
+    for (const bucket of ['chat-images', 'post-images', 'dm-media']) {
+      if (body.includes(`'${bucket}'`)) finalFor.set(bucket, { name: m[1], body })
+    }
+  }
+
+  for (const [bucket, checker] of [
+    ['chat-images', 'can_read_chat_image'],
+    ['post-images', 'can_read_post_image'],
+    ['dm-media', 'is_conversation_member'],
+  ]) {
+    const pol = finalFor.get(bucket)
+    assert.ok(pol, `нет политики чтения для ${bucket}`)
+    assert.ok(pol.body.includes(checker),
+      `итоговая политика чтения ${bucket} («${pol.name}») не проверяет ничего, кроме имени бакета — ` +
+      'файл отдаётся любому, включая невошедшего')
+  }
+})

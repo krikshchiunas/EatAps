@@ -1,3 +1,4 @@
+import { signedUrl } from './storageUrl.js'
 import { createClient } from '@supabase/supabase-js'
 import { pickSyncable } from './syncModel.js'
 import { projectFriendState } from './friendView.js'
@@ -437,12 +438,30 @@ async function uploadImage(bucket, userId, file) {
   return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
 }
 
-export function uploadChatImage(userId, file) {
-  return uploadImage('chat-images', userId, file)
-}
-
+// Фото записи по-прежнему кладётся в post-images, но бакет теперь ЗАКРЫТ
+// (миграция 2026-09-12_private_media). В строке записи сохраняется прежний
+// адрес вида .../object/public/... — он остаётся стабильным ключом объекта,
+// а показывается запись через подписанную ссылку (signedPostImage).
+// Переписывать уже сохранённые адреса в базе ради красоты не стали: лишняя
+// правка миллиона строк ради строки, которая всё равно разбирается кодом.
 export function uploadPostImage(userId, file) {
   return uploadImage('post-images', userId, file)
+}
+
+// Вложения переписки в chat-images БОЛЬШЕ НЕ ЗАГРУЖАЮТСЯ: всё новое уходит в
+// dm-media (см. lib/messaging.js uploadMedia), где путь начинается с id
+// диалога и политика пускает только его участников. chat-images остался
+// только на чтение старой истории.
+
+// ── Подписанные ссылки на закрытые бакеты ───────────────────────────────────
+// Постоянного публичного адреса у вложения больше нет. Разбор адреса и кэш
+// подписей живут в lib/storageUrl.js — здесь только привязка к клиенту.
+export function signedChatImage(url) {
+  return signedUrl(supabase, 'chat-images', url)
+}
+
+export function signedPostImage(url) {
+  return signedUrl(supabase, 'post-images', url)
 }
 
 // ---------------- Непрочитанные сообщения ----------------

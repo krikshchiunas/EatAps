@@ -17,10 +17,16 @@ export default function StatsScreen({ onClose }) {
   const [period, setPeriod] = useState('7d')
   const today = keyOf()
 
-  // Тяжёлый расчёт — только при смене данных/периода/целей, не на каждый рендер.
+  // Тяжёлый расчёт — только при смене данных/периода/профиля, не на каждый рендер.
+  //
+  // Зависимость именно на profile целиком, а не на profile?.targets, как было
+  // раньше. Цель на конкретный день считается из веса, пола, возраста, роста и
+  // режима активности (createTargetResolver), а не берётся из profile.targets
+  // готовой. Со старой зависимостью правка веса или режима не пересчитывала
+  // статистику вовсе: на экране оставались цифры, посчитанные по прежнему телу.
   const stats = useMemo(
     () => computeStats(days, profile, period, today),
-    [days, profile?.targets, period, today]
+    [days, profile, period, today]
   )
 
   return (

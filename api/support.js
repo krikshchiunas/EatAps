@@ -8,7 +8,7 @@
 // сервере: у клиента можно отключить что угодно.
 
 import { isAllowedOrigin } from './stripe/origin.js'
-import { getUserFromRequest } from './stripe/_shared.js'
+import { getUserFromRequest } from './_auth.js'
 import { db, ADMIN_CHAT_IDS, sendMessage, banButtonKeyboard, formatReport } from './telegram/_tg.js'
 
 const MAX_LEN = 2000

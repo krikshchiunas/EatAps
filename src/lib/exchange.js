@@ -176,7 +176,7 @@ export function parseDate(raw) {
   if (!s) return null
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (m) return `${m[1]}-${m[2]}-${m[3]}`
-  m = s.match(/^(\d{1,2})[.\-](\d{1,2})[.\-](\d{4})/) // ДД.ММ.ГГГГ
+  m = s.match(/^(\d{1,2})[.-](\d{1,2})[.-](\d{4})/) // ДД.ММ.ГГГГ
   if (m) return `${m[3]}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/) // ММ/ДД/ГГГГ — формат MyFitnessPal
   if (m) return `${m[3]}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`
@@ -203,7 +203,7 @@ function parseMeal(raw) {
 // «1,5» → 1.5; «250 g» → 250; мусор → null.
 function parseNum(raw) {
   if (raw == null || raw === '') return null
-  const s = String(raw).replace(/\s/g, '').replace(',', '.').replace(/[^\d.\-]/g, '')
+  const s = String(raw).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, '')
   const n = Number(s)
   return Number.isFinite(n) ? n : null
 }
@@ -213,7 +213,10 @@ export const IMPORT_MAX_ROWS = 20000
 // Разбор CSV в структуру дней. Ничего не пишет — возвращает предпросмотр:
 // { days, stats:{rows, imported, skipped, dateRange}, warnings, columns }.
 export function parseImportCsv(text) {
-  const clean = String(text || '').replace(/^﻿/, '')
+  // \uFEFF — метка порядка байтов: Excel дописывает её в начало файла.
+  // Записана escape-ом намеренно: литеральный символ невидим в редакторе и
+  // неотличим от случайного пробела.
+  const clean = String(text || '').replace(/^\uFEFF/, '')
   const lines = clean.split(/\r\n|\n|\r/).filter((l) => l.trim() !== '')
   if (lines.length < 2) {
     return { ok: false, error: 'Файл пустой или в нём только заголовок.' }

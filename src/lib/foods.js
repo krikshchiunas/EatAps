@@ -1,16 +1,6 @@
 import { barcodeVariants } from './barcode.js'
 import { rankedSearch } from './fuzzy.js'
 
-export const MEAL_TYPES = [
-  { key: 'breakfast', label: 'Завтрак', emoji: '🌅' },
-  { key: 'lunch', label: 'Обед', emoji: '🥗' },
-  { key: 'dinner', label: 'Ужин', emoji: '🌙' },
-  { key: 'snack', label: 'Перекус', emoji: '🍎' },
-]
-
-export function mealMeta(type) {
-  return MEAL_TYPES.find((m) => m.key === type) || MEAL_TYPES[3]
-}
 
 const CAT_EMOJI = {
   grain: '🌾', legume: '🫘', meat: '🥩', poultry: '🍗', fish: '🐟', sea: '🦐',
@@ -695,31 +685,11 @@ export function scale(food, grams) {
 //   • снятие латинских диакритик: Müsli → musli, café → cafe;
 //   • пунктуация и дефисы → пробел, повторные пробелы схлопываются.
 // Цифры и «%» остаются: «молоко 3.2%» — осмысленный запрос.
-const DIACRITICS = /[̀-ͯ]/g
-
-export function normalizeQuery(s) {
-  return String(s ?? '')
-    .normalize('NFD')
-    .replace(DIACRITICS, '')
-    .normalize('NFC')
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .replace(/[^0-9a-zа-я%.\s]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 // Поле количества принимает только то, что действительно является числом.
 // Раньше «-50» оставалось в поле, а записывалось 50: минус молча выбрасывался
 // при разборе, и увиденное расходилось с сохранённым. Незаконченный ввод
 // («12.») пропускаем — иначе нельзя набрать дробное число.
-export function sanitizeAmount(raw) {
-  const s = String(raw ?? '').replace(/[^\d.,]/g, '').replace(/,/g, '.')
-  const dot = s.indexOf('.')
-  if (dot === -1) return s
-  // Вторая и последующие точки — уже не число: «1.2.3» превращается в «1.23».
-  return s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '')
-}
+import { normalizeQuery } from './foodFormat.js'
 
 const norm = normalizeQuery
 
@@ -1333,37 +1303,13 @@ export function hasMacros(f) {
 // Граммы, миллилитры и штуки не склоняются, поэтому таблица нужна только для
 // порций — но проходить через эту функцию должны все, иначе разделитель снова
 // разъедется.
-const UNIT_FORMS = { 'порция': ['порция', 'порции', 'порций'] }
-
-export function formatAmount(value) {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return ''
-  return (Math.round(n * 100) / 100).toString().replace('.', ',')
-}
-
-export function amountLabel(value, unit = 'г') {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return ''
-  const forms = UNIT_FORMS[unit]
-  if (!forms) return `${formatAmount(n)} ${unit}`
-  // Дробное число — всегда родительный падеж единственного числа.
-  if (!Number.isInteger(n)) return `${formatAmount(n)} ${forms[1]}`
-  const mod10 = n % 10
-  const mod100 = n % 100
-  const form = mod10 === 1 && mod100 !== 11 ? forms[0]
-    : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20) ? forms[1]
-      : forms[2]
-  return `${n} ${form}`
-}
-
-// Единая подпись «Б… У… Ж…» для всего приложения.
-//
-// Неизвестное показываем прочерком, а не нулём и не пустотой. Пустота — это
-// как раз то, что получалось раньше: в дневнике висела буква «Ж» без числа.
-export function macroLabel(m) {
-  const v = (x) => (x == null || !Number.isFinite(+x) ? '—' : +(+x).toFixed(1))
-  return `Б${v(m?.protein)} У${v(m?.carbs)} Ж${v(m?.fat)}`
-}
+// Форматирование вынесено в foodFormat.js — маленький модуль без справочника,
+// чтобы первый экран не тянул полторы тысячи строк таблиц ради подписи
+// «150 г». Реэкспорт оставлен, чтобы существующие импорты не переписывать.
+export {
+  formatAmount, amountLabel, macroLabel, sanitizeAmount,
+  MEAL_TYPES, mealMeta, normalizeQuery,
+} from './foodFormat.js'
 
 const posNum = (v, max) => {
   const n = +v
