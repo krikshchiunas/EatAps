@@ -274,3 +274,62 @@ test('бакеты вложений закрыты, а у чтения есть 
       'файл отдаётся любому, включая невошедшего')
   }
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Смена типа колонки, на которую ссылается политика RLS.
+//
+// Postgres отказывается это делать: 0A000 «cannot alter type of a column used
+// in a policy definition». Коварство в том, что НА ПУСТОЙ БАЗЕ ошибки нет —
+// политики к этому моменту ещё не создано, ALTER проходит. Она появляется
+// только там, где предыдущие миграции уже применены, то есть ровно на проде.
+//
+// Так и случилось: 2026-09-09_social_graph_v2 переводила posts.visibility из
+// перечисления в text, а политика "posts select" читает эту колонку напрямую —
+// и весь setup_all.sql обрывался на этой строке.
+//
+// Проверяем: перед каждой сменой типа колонки, которую читает политика, эта
+// политика должна быть снята.
+test('смена типа колонки не упирается в политику, которая её читает', () => {
+  const all = readFileSync(join(ROOT, 'supabase', 'setup_all.sql'), 'utf8')
+
+  // Все политики и колонки, которые они упоминают в своём условии.
+  const POLICY = /create policy "([^"]+)" on public\.(\w+)([\s\S]*?);\s*\n/g
+  const policiesOf = new Map() // table → [{ name, at, body }]
+  for (const m of all.matchAll(POLICY)) {
+    const [, name, table] = m
+    if (!policiesOf.has(table)) policiesOf.set(table, [])
+    policiesOf.get(table).push({ name, at: m.index, body: m[3] })
+  }
+
+  const ALTER_TYPE = /alter table public\.(\w+)\s+alter column (\w+) type\b/g
+  const offenders = []
+
+  for (const m of all.matchAll(ALTER_TYPE)) {
+    const [, table, column] = m
+    const at = m.index
+
+    // Политики этой таблицы, созданные РАНЬШЕ и читающие эту колонку.
+    const blocking = (policiesOf.get(table) || []).filter((p) => (
+      p.at < at && new RegExp(`\\b${column}\\b`).test(p.body)
+    ))
+    if (!blocking.length) continue
+
+    // Для каждой — между её созданием и ALTER должен быть drop.
+    for (const p of blocking) {
+      const between = all.slice(p.at, at)
+      const dropped = new RegExp(
+        `drop policy if exists "${p.name}" on public\\.${table}`,
+      ).test(between)
+      if (!dropped) {
+        offenders.push(
+          `${table}.${column}: политика "${p.name}" читает колонку и не снята перед сменой типа`,
+        )
+      }
+    }
+  }
+
+  assert.deepEqual([...new Set(offenders)], [],
+    'Postgres откажет с 0A000 «cannot alter type of a column used in a policy ' +
+    'definition». На пустой базе это не воспроизводится — только на той, где ' +
+    'политика уже создана, то есть на проде:\n  ' + [...new Set(offenders)].join('\n  '))
+})

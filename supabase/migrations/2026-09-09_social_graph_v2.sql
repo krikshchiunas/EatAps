@@ -123,6 +123,23 @@ begin
     where table_schema = 'public' and table_name = 'posts'
       and column_name = 'visibility' and data_type <> 'text'
   ) then
+    -- ⚠ ПОЛИТИКУ ЧТЕНИЯ НУЖНО СНЯТЬ ДО СМЕНЫ ТИПА.
+    --
+    -- Postgres отказывается менять тип колонки, на которую ссылается политика
+    -- RLS, и падает с 0A000: «cannot alter type of a column used in a policy
+    -- definition». Политика "posts select" читает posts.visibility напрямую,
+    -- поэтому без снятия вся миграция обрывается на этой строке.
+    --
+    -- На пустой базе этого не воспроизвести: там политики ещё нет, и ALTER
+    -- проходит. Ошибка появляется только на базе, куда уже применялся
+    -- социальный граф 2026-08-25, то есть ровно на проде.
+    --
+    -- Снимать безопасно: правильная редакция политики (уже с 'close_friends')
+    -- создаётся ниже в этом же файле. В промежутке таблица остаётся с
+    -- включённым RLS и без политики чтения, то есть закрытой — отказ в
+    -- безопасную сторону, а не в открытую.
+    drop policy if exists "posts select" on public.posts;
+
     alter table public.posts alter column visibility drop default;
     alter table public.posts alter column visibility type text using visibility::text;
     alter table public.posts alter column visibility set default 'followers';
