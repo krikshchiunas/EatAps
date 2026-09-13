@@ -9,4 +9,7 @@
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || ''
 
 export const WALLETCONNECT_PROJECT_ID = projectId
+// Тот же признак, что и константа сборки __WEB3_ENABLED__ (см. vite.config.js).
+// Здесь он нужен для условий в разметке, там — чтобы Rollup мог выбросить
+// импорт. Считаются оба из одной переменной окружения, разойтись не могут.
 export const web3Enabled = Boolean(projectId)

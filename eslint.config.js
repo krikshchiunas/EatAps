@@ -37,6 +37,7 @@ export default [
       globals: {
         ...globals.browser,
         __APP_VERSION__: 'readonly',
+        __WEB3_ENABLED__: 'readonly',
       },
       parserOptions: {
         ecmaFeatures: { jsx: true },
