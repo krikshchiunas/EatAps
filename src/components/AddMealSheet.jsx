@@ -7,6 +7,7 @@ import {
   templateToEntries, templateTotals, recipeTotals, recipePerServing, recipeToFood,
 } from '../lib/library.js'
 import { BEER_BRANDS, SPIRIT_TYPES, COCKTAILS, alcKcal } from '../lib/alcohol.js'
+import { checkManualFood } from '../lib/manualFood.js'
 import { useStore } from '../store.jsx'
 import Toast from './Toast.jsx'
 import RecipeEditorSheet from './RecipeEditorSheet.jsx'
@@ -64,8 +65,11 @@ const SECTIONS = [
   { key: 'dairy', label: 'Молочное' },
   { key: 'cheese', label: 'Сыры' },
   { key: 'nut', label: 'Орехи' },
+  { key: 'bread', label: 'Хлеб' },
   { key: 'pastry', label: 'Выпечка' },
+  { key: 'snack', label: 'Снеки' },
   { key: 'sweet', label: 'Сладкое' },
+  { key: 'sauce', label: 'Соусы' },
   { key: 'dish', label: 'Блюда' },
   { key: 'dessert', label: 'Десерты' },
   { key: 'mcdonalds', label: 'Макдоналдс' },
@@ -470,68 +474,63 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     onClose()
   }
 
-  // Сохраняет продукт в «Моё» (customFoods). БЕЗ добавления в приём пищи.
-  // Хранение — всегда per 100 (г или мл). Если введено «за штуку/порцию»,
-  // приводим к per100 через размер порции.
-  const saveToMine = () => {
-    if (manualKind === 'food') {
-      const nm = manual.name.trim()
-      if (!nm) return
-      const portion = Math.max(0, num(manual.portion))
-      // basis=perPortion → значения относятся ко всей порции → делим на portion*100 → per100
-      let scale = 1
-      if (manualBasis === 'perPortion') {
-        if (portion <= 0) return
-        scale = 100 / portion
-      }
-      const entry = {
-        name: nm,
-        emoji: '🍽️',
-        cat: 'dish',
-        unit: 'г',
-        kcal: Math.round(num(manual.kcal) * scale),
-        protein: round1(num(manual.protein) * scale),
-        carbs: round1(num(manual.carbs) * scale),
-        fat: round1(num(manual.fat) * scale),
-        source: 'custom',
-      }
-      const sugar = optionalNum(manual.sugar, scale)
-      // Ввели явно — помечаем. Ноль, введённый руками, это факт, а не пробел.
-      if (sugar != null) { entry.sugar = sugar; entry.sugarSrc = 'measured' }
-      const satFat = optionalNum(manual.satFat, scale)
-      if (satFat != null) entry.satFat = satFat
-      addCustomFood(entry)
-      setManual({ name: '', portion: '', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '' })
-      showToast('Сохранено в «Моё»')
-    } else {
-      const nm = manualDrink.name.trim()
-      if (!nm) return
-      const ml = Math.max(0, num(manualDrink.ml))
-      let scale = 1
-      if (drinkBasis === 'perServing') {
-        if (ml <= 0) return
-        scale = 100 / ml
-      }
-      const drink = {
-        name: nm,
-        emoji: '🥤',
-        cat: 'drink',
-        unit: 'мл',
-        kcal: Math.round(num(manualDrink.kcal) * scale),
-        protein: round1(num(manualDrink.protein) * scale),
-        carbs: round1(num(manualDrink.carbs) * scale),
-        fat: round1(num(manualDrink.fat) * scale),
-        source: 'custom',
-      }
-      for (const [key, raw] of [['sugar', manualDrink.sugar], ['satFat', manualDrink.satFat], ['caffeine', manualDrink.caffeine]]) {
-        const v = optionalNum(raw, scale)
-        if (v != null) drink[key] = v
-      }
-      if (drink.sugar != null) drink.sugarSrc = 'measured'
-      addCustomFood(drink)
-      setManualDrink({ name: '', ml: '250', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '', caffeine: '' })
-      showToast('Сохранено в «Моё»')
+  // Продукт из формы ручного ввода, приведённый к 100 г/мл. Хранение — всегда
+  // per 100; если введено «за порцию», делим на её размер. Возвращает и сам
+  // продукт, и порцию — её показывает и добавляет кнопка «Сохранить и добавить».
+  const buildManual = () => {
+    const isFood = manualKind === 'food'
+    const src = isFood ? manual : manualDrink
+    const nm = src.name.trim()
+    const unit = isFood ? 'г' : 'мл'
+    const basis = isFood ? manualBasis : drinkBasis
+    const perPortion = basis === 'perPortion' || basis === 'perServing'
+    const portion = Math.max(0, num(isFood ? manual.portion : manualDrink.ml))
+    const k = perPortion && portion > 0 ? 100 / portion : 1
+
+    const entry = {
+      name: nm,
+      emoji: isFood ? '🍽️' : '🥤',
+      cat: isFood ? 'dish' : 'drink',
+      unit,
+      kcal: Math.round(num(src.kcal) * k),
+      protein: round1(num(src.protein) * k),
+      carbs: round1(num(src.carbs) * k),
+      fat: round1(num(src.fat) * k),
+      source: 'custom',
     }
+    const optional = isFood ? [['sugar', src.sugar], ['satFat', src.satFat]]
+      : [['sugar', src.sugar], ['satFat', src.satFat], ['caffeine', src.caffeine]]
+    for (const [key, raw] of optional) {
+      const v = optionalNum(raw, k)
+      if (v != null) entry[key] = v
+    }
+    // Ввели явно — помечаем. Ноль, введённый руками, это факт, а не пробел.
+    if (entry.sugar != null) entry.sugarSrc = 'measured'
+
+    // Сколько добавить в приём. «За порцию» — ровно её; «на 100» — сотню, то
+    // есть буквально то, для чего человек и вписывал цифры. Подпись на кнопке
+    // называет это число, чтобы добавленное не расходилось с ожидаемым.
+    const addGrams = perPortion && portion > 0 ? portion : 100
+    return { entry, addGrams, portion, basis, unit }
+  }
+
+  const manualState = buildManual()
+  const manualCheck = checkManualFood(manualState.entry, manualState)
+
+  // Сохраняет продукт в «Моё» (customFoods). alsoAdd — ещё и кладёт порцию в
+  // текущий приём, чтобы не искать только что созданное через поиск.
+  const saveToMine = (alsoAdd = false) => {
+    const { entry, addGrams, unit } = manualState
+    if (!manualCheck.ok) return
+    addCustomFood(entry)
+    if (manualKind === 'food') {
+      setManual({ name: '', portion: '', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '' })
+    } else {
+      setManualDrink({ name: '', ml: '250', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '', caffeine: '' })
+    }
+    if (!alsoAdd) { showToast('Сохранено в «Моё»'); return }
+    emit({ type, name: entry.name, emoji: entry.emoji, cat: entry.cat, unit, grams: addGrams, ...scale(entry, addGrams) })
+    onClose()
   }
 
   return (
@@ -1177,8 +1176,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.satFat} onChange={(e) => setManual({ ...manual, satFat: e.target.value })} />
                 </div>
 
-                <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 14px' }}>Сохранится в разделе «Моё» — потом сможете добавить в приём.</p>
-                <button className="btn" style={{ marginTop: 0 }} onClick={saveToMine} disabled={!manual.name.trim() || (manualBasis === 'perPortion' && !num(manual.portion))}>Сохранить</button>
+                <ManualNotes check={manualCheck} />
+                <ManualActions check={manualCheck} amount={`${manualState.addGrams} г`} onSave={saveToMine} />
               </>
             )}
 
@@ -1237,8 +1236,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.caffeine} onChange={(e) => setManualDrink({ ...manualDrink, caffeine: e.target.value })} />
                 </div>
 
-                <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 14px' }}>Сохранится в разделе «Моё» — потом сможете добавить, указав объём.</p>
-                <button className="btn" style={{ marginTop: 0 }} onClick={saveToMine} disabled={!manualDrink.name.trim() || (drinkBasis === 'perServing' && !num(manualDrink.ml))}>Сохранить</button>
+                <ManualNotes check={manualCheck} />
+                <ManualActions check={manualCheck} amount={`${manualState.addGrams} мл`} onSave={saveToMine} />
               </>
             )}
           </div>
@@ -1933,6 +1932,41 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, remembered }) {
 // кнопка быстрого добавления. Кнопка быстрого добавления показывается только
 // когда количество реально известно — она подписана этим количеством, чтобы
 // человек видел, что именно запишется, ДО нажатия.
+// Замечания к введённым цифрам. Ошибка (пустое имя, порция в ноль) закрывает
+// обе кнопки; всё остальное — предупреждение: человек с этикеткой в руках прав
+// чаще, чем наша таблица допусков, и запрещать ему сохранять нельзя.
+function ManualNotes({ check }) {
+  if (!check || (!check.errors.length && !check.warnings.length)) return null
+  const line = (text, color, key) => (
+    <p key={key} style={{ fontSize: 13, color, margin: '0 0 6px', lineHeight: 1.4 }}>{text}</p>
+  )
+  return (
+    <div role="status" aria-live="polite" style={{ marginBottom: 12 }}>
+      {check.errors.map((e, i) => line(e, 'var(--danger)', `e${i}`))}
+      {check.warnings.map((w, i) => line(`Проверьте: ${w}`, 'var(--warn)', `w${i}`))}
+    </div>
+  )
+}
+
+function ManualActions({ check, amount, onSave }) {
+  const blocked = !check?.ok
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button className="btn soft" style={{ marginTop: 0, flex: 1 }} onClick={() => onSave(false)} disabled={blocked}>
+          Сохранить
+        </button>
+        <button className="btn" style={{ marginTop: 0, flex: 1.7 }} onClick={() => onSave(true)} disabled={blocked}>
+          Сохранить и добавить {amount}
+        </button>
+      </div>
+      <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '10px 0 0' }}>
+        И то и другое сохранит продукт в разделе «Моё» — добавить его снова можно в любой день.
+      </p>
+    </>
+  )
+}
+
 function MemoryRow({ emoji, name, meta, quickLabel, onQuick, onOpen, favorite, onFav }) {
   return (
     <div className="meal-item" style={{ gap: 8 }}>

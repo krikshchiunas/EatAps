@@ -276,7 +276,7 @@ const DATA = {
     ['Топлёное масло', 900, 0, 0, 100, '🧈'], ['Маргарин', 717, 0.2, 0.7, 80, '🧈'],
   ],
   snack: [
-    ['Чипсы картофельные', 536, 6.6, 53, 34], ['Чипсы с паприкой', 530, 6, 52, 33],
+    ['Чипсы', 536, 6.6, 53, 34], ['Чипсы с паприкой', 530, 6, 52, 33],
     ['Чипсы со сметаной и луком', 525, 6.5, 53, 32], ['Чипсы с сыром', 535, 7, 52, 33],
     ['Чипсы барбекю', 530, 6.5, 53, 32], ['Чипсы чили', 528, 6.4, 53, 32],
     ['Чипсы в тубе', 540, 4, 52, 35], ['Чипсы овощные', 480, 5, 55, 27],
@@ -926,7 +926,7 @@ const FOREIGN = {
   'Шоколадно-ореховая паста': 'nutella chocolate spread nussnougatcreme',
   'Арахис солёный': 'salted peanuts erdnusse gesalzen',
   // Снеки
-  'Чипсы картофельные': 'potato chips crisps kartoffelchips', 'Чипсы с паприкой': 'paprika chips',
+  'Чипсы': 'potato chips crisps kartoffelchips картофельные', 'Чипсы с паприкой': 'paprika chips',
   'Чипсы со сметаной и луком': 'sour cream onion chips', 'Чипсы с сыром': 'cheese chips kasechips',
   'Чипсы барбекю': 'barbecue chips bbq', 'Чипсы чили': 'chili chips',
   'Чипсы в тубе': 'pringles stacked chips', 'Чипсы овощные': 'vegetable chips gemusechips',
