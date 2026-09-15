@@ -4,6 +4,7 @@
 // обязана сходиться с белками, углеводами и жирами.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { FOODS, BREADS, CONSTRUCTOR_ING, scale, getPortions, inferCat, searchLocal, searchIngredients } from './foods.js'
 
 // Алкоголь даёт 7 ккал на грамм, и этих калорий нет ни в белках, ни в
@@ -149,4 +150,82 @@ test('категория по названию определяется для �
   assert.equal(inferCat('Куриная грудка'), 'poultry')
   assert.equal(inferCat('Творог 5%'), 'dairy')
   assert.equal(inferCat('Лосось слабосолёный'), 'fish')
+  assert.equal(inferCat('Чипсы с паприкой'), 'snack')
+})
+
+// ── Иноязычный поиск ─────────────────────────────────────────────────────────
+
+test('продукт находится по немецкому и английскому названию', () => {
+  const finds = (q, part) =>
+    searchLocal(q).slice(0, 5).some((f) => f.name.toLowerCase().includes(part.toLowerCase()))
+  // Раскладка латиницей — обычное дело, когда человек живёт не в русскоязычной
+  // стране. Всё это раньше уходило в Open Food Facts или не находилось вовсе.
+  for (const [query, want] of [
+    ['gouda', 'гауда'], ['tomate', 'помидор'], ['tomaten', 'помидор'], ['tomato', 'помидор'],
+    ['kartoffel', 'картофель'], ['kartoffeln', 'картофель'], ['potato', 'картофель'],
+    ['bratwurst', 'братвурст'], ['schinken', 'окорок'], ['hackfleisch', 'фарш'],
+    ['quark', 'творог'], ['skyr', 'скир'], ['lachs', 'лосось'], ['huhn', 'курин'],
+    ['chips', 'чипсы'], ['popcorn', 'попкорн'], ['spargel', 'спаржа'],
+    ['erdbeeren', 'клубника'], ['brotchen', 'булочка'], ['frozen pizza', 'пицца заморож'],
+  ]) {
+    assert.ok(finds(query, want), `«${query}» не нашёл «${want}»`)
+  }
+})
+
+test('иноязычные названия дописаны в alias, а не потеряны', () => {
+  // Ключ FOREIGN, не совпавший с именем продукта, не падает и не виден:
+  // алиас просто молча не применяется, и поиск по-немецки перестаёт работать.
+  const src = readFileSync(new URL('./foods.js', import.meta.url), 'utf8')
+  const block = src.slice(src.indexOf('const FOREIGN = {'), src.indexOf('const withForeign'))
+  const keys = [...block.matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1])
+  const names = new Set(FOODS.map((f) => f.name))
+  const dangling = keys.filter((k) => !names.has(k))
+  assert.deepEqual(dangling, [], 'ключи FOREIGN без продукта в базе')
+  assert.ok(keys.length > 200, `иноязычных названий всего ${keys.length}`)
+})
+
+test('в алиасах нет слов со смешанным алфавитом', () => {
+  // «sussкirsche» с кириллической «к» выглядит как латиница и не находится
+  // ничем: ни латинским запросом, ни русским. Отловить можно только так.
+  const mixed = []
+  for (const f of FOODS) {
+    for (const w of String(f.alias || '').split(/\s+/)) {
+      if (/[а-яё]/i.test(w) && /[a-z]/i.test(w)) mixed.push(`${f.name}: ${w}`)
+    }
+  }
+  assert.deepEqual(mixed, [])
+})
+
+// ── Качество данных базы ─────────────────────────────────────────────────────
+
+test('база покрывает повседневные категории, а не только готовые блюда', () => {
+  const byCat = {}
+  for (const f of FOODS) byCat[f.cat] = (byCat[f.cat] || 0) + 1
+  // Нижние границы — защита от случайного удаления куска таблицы, а не цель.
+  for (const [cat, min] of [
+    ['cheese', 20], ['meat', 30], ['fish', 20], ['veg', 40], ['fruit', 25],
+    ['dairy', 20], ['grain', 20], ['bread', 15], ['snack', 15], ['sauce', 15],
+  ]) {
+    assert.ok((byCat[cat] || 0) >= min, `${cat}: всего ${byCat[cat] || 0}, ожидалось ≥ ${min}`)
+  }
+  assert.ok(FOODS.length > 750, `в базе ${FOODS.length} продуктов`)
+})
+
+test('единица измерения — либо известная, либо отсутствует', () => {
+  // Отсутствие unit законно: у продуктов с вариантами приготовления единицу
+  // подставляет интерфейс (`food.unit || 'г'`). Ловим не пропуск, а ОПЕЧАТКУ —
+  // «гр» вместо «г» не сломает расчёт, но напечатает в дневнике чужое слово.
+  const allowed = new Set(['г', 'мл', 'шт', 'порция'])
+  for (const f of FOODS) {
+    if (f.unit == null) continue
+    assert.ok(allowed.has(f.unit), `${f.name}: единица «${f.unit}»`)
+  }
+})
+
+test('названия продуктов опрятные', () => {
+  for (const f of FOODS) {
+    assert.equal(f.name, f.name.trim(), `${f.name}: пробелы по краям`)
+    assert.ok(!/\s{2,}/.test(f.name), `${f.name}: двойной пробел`)
+    assert.ok(f.name.length <= 60, `${f.name}: слишком длинное название`)
+  }
 })
