@@ -554,7 +554,7 @@ function DayBody({
           label="Усвояемый белок"
           valueText={`${Math.round(advanced.qualityProtein)} г${advanced.qualityProteinShare != null ? ` · ${Math.round(advanced.qualityProteinShare * 100)}%` : ''}`}
           sub={advanced.qualityProteinConfidence === 'none' ? 'нет данных' : advanced.qualityProteinConfidence === 'partial' ? 'часть продуктов не опознана' : undefined}
-          explain="Сколько съеденного белка организм действительно может пустить на строительство мышц и тканей. Считается по DIAAS — международному показателю качества белка (FAO): у яиц, молочного, мяса и рыбы засчитывается почти всё, у круп и бобовых — половина-две трети, у коллагена и желатина — ничего, в них нет триптофана. Значения справочные, по типу продукта, а не измерение конкретной пачки — это ориентир, а не медицинский диагноз."
+          explain="Сколько съеденного белка организм действительно может пустить на строительство мышц и тканей. В зачёт идёт меньшее из двух: сколько белка всосётся (из мяса, рыбы, яиц и молочного — 93–97%, из круп и бобовых — 80–90%) и на сколько хватит самой дефицитной незаменимой аминокислоты (метод DIAAS, FAO). Продукты одного приёма пищи дополняют друг друга: хлебу не хватает лизина, а сыр и мясо его восполняют. У коллагена и желатина не засчитывается ничего — в них нет триптофана. Значения справочные, по типу продукта, а не анализ конкретной пачки."
         />
         <SubMetricRow
           label="Сложные углеводы"
@@ -1221,7 +1221,7 @@ function EditFoodSheet({ food, onSave, onClose }) {
         {food.grams ? (
           <>
             <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">{food.unit === 'мл' ? 'Объём, мл' : 'Порция, г'}</label>
+              <label className="label">{food.unit === 'мл' ? 'Объём, мл' : food.unit && food.unit !== 'г' ? `Количество, ${food.unit}` : 'Порция, г'}</label>
               <input className="input" type="number" inputMode="decimal" value={grams} onChange={(e) => setGrams(e.target.value)} style={{ marginTop: 6 }} />
             </div>
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 22 }}>

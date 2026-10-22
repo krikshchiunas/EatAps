@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { amountLabel, formatAmount } from '../lib/foods.js'
 import { sumAdvanced, freeSugarShare, fiberRatioOf } from '../lib/nutrition.js'
-import { estimateProteinQuality, usableProteinShare, PROTEIN_QUALITY_LOW } from '../lib/nutritionClassification.js'
+import { estimateProteinQuality, PROTEIN_QUALITY_LOW } from '../lib/nutritionClassification.js'
 import { microsForEntry, massOf } from '../lib/foodMicros.js'
 import { MICRO_GROUPS, MICRONUTRIENTS, microTargets, formatMicro } from '../lib/micronutrients.js'
 
@@ -27,6 +27,12 @@ import { MICRO_GROUPS, MICRONUTRIENTS, microTargets, formatMicro } from '../lib/
 // ─────────────────────────────────────────────────────────────────────────────
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+
+// Лимитирующая аминокислота — в родительном падеже, для фразы «не хватает …».
+const AA_GENITIVE = {
+  lys: 'лизина', saa: 'метионина и цистеина', thr: 'треонина', trp: 'триптофана',
+  leu: 'лейцина', his: 'гистидина', val: 'валина', ile: 'изолейцина', aaa: 'фенилаланина и тирозина',
+}
 
 // Граммы по-русски: десятая доля и ЗАПЯТАЯ. Через шаблонную строку выходило
 // «10.3 г» — точка, которой в русском тексте не бывает, и весь остальной
@@ -73,7 +79,7 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
     }))
     .filter((g) => g.rows.length > 0)
 
-  const share = usableProteinShare(pq.diaas)
+  const share = pq.usable
 
   return (
     <div className="sheet-backdrop" {...backdropProps} onClick={close}>
@@ -109,6 +115,12 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
                 <Note>
                   В этом белке нет триптофана — на строительство тканей он не идёт совсем.
                   Так устроены коллаген и желатин: граммы на упаковке настоящие, пользы для мышц нет.
+                </Note>
+              )}
+              {pq.diaas > 0 && pq.diaas < pq.digestibility && AA_GENITIVE[pq.limiting] && (
+                <Note>
+                  Здесь не хватает {AA_GENITIVE[pq.limiting]}. Мясо, рыба, яйца или молочное в том же
+                  приёме пищи это восполняют — в итоге дня такое сочетание уже учтено.
                 </Note>
               )}
             </>

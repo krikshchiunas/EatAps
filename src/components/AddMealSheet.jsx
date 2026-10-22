@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { plural } from '../lib/text.js'
-import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel } from '../lib/foods.js'
+import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel, dairyProtein } from '../lib/foods.js'
 import {
   memoryBoost, frequentFoods, recentFoods, memoryPortion,
   repeatEntry, toPer100, favoriteKey, MAX_FAVORITES,
@@ -8,6 +8,7 @@ import {
 } from '../lib/library.js'
 import { BEER_BRANDS, SPIRIT_TYPES, COCKTAILS, alcKcal } from '../lib/alcohol.js'
 import { checkManualFood } from '../lib/manualFood.js'
+import { proteinMixOf } from '../lib/nutritionClassification.js'
 import { useStore } from '../store.jsx'
 import Toast from './Toast.jsx'
 import RecipeEditorSheet from './RecipeEditorSheet.jsx'
@@ -45,6 +46,10 @@ const optionalNum = (raw, scale = 1) => {
 }
 
 const SUGAR_TSP = { grams: 4, kcal: 16, carbs: 4 }
+
+// Категории, где вес до и после готовки различается настолько, что от выбора
+// «сырое/готовое» белок меняется в полтора раза.
+const RAW_WEIGHT_CATS = new Set(['meat', 'poultry', 'fish'])
 const isHotDrink = (food) => {
   if (!food) return false
   if (food.emoji === '☕' || food.emoji === '🍵') return true
@@ -322,7 +327,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
   // Вызывается только когда привычная порция известна: кнопки быстрого
   // добавления без количества у строки просто нет (см. MemoryRow).
   const quickAddFavorite = (fav, grams) => {
-    quickAdd({ ...scale(fav, grams), name: fav.name, emoji: fav.emoji, unit: fav.unit || 'г', cat: fav.cat, grams })
+    quickAdd({ ...scale(fav, grams), name: fav.name, emoji: fav.emoji, unit: fav.unit || 'г', cat: fav.cat, grams, ...(fav.proteinMix ? { proteinMix: fav.proteinMix } : {}) })
   }
 
   // Закрепить/снять. В избранном продукт хранится «на 100 г/мл» — в том же
@@ -368,7 +373,11 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     // Памяти нет — прежний список недавних, затем нейтральное значение.
     const remembered = memoryPortion(foodMemory, { name: food.name, unit: u })
     const last = remembered || recents.find((r) => r.name === food.name && r.unit === u && r.grams)?.grams
-    setGrams(last ? String(last) : u === 'мл' ? '250' : '150')
+    // Памяти нет — первая бытовая мера продукта («ломтик · 20 г», «1 шт · 50 г»),
+    // а не 150 г для всего подряд: 150 г сыра — это 37 г белка, а человек,
+    // не глядя нажавший «Добавить», съел один ломтик.
+    const typical = getPortions(food)[0]?.grams
+    setGrams(last ? String(last) : typical ? String(typical) : u === 'мл' ? '250' : '150')
   }
 
   // Тап по строке памяти → экран количества. Сначала ищем канонический продукт
@@ -441,7 +450,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     if (!effective || g <= 0) return
     const s = scale(effective, g)
     const name = selected.hasVariants && method ? `${selected.name}, ${method.label.toLowerCase()}` : selected.name
-    emit({ type, name, emoji: selected.emoji, grams: g, unit, cat: selected.cat, ...s })
+    emit({ type, name, emoji: selected.emoji, grams: g, unit, cat: selected.cat, ...s, ...(selected.proteinMix ? { proteinMix: selected.proteinMix } : {}) })
     if (selected.name === 'Яйцо' && method?.label === 'Глазунья на сл. масле') {
       const bg = g <= 55 ? 5 : 7.5
       emit({
@@ -1017,6 +1026,12 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
             {selected.hasVariants && (
               <div style={{ marginBottom: 18 }}>
                 <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>Способ приготовления</label>
+                {RAW_WEIGHT_CATS.has(selected.cat) && selected.methods.some((m) => /^сыр/i.test(m.label)) && (
+                  <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '-4px 0 10px' }}>
+                    Взвешивали до готовки — выберите «{selected.methods.find((m) => /^сыр/i.test(m.label)).label}».
+                    Готовое мясо легче сырого на четверть-треть, поэтому в 100 г готового белка больше.
+                  </p>
+                )}
                 <div className="row wrap gap8">
                   {selected.methods.map((m) => (
                     <button
@@ -1624,6 +1639,8 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
   const group = BASE_GROUPS[selected.baseGroup] || BASE_GROUPS.bread
   const [baseName, setBaseName] = useState(selected.preset?.base || group.items[0].name)
   const [slices, setSlices] = useState(selected.preset?.slices || 1)
+  // Вес одного ломтика основы. null — табличный: другой хлеб, другой ломтик.
+  const [baseEach, setBaseEach] = useState(null)
   const [items, setItems] = useState([])
   const [name, setName] = useState(selected.name)
   const [servings, setServings] = useState(1)
@@ -1632,7 +1649,8 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
   const [ci, setCi] = useState({ name: '', kcal: '', protein: '', carbs: '', fat: '', grams: '50' })
 
   const bread = group.items.find((b) => b.name === baseName) || group.items[0]
-  const baseGrams = slices * bread.each
+  const breadEach = baseEach ?? bread.each
+  const baseGrams = slices * breadEach
   const baseMacros = scale(bread, baseGrams)
 
   const withMacros = items.map((it) => {
@@ -1670,6 +1688,11 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
     if (c <= 0) return setItems((prev) => prev.filter((p) => p.name !== n))
     setItems((prev) => prev.map((p) => (p.name === n ? { ...p, count: c } : p)))
   }
+  // Вес одного ломтика правится: табличные 20 г — это ломтик сыра из нарезки,
+  // а тонкая пластинка весит вдвое меньше. Ошибка в весе ломтика умножается
+  // на число ломтиков и штук — именно так «два бутерброда» и набирали лишние
+  // граммы белка.
+  const setEach = (n, g) => setItems((prev) => prev.map((p) => (p.name === n ? { ...p, each: g } : p)))
 
   const nq = ingQuery.trim().toLowerCase().replace(/ё/g, 'е')
   const customMatches = nq ? customIngredients.filter((i) => i.name.toLowerCase().replace(/ё/g, 'е').includes(nq)) : []
@@ -1699,6 +1722,13 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
 
   const unit = selected.unit || 'шт'
 
+  // Из чего состоит белок одной штуки — чтобы усвояемый белок считался по
+  // настоящему составу (хлеб + колбаса + сыр), а не по слову «бутерброд».
+  const proteinMix = proteinMixOf([
+    { name: bread.name, cat: BASE_CAT[selected.baseGroup], protein: baseMacros.protein },
+    ...withMacros.map((it) => ({ name: it.name, cat: it.cat, protein: it.m.protein })),
+  ])
+
   const finish = () => {
     const finalName = name.trim() || selected.name
     addCustomFood({
@@ -1711,10 +1741,11 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
       protein: perUnit.protein,
       carbs: perUnit.carbs,
       fat: perUnit.fat,
-      recipe: { base: baseName, slices, items: items.map((i) => ({ name: i.name, count: i.count })) },
+      recipe: { base: baseName, slices, baseEach: breadEach, items: items.map((i) => ({ name: i.name, count: i.count, each: i.each })) },
+      ...(proteinMix ? { proteinMix } : {}),
       source: 'custom',
     })
-    onAdd({ type, name: finalName, emoji: selected.emoji, cat: selected.cat || 'dish', grams: servings, unit, ...total })
+    onAdd({ type, name: finalName, emoji: selected.emoji, cat: selected.cat || 'dish', grams: servings, unit, ...total, ...(proteinMix ? { proteinMix } : {}) })
     onClose()
   }
 
@@ -1731,22 +1762,34 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
       <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>{group.label}</label>
       <div className="row wrap gap8" style={{ marginBottom: 14 }}>
         {group.items.map((b) => (
-          <button key={b.name} className={`pill ${baseName === b.name ? 'on' : ''}`} onClick={() => setBaseName(b.name)}>{b.name}</button>
+          <button key={b.name} className={`pill ${baseName === b.name ? 'on' : ''}`} onClick={() => { setBaseName(b.name); setBaseEach(null) }}>{b.name}</button>
         ))}
       </div>
-      <div className="row between" style={{ marginBottom: 20 }}>
+      <div className="row between" style={{ marginBottom: 6 }}>
         <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>{group.countLabel}</span>
         <Stepper value={slices} set={setSlices} min={1} />
       </div>
+      <div className="row" style={{ gap: 6, marginBottom: 20, alignItems: 'center', fontSize: 12.5, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>
+        <span>{bread.unitName}</span>
+        <PieceGrams value={breadEach} onChange={setBaseEach} label={`Вес: ${bread.unitName}, г`} />
+        <span>г × {slices} = {round1(baseGrams)} г</span>
+      </div>
 
-      <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>Начинка</label>
+      <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>
+        Начинка — на {unit === 'шт' ? 'одну штуку' : 'одну порцию'}
+      </label>
       {withMacros.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           {withMacros.map((it) => (
             <div key={it.name} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 15, fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.emoji} {it.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{it.count} {it.unitName} · {it.grams} г · {it.m.kcal} ккал</div>
+                <div className="row" style={{ gap: 6, fontSize: 12, color: 'var(--ink-3)', alignItems: 'center', whiteSpace: 'nowrap', marginTop: 2 }}>
+                  <span>{it.unitName}</span>
+                  <PieceGrams value={it.each} onChange={(g) => setEach(it.name, g)} label={`Вес: ${it.unitName}, ${it.name}, г`} />
+                  <span>г × {it.count} = {round1(it.grams)} г</span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{it.m.kcal} ккал · Б{round1(it.m.protein || 0)}</div>
               </div>
               <Stepper value={it.count} set={(c) => setCount(it.name, c)} min={0} />
             </div>
@@ -1805,13 +1848,50 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Мой бутерброд с салями" />
       </div>
 
-      <div className="row between" style={{ margin: '4px 0 18px' }}>
+      <div className="row between" style={{ margin: '4px 0 6px' }}>
         <span style={{ fontSize: 15, fontWeight: 550 }}>Сколько съел, {unit}</span>
         <Stepper value={servings} set={setServings} min={1} />
       </div>
+      <p className="tabular" style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 18px' }}>
+        {servings > 1 ? `Всего за ${servings} ${unit}: ` : 'Всего: '}{total.kcal} ккал · Б{total.protein} · У{total.carbs} · Ж{total.fat}
+      </p>
 
       <button className="btn" onClick={finish}>Сохранить и добавить {total.kcal} ккал</button>
     </div>
+  )
+}
+
+// Категория основы конструктора для разбора белка: «Микс салатов» сам по
+// себе ничего не говорит, а группа — говорит.
+const BASE_CAT = {
+  bread: 'bread', salad: 'veg', bowl: 'grain', porridge: 'grain', pasta: 'pasta',
+  garnish: 'grain', pizza2: 'bread', smoothie: 'drink', omelet: 'egg',
+}
+
+// Вес одной штуки ингредиента (ломтика, ложки). Пока поле редактируется, в нём
+// может стоять «1» или пустота — наверх уходит только осмысленное число.
+function PieceGrams({ value, onChange, label }) {
+  const [text, setText] = useState(String(value))
+  useEffect(() => {
+    // Значение поменялось снаружи (сброс основы) — показываем его. Своё же
+    // нажатие сюда не доходит: num(text) уже равен value.
+    if (num(text) !== value) setText(String(value))
+  }, [value])
+  return (
+    <input
+      className="input tabular"
+      type="text"
+      inputMode="decimal"
+      aria-label={label}
+      value={text}
+      onChange={(e) => {
+        const v = sanitizeAmount(e.target.value)
+        setText(v)
+        const n = num(v)
+        if (n > 0 && n <= 1000) onChange(n)
+      }}
+      style={{ width: 48, height: 30, padding: '0 6px', fontSize: 13, textAlign: 'center' }}
+    />
   )
 }
 
@@ -1825,7 +1905,7 @@ function CompositePortion({ selected, onBack, onAdd, onClose, type }) {
   }
   const unit = selected.unit || 'шт'
   const add = () => {
-    onAdd({ type, name: selected.name, emoji: selected.emoji, cat: selected.cat, grams: servings, unit, ...total })
+    onAdd({ type, name: selected.name, emoji: selected.emoji, cat: selected.cat, grams: servings, unit, ...total, ...(selected.proteinMix ? { proteinMix: selected.proteinMix } : {}) })
     onClose()
   }
   return (
@@ -1864,11 +1944,12 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, remembered }) {
 
   const fatN = Math.max(0, num(fat))
   const g = Math.max(0, num(grams))
+  const protein = dairyProtein(selected, fatN)
   const per100 = {
-    protein: selected.protein,
+    protein,
     carbs: selected.carbs,
     fat: fatN,
-    kcal: Math.round(4 * selected.protein + 4 * selected.carbs + 9 * fatN),
+    kcal: Math.round(4 * protein + 4 * selected.carbs + 9 * fatN),
   }
   const res = scale(per100, g)
   const valid = String(fat).trim() !== '' && g > 0

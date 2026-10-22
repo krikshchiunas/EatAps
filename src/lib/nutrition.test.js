@@ -8,7 +8,7 @@ import {
   sumDay, sumAdvanced, sumQuality, satFatLimit, sugarLimit, fiberGoal, carbGrade,
   ACTIVITY, GOALS,
 } from './nutrition.js'
-import { estimateProteinQuality, usableProteinShare } from './nutritionClassification.js'
+import { estimateProteinQuality, mixProteinQuality, proteinMixOf } from './nutritionClassification.js'
 
 const M = { sex: 'male', age: 30, height: 180, weight: 80, activity: 'light', goal: 'maintain' }
 const F = { sex: 'female', age: 30, height: 165, weight: 60, activity: 'light', goal: 'maintain' }
@@ -183,7 +183,9 @@ test('жиры не опускаются ниже физиологическог
   }
 })
 
-// ── Качество белка (DIAAS) ────────────────────────────────────────────────────
+// ── Усвояемый белок (DIAAS смеси + усвояемость) ──────────────────────────────
+
+const profilesOf = (name, cat) => estimateProteinQuality({ name, cat, protein: 10 }).profiles
 
 test('DIAAS: животные источники выше растительных', () => {
   const q = (food) => estimateProteinQuality(food).diaas
@@ -193,45 +195,113 @@ test('DIAAS: животные источники выше растительны
 })
 
 test('коллаген и желатин — ноль в зачёт: в них нет триптофана', () => {
-  for (const name of ['Коллаген порошок', 'Желатин', 'Холодец']) {
-    const { diaas } = estimateProteinQuality({ name, protein: 10 })
+  for (const name of ['Коллаген порошок', 'Желатин']) {
+    const { diaas, usable } = estimateProteinQuality({ name, protein: 10 })
     assert.equal(diaas, 0, name)
+    assert.equal(usable, 0, name)
   }
   const day = sumAdvanced([{ name: 'Коллаген порошок', protein: 20, fat: 0, carbs: 0 }])
   assert.equal(day.qualityProtein, 0)
   assert.equal(day.totalProtein, 20)
 })
 
+test('холодец — не чистый желатин: в нём есть куски мяса', () => {
+  assert.deepEqual(profilesOf('Холодец', 'dish').sort(), ['gelatin', 'meat'])
+  const q = estimateProteinQuality({ name: 'Холодец', cat: 'dish', protein: 10 })
+  assert.ok(q.usable > 0 && q.usable <= 0.95, `доля ${q.usable}`)
+})
+
 test('растительный протеин не путается с сывороточным', () => {
-  assert.equal(estimateProteinQuality({ name: 'Соевый протеин', protein: 25 }).diaas, 0.90)
-  assert.equal(estimateProteinQuality({ name: 'Гороховый изолят', protein: 25 }).diaas, 0.82)
-  assert.equal(estimateProteinQuality({ name: 'Сывороточный протеин', protein: 25 }).diaas, 1.09)
+  assert.deepEqual(profilesOf('Соевый протеин'), ['soy'])
+  assert.deepEqual(profilesOf('Гороховый изолят'), ['pea'])
+  assert.deepEqual(profilesOf('Сывороточный протеин'), ['whey'])
+  assert.deepEqual(profilesOf('Протеин (скуп)'), ['whey'], 'источник не назван — сывороточный')
+  assert.ok(estimateProteinQuality({ name: 'Гороховый изолят', protein: 25 }).usable < 0.85)
 })
 
-test('зачёт качественного белка непрерывный, без обрыва на пороге', () => {
-  // Раньше оценка 7 засчитывалась целиком, 6 — не засчитывалась вовсе.
+test('продукт узнаётся по слову, а не по подстроке', () => {
+  // Каждая из этих строк раньше давала чужую категорию.
+  assert.deepEqual(profilesOf('Котлета домашняя', 'dish'), ['meat'], '«домашняя» ≠ маш')
+  assert.deepEqual(profilesOf('Куриная грудка, сырая', 'poultry'), ['poultry'], '«сырая» ≠ сыр')
+  assert.deepEqual(profilesOf('Сырокопчёный окорок', 'meat'), ['procmeat'], '«сырокопчёный» ≠ сырок')
+  assert.deepEqual(profilesOf('Печенье овсяное', 'sweet').sort(), ['oats', 'sweet'], '«печенье» ≠ печень')
+  assert.deepEqual(profilesOf('Печень куриная', 'poultry').sort(), ['meat', 'poultry'])
+  assert.ok(!profilesOf('Нутелла', 'sweet').includes('chickpea'), '«Нутелла» ≠ нут')
+  assert.deepEqual(profilesOf('Кокосовое молоко', 'dairy'), ['nut'], 'растительное «молоко» — не молочный белок')
+  assert.deepEqual(profilesOf('Арахисовая паста', 'nut'), ['peanut'], '«паста» здесь не макароны')
+})
+
+test('блюдо из нескольких продуктов узнаётся по всем словам', () => {
+  assert.deepEqual(profilesOf('Овсянка, на молоке', 'grain').sort(), ['milk', 'oats'])
+  assert.deepEqual(profilesOf('Рис с курицей', 'dish').sort(), ['poultry', 'rice'])
+  assert.deepEqual(profilesOf('Бутерброды с салями и сыром').sort(), ['cheese', 'procmeat', 'wheat'])
+  assert.deepEqual(profilesOf('Бутерброд', 'dish'), ['mixed'], 'без начинки в названии — смешанное блюдо')
+  // В рисе с курицей белок почти весь куриный: смесь близка к курице, а не к рису.
+  const q = estimateProteinQuality({ name: 'Рис с курицей', cat: 'dish', protein: 30 })
+  assert.ok(q.usable > 0.9, `доля ${q.usable}`)
+})
+
+test('чечевица засчитывается частично — не ноль и не всё', () => {
   const lentils = sumAdvanced([{ name: 'Чечевица варёная', cat: 'legume', protein: 10, fat: 0, carbs: 20 }])
-  assert.ok(lentils.qualityProtein > 0, 'чечевица должна давать хоть что-то')
-  assert.ok(lentils.qualityProtein < 10, 'но не весь белок целиком')
-  assert.ok(Math.abs(lentils.qualityProtein - 5.5) < 0.2, `получилось ${lentils.qualityProtein}`)
+  assert.ok(lentils.qualityProtein > 5.5 && lentils.qualityProtein < 7.5, `получилось ${lentils.qualityProtein}`)
 })
 
-test('DIAAS выше единицы не даёт бонуса — усечение по рекомендации FAO', () => {
-  assert.equal(usableProteinShare(1.13), 1)
-  assert.equal(usableProteinShare(0.55), 0.55)
-  assert.equal(usableProteinShare(null), null)
+test('усвояемый белок не больше того, что всасывается', () => {
+  // Раньше яйца засчитывались на 100%. Всасывается из них около 93%.
   const eggs = sumAdvanced([{ name: 'Яйцо', cat: 'egg', protein: 12, fat: 10, carbs: 0 }])
-  assert.equal(eggs.qualityProtein, 12)
+  assert.ok(eggs.qualityProtein < 12, `${eggs.qualityProtein}`)
+  assert.ok(eggs.qualityProtein >= 11, `${eggs.qualityProtein}`)
+  for (const key of ['milk', 'whey', 'egg', 'meat', 'fish']) {
+    const q = mixProteinQuality({ [key]: 1 })
+    assert.ok(q.diaas >= 1, `${key}: полноценный белок`)
+    assert.ok(q.usable < 1 && q.usable === q.digestibility, `${key}: в зачёт идёт всосавшееся, а не больше`)
+  }
 })
 
-test('неопознанный продукт не занижает долю качественного белка', () => {
+test('продукты одного приёма дополняют друг друга, разных приёмов — нет', () => {
+  // Хлебу не хватает лизина, сыру его девать некуда (FAO 2013: смесь
+  // оценивается целиком, а не по отдельным продуктам).
+  const bread = { name: 'Хлеб белый', cat: 'bread', protein: 5, fat: 1, carbs: 30 }
+  const cheese = { name: 'Гауда', cat: 'cheese', protein: 10, fat: 11, carbs: 0 }
+  const together = sumAdvanced([{ ...bread, mealId: 'std:breakfast' }, { ...cheese, mealId: 'std:breakfast' }])
+  const apart = sumAdvanced([{ ...bread, mealId: 'std:breakfast' }, { ...cheese, mealId: 'std:dinner' }])
+  assert.ok(together.qualityProtein > apart.qualityProtein + 1,
+    `вместе ${together.qualityProtein}, порознь ${apart.qualityProtein}`)
+  assert.ok(together.qualityProtein <= 15 * 0.96, 'но не больше всосавшегося')
+})
+
+test('вклад записей складывается в итог дня', () => {
+  const meals = [
+    { name: 'Хлеб белый', cat: 'bread', protein: 5, fat: 1, carbs: 30, mealId: 'a' },
+    { name: 'Гауда', cat: 'cheese', protein: 10, fat: 11, carbs: 0, mealId: 'a' },
+    { name: 'Чечевица варёная', cat: 'legume', protein: 9, fat: 0, carbs: 20, mealId: 'b' },
+  ]
+  const day = sumAdvanced(meals)
+  assert.equal(day.items.length, 3)
+  const sum = day.items.reduce((a, i) => a + i.qualityProtein, 0)
+  assert.ok(Math.abs(sum - day.qualityProtein) < 0.2, `${sum} против ${day.qualityProtein}`)
+})
+
+test('состав из конструктора важнее названия', () => {
+  const mix = proteinMixOf([
+    { name: 'Тостерный хлеб', cat: 'bread', protein: 4.5 },
+    { name: 'Салями', cat: 'meat', protein: 5.3 },
+    { name: 'Гауда', cat: 'cheese', protein: 10 },
+  ])
+  assert.deepEqual(Object.keys(mix).sort(), ['cheese', 'procmeat', 'wheat'])
+  const q = estimateProteinQuality({ name: 'Мой бутерброд', cat: 'dish', protein: 19.8, proteinMix: mix })
+  assert.deepEqual(q.profiles.sort(), ['cheese', 'procmeat', 'wheat'])
+  assert.ok(q.usable > 0.9 && q.usable < 0.96, `доля ${q.usable}`)
+})
+
+test('неопознанный продукт не занижает долю усвояемого белка', () => {
   const known = sumAdvanced([{ name: 'Куриная грудка', cat: 'poultry', protein: 30, fat: 3, carbs: 0 }])
   const withUnknown = sumAdvanced([
     { name: 'Куриная грудка', cat: 'poultry', protein: 30, fat: 3, carbs: 0 },
     { name: 'Штуковина неизвестная', protein: 20, fat: 5, carbs: 5 },
   ])
-  assert.equal(known.qualityProteinShare, 1)
-  assert.equal(withUnknown.qualityProteinShare, 1, 'доля считается от классифицированного белка')
+  assert.ok(known.qualityProteinShare > 0.9)
+  assert.equal(withUnknown.qualityProteinShare, known.qualityProteinShare, 'доля считается от классифицированного белка')
   assert.equal(withUnknown.qualityProteinConfidence, 'partial', 'но честно помечена как неполная')
   assert.equal(withUnknown.totalProtein, 50)
 })

@@ -20,6 +20,7 @@ import {
   MAX_OUTPUT_TOKENS, roughTokens, IMAGE_TOKENS,
 } from '../../src/lib/aiBudget.js'
 import { buildSystemPrompt, buildUserContext, resolveTone } from '../../src/lib/aiPrompt.js'
+import { sanitizeCards } from '../../src/lib/aiCards.js'
 import { activeGrant, bestTier } from '../../src/lib/subscription.js'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
@@ -238,12 +239,16 @@ export function parseReply(data) {
   try {
     const parsed = JSON.parse(stripped)
     const ask = parsed.ask ? String(parsed.ask).trim() : null
+    // Карточки обрезанного ответа не отдаём: последняя из них почти наверняка
+    // недописана, а карточка с половиной КБЖУ хуже, чем её отсутствие.
+    // Физически невозможные (белка больше, чем весит порция; БЖУ не сходятся
+    // с калориями) отбрасываются — см. aiCards.js.
+    const { cards, dropped } = sanitizeCards(!truncated && Array.isArray(parsed.cards) ? parsed.cards.slice(0, 10) : [])
     return {
       reply: dedupeAsk(String(parsed.reply || '').trim(), ask),
       ask,
-      // Карточки обрезанного ответа не отдаём: последняя из них почти наверняка
-      // недописана, а карточка с половиной КБЖУ хуже, чем её отсутствие.
-      cards: !truncated && Array.isArray(parsed.cards) ? parsed.cards.slice(0, 10) : [],
+      cards,
+      ...(dropped ? { cardsDropped: dropped } : {}),
       memory: parsed.memory ? String(parsed.memory).slice(0, 300) : null,
       ...(truncated ? { truncated: true } : {}),
     }

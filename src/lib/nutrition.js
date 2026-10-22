@@ -1,4 +1,4 @@
-import { estimateSaturatedFat, classifyComplexCarb, estimateProteinQuality, usableProteinShare } from './nutritionClassification.js'
+import { estimateSaturatedFat, classifyComplexCarb, proteinPartsOf, mixProteinQuality } from './nutritionClassification.js'
 
 export const ACTIVITY = {
   sedentary: { factor: 1.2, label: 'Мало движения' },
@@ -239,15 +239,24 @@ function aggConfidence(list) {
   return 'estimated'
 }
 
+// Ключ приёма пищи для расчёта белка: аминокислоты разных продуктов
+// дополняют друг друга, только если съедены вместе. Хлеб утром и творог
+// вечером — это два отдельных приёма, а не один полноценный белок.
+const mealKeyOf = (m) => m?.mealId || m?.type || '_'
+
 export function sumAdvanced(meals = []) {
   const satConfidences = []
   const carbConfidences = []
   const proteinConfidences = []
   let satFat = 0
   let complexCarb = 0
-  let qualityProtein = 0
   let totalProtein = 0
-  let classifiedProtein = 0
+  // Белок по приёмам и по профилям: { приём: { профиль: граммы } }.
+  const proteinByMeal = new Map()
+  // Вклад каждой записи (в том же порядке, что и meals) и то, из чего он
+  // посчитается после того, как станут известны итоги приёмов.
+  const items = []
+  const classified = []
 
   for (const m of meals) {
     const fat = Number(m.fat) || 0
@@ -263,17 +272,37 @@ export function sumAdvanced(meals = []) {
     complexCarb += carbs * cc.share
     if (carbs > 0) carbConfidences.push(cc.confidence)
 
+    const item = { satFat: sf.grams, complexCarb: carbs * cc.share, qualityProtein: 0 }
+    items.push(item)
     if (protein > 0) {
-      const pq = estimateProteinQuality(m)
-      proteinConfidences.push(pq.confidence)
-      // Непрерывный зачёт по DIAAS вместо порога «7 и выше — целиком, ниже —
-      // ноль»: чечевица теперь даёт свои 55%, а не исчезает из счёта.
-      const share = usableProteinShare(pq.diaas)
-      if (share != null) {
-        qualityProtein += protein * share
-        classifiedProtein += protein
+      const parts = proteinPartsOf(m)
+      proteinConfidences.push(parts ? 'estimated' : 'unknown')
+      if (parts) {
+        const meal = mealKeyOf(m)
+        classified.push({ item, meal, protein })
+        let byProfile = proteinByMeal.get(meal)
+        if (!byProfile) proteinByMeal.set(meal, (byProfile = {}))
+        for (const { key, share } of parts) byProfile[key] = (byProfile[key] || 0) + protein * share
       }
     }
+  }
+
+  // Усвояемый белок каждого приёма — по аминокислотному составу всего приёма
+  // (FAO 2013: смесь оценивается целиком, отдельные продукты не усекаются).
+  let qualityProtein = 0
+  let classifiedProtein = 0
+  const shareByMeal = new Map()
+  for (const [meal, byProfile] of proteinByMeal) {
+    const q = mixProteinQuality(byProfile)
+    const grams = Object.values(byProfile).reduce((a, v) => a + v, 0)
+    shareByMeal.set(meal, q ? q.usable : 0)
+    qualityProtein += grams * (q ? q.usable : 0)
+    classifiedProtein += grams
+  }
+  // Вклад записи — её белок с долей усвоения её приёма: так сумма по продуктам
+  // совпадает с итогом дня (это нужно рейтингу продуктов в статистике).
+  for (const { item, meal, protein } of classified) {
+    item.qualityProtein = round1n(protein * (shareByMeal.get(meal) || 0))
   }
 
   return {
@@ -288,6 +317,7 @@ export function sumAdvanced(meals = []) {
     // просто ничего не известно.
     qualityProteinShare: classifiedProtein > 0 ? qualityProtein / classifiedProtein : null,
     qualityProteinConfidence: aggConfidence(proteinConfidences),
+    items,
   }
 }
 

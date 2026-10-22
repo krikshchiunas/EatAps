@@ -15,6 +15,7 @@
 // и обращений к стору — так их можно тестировать и переиспользовать.
 // ─────────────────────────────────────────────────────────────────────────────
 import { normalizeName } from './text.js'
+import { proteinMixOf } from './nutritionClassification.js'
 
 const r1 = (n) => Math.round((Number(n) || 0) * 10) / 10
 const r0 = (n) => Math.round(Number(n) || 0)
@@ -52,6 +53,9 @@ export function foodSnapshot(food) {
   if (Number.isFinite(Number(food.sugar))) snap.sugar = r1(food.sugar)
   if (Number.isFinite(Number(food.satFat))) snap.satFat = r1(food.satFat)
   if (food.barcode) snap.barcode = food.barcode
+  // Состав белка («хлеб + колбаса + сыр») — это доли, а не граммы, поэтому
+  // он верен для любой порции и переезжает в снимок как есть.
+  if (food.proteinMix && typeof food.proteinMix === 'object') snap.proteinMix = food.proteinMix
   return snap
 }
 
@@ -260,6 +264,10 @@ export function recipeToFood(recipe, servingsEaten = 1, mealId) {
     recipeId: recipe.id,
     servings: n,
   }
+  // Из чего состоит белок рецепта — по его ингредиентам: «Борщ» по одному
+  // названию не скажет, говядина в нём или фасоль.
+  const proteinMix = proteinMixOf(recipe?.items)
+  if (proteinMix) food.proteinMix = proteinMix
   if (per.sugar != null) food.sugar = r1(per.sugar)
   if (per.satFat != null) food.satFat = r1(per.satFat)
   if (mealId) food.mealId = mealId
@@ -504,6 +512,7 @@ export function toPer100(entry) {
     fat: rn(entry.fat == null ? null : Number(entry.fat) * k),
   }
   if (entry.cat) out.cat = entry.cat
+  if (entry.proteinMix && typeof entry.proteinMix === 'object') out.proteinMix = entry.proteinMix
   if (Number.isFinite(Number(entry.sugar))) out.sugar = r1(Number(entry.sugar) * k)
   if (Number.isFinite(Number(entry.satFat))) out.satFat = r1(Number(entry.satFat) * k)
   return out

@@ -29,7 +29,7 @@ export const NUTRIENTS = [
   { key: 'protein', label: 'Белки', short: 'Белки', unit: 'г', color: 'var(--good)' },
   {
     key: 'qualityProtein', label: 'Усвояемый белок', short: 'Усв. белок', unit: 'г', color: 'var(--good)', estimate: true,
-    disclaimer: 'Белок, взвешенный по DIAAS — международному показателю качества белка (FAO): каждый продукт засчитывается в той доле, в какой его белок пригоден для строительства тканей. Значения справочные, по типу продукта, а не лабораторные данные конкретной пачки.',
+    disclaimer: 'Сколько белка организм может пустить на строительство тканей. В зачёт идёт меньшее из двух: сколько белка всосётся (из мяса, рыбы, яиц и молочного — 93–97%, из круп и бобовых — 80–90%) и на сколько хватит самой дефицитной незаменимой аминокислоты приёма пищи (метод DIAAS, FAO). Продукты одного приёма дополняют друг друга. Значения справочные, по типу продукта, а не анализ конкретной пачки.',
   },
   { key: 'fat', label: 'Жиры', short: 'Жиры', unit: 'г', color: 'var(--warn)' },
   {
@@ -390,7 +390,12 @@ function productStats(days, keys, ctx) {
   for (const k of keys) {
     const day = days[k]
     if (!counts(day, k, ctx)) continue
-    for (const m of day.meals) {
+    // Качество белка считается по приёму целиком (аминокислоты продуктов
+    // дополняют друг друга), поэтому вклад записи берём из расчёта всего дня,
+    // а не из расчёта записи в одиночку — иначе сумма по продуктам не сошлась
+    // бы с итогом дня.
+    const dayAdv = sumAdvanced(day.meals)
+    for (const [idx, m] of day.meals.entries()) {
       const norm = normalizeName(m.name)
       if (!norm) continue
       if (realSugar(m) == null) sugarEstimated = true
@@ -432,7 +437,7 @@ function productStats(days, keys, ctx) {
       const fat = Number(m.fat) || 0
       const carbs = Number(m.carbs) || 0
       const sugar = mealSugar(m)
-      const adv = sumAdvanced([m])
+      const adv = dayAdv.items[idx]
       g.kcal += kcal
       g.protein += protein
       g.fat += fat

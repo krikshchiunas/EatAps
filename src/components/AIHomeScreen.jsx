@@ -22,6 +22,7 @@ import { usedShare, budgetForTier, periodKey } from '../lib/aiBudget.js'
 import { pullAiUsage } from '../lib/supabase.js'
 import { keyOf } from '../lib/date.js'
 import { autoStandardMealId } from '../lib/meals.js'
+import { sanitizeCard } from '../lib/aiCards.js'
 
 const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
 
@@ -100,6 +101,9 @@ export default function AIHomeScreen({ onUpgrade }) {
         // вместо «Бутерброды очень разные. С чем именно?».
         text: [data.reply, data.ask].filter(Boolean).join(' ') || data.reply || data.ask,
         cards: data.cards?.length ? data.cards : undefined,
+        // Карточки с невозможными цифрами сервер отбросил — говорим об этом,
+        // иначе обещанная в ответе карточка просто молча не появляется.
+        cardsDropped: data.cardsDropped || 0,
         asking: !!data.ask,
         // Ответ упёрся в потолок — показываем это, а не выдаём обрывок за
         // законченную мысль.
@@ -170,19 +174,26 @@ export default function AIHomeScreen({ onUpgrade }) {
 
   // Карточка → запись в дневнике. Приём пищи берём из карточки, а если модель
   // его не указала — по времени суток, как при обычном добавлении руками.
-  const addCard = (card, msgIndex, cardIndex) => {
+  const addCard = (raw, msgIndex, cardIndex) => {
+    // Та же проверка, что на сервере: в дневник не должно попасть то, что
+    // противоречит физике, откуда бы карточка ни пришла.
+    const card = sanitizeCard(raw)
+    if (!card) return
     const date = keyOf()
     const day = store.days?.[date]
     haptic(18)
     addFood(date, {
-      name: String(card.name || 'Блюдо').slice(0, 80),
+      name: card.name,
       emoji: '🍽️',
       unit: 'г',
-      grams: Number(card.grams) || null,
-      kcal: Math.max(0, Math.round(Number(card.kcal) || 0)),
-      protein: Math.max(0, Math.round(Number(card.protein) || 0)),
-      fat: Math.max(0, Math.round(Number(card.fat) || 0)),
-      carbs: Math.max(0, Math.round(Number(card.carbs) || 0)),
+      grams: card.grams,
+      kcal: card.kcal,
+      protein: card.protein,
+      fat: card.fat,
+      carbs: card.carbs,
+      // Тип блюда нужен разбору качества белка: без него «Омлет с сыром» —
+      // это просто название, а с ним — яйца и молочное.
+      ...(card.cat ? { cat: card.cat } : {}),
       type: MEAL_TYPES.includes(card.meal) ? card.meal : undefined,
       mealId: MEAL_TYPES.includes(card.meal) ? `std:${card.meal}` : autoStandardMealId(day),
     })
@@ -278,6 +289,12 @@ function Bubble({ msg, onAdd }) {
       {msg.truncated && (
         <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
           Ответ оборвался на середине — переспросите короче.
+        </p>
+      )}
+      {msg.cardsDropped > 0 && (
+        <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
+          {msg.cardsDropped === 1 ? 'Одну карточку' : 'Часть карточек'} не показываю: цифры в ней не сходятся
+          (белок, жиры и углеводы противоречат калориям или весу). Переспросите — посчитаю заново.
         </p>
       )}
       {msg.cards?.map((card, i) => (
