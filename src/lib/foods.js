@@ -591,10 +591,10 @@ const VARIANTS = [
 ]
 
 export const MILKS = [
-  { key: '3.2', label: 'Молоко 3.2%', kcal: 60, protein: 3, carbs: 4.7, fat: 3.2 },
+  { key: '3.2', get label() { return t('add.milk32') }, kcal: 60, protein: 3, carbs: 4.7, fat: 3.2 },
   { key: '2.5', label: '2.5%', kcal: 52, protein: 2.9, carbs: 4.8, fat: 2.5 },
   { key: '1.5', label: '1.5%', kcal: 44, protein: 3, carbs: 4.7, fat: 1.5 },
-  { key: '0', label: 'Обезжир.', kcal: 34, protein: 3.3, carbs: 5, fat: 0.1 },
+  { key: '0', get label() { return t('add.milkSkim') }, kcal: 34, protein: 3.3, carbs: 5, fat: 0.1 },
 ]
 
 export const BUILDERS = [
@@ -1295,16 +1295,23 @@ const OMELET_BASES = mkBases([
   ['Скрэмбл', 55, 'яйцо', 148, 10, 1.6, 11], ['Белковый омлет', 55, 'яйцо', 52, 11, 0.7, 0.2],
 ], '🍳')
 
+// Подписи групп — из словаря (add.group.<ключ>): это интерфейс, а не данные.
+const baseGroup = (key, items) => ({
+  get label() { return t(`add.group.${key}.label`) },
+  get countLabel() { return t(`add.group.${key}.count`) },
+  items,
+})
+
 export const BASE_GROUPS = {
-  bread: { label: 'Хлеб / основа', countLabel: 'Ломтиков основы', items: BREADS },
-  salad: { label: 'Зелень / основа', countLabel: 'Порций зелени', items: SALAD_BASES },
-  bowl: { label: 'Крупа / основа', countLabel: 'Порций основы', items: BOWL_BASES },
-  porridge: { label: 'Каша / основа', countLabel: 'Порций каши', items: PORRIDGE_BASES },
-  pasta: { label: 'Паста / основа', countLabel: 'Порций пасты', items: PASTA_BASES },
-  garnish: { label: 'Гарнир / основа', countLabel: 'Порций гарнира', items: GARNISH_BASES },
-  pizza2: { label: 'Тесто / основа', countLabel: 'Основ', items: PIZZA_BASES },
-  smoothie: { label: 'Жидкая основа', countLabel: 'Стаканов основы', items: SMOOTHIE_BASES },
-  omelet: { label: 'Основа омлета', countLabel: 'Яиц', items: OMELET_BASES },
+  bread: baseGroup('bread', BREADS),
+  salad: baseGroup('salad', SALAD_BASES),
+  bowl: baseGroup('bowl', BOWL_BASES),
+  porridge: baseGroup('porridge', PORRIDGE_BASES),
+  pasta: baseGroup('pasta', PASTA_BASES),
+  garnish: baseGroup('garnish', GARNISH_BASES),
+  pizza2: baseGroup('pizza2', PIZZA_BASES),
+  smoothie: baseGroup('smoothie', SMOOTHIE_BASES),
+  omelet: baseGroup('omelet', OMELET_BASES),
 }
 
 const ING = {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { scanLuma, toLuma, expandUpcE } from '../lib/barcode.js'
 import { lookupBarcode } from '../lib/foods.js'
+import { t } from '../lib/i18n.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Камера для считывания штрихкода с упаковки.
@@ -270,15 +271,17 @@ export default function BarcodeScanner({ onClose, onFound, onManual }) {
     return () => clearTimeout(t)
   }, [phase, result])
 
-  const failure = FAILURES[phase]
+  const failure = FAILURES.has(phase)
+    ? { title: t(`scanner.fail.${phase}.title`), text: t(`scanner.fail.${phase}.text`) }
+    : null
 
   return (
     <div className="scanner" onClick={(e) => e.stopPropagation()}>
       <video ref={videoRef} className="scanner-video" playsInline muted autoPlay />
 
       <div className="scanner-top">
-        <span className="scanner-title">Штрихкод</span>
-        <button className="scanner-x" onClick={close} aria-label="Закрыть">✕</button>
+        <span className="scanner-title">{t('scanner.title')}</span>
+        <button className="scanner-x" onClick={close} aria-label={t('common.close')}>✕</button>
       </div>
 
       {phase === 'scanning' && !result && (
@@ -287,84 +290,59 @@ export default function BarcodeScanner({ onClose, onFound, onManual }) {
             <i className="c tl" /><i className="c tr" /><i className="c bl" /><i className="c br" />
             <div className="scanner-beam" />
           </div>
-          <p className="scanner-hint">Наведите камеру на штрихкод продукта</p>
+          <p className="scanner-hint">{t('scanner.aim')}</p>
           {hint && (
             <p className="scanner-tip">
-              Не читается? Поднесите ближе, чтобы штрихкод занял рамку целиком, и дайте камере навестись.
+              {t('scanner.tip')}
             </p>
           )}
         </>
       )}
 
-      {phase === 'starting' && <p className="scanner-hint">Включаем камеру…</p>}
+      {phase === 'starting' && <p className="scanner-hint">{t('scanner.starting')}</p>}
 
       {failure && (
         <div className="scanner-card">
           <h3>{failure.title}</h3>
           <p>{failure.text}</p>
-          <button className="btn" onClick={() => onManual('')}>Добавить вручную</button>
+          <button className="btn" onClick={() => onManual('')}>{t('scanner.manual')}</button>
         </div>
       )}
 
       {result?.status === 'looking' && (
         <div className="scanner-card">
-          <h3>Ищем продукт…</h3>
+          <h3>{t('scanner.looking')}</h3>
           <p className="scanner-code">{result.code}</p>
         </div>
       )}
 
       {result?.status === 'not-found' && (
         <div className="scanner-card">
-          <h3>Продукт не найден</h3>
-          <p>Штрихкод считан, но такого товара нет в базе.</p>
+          <h3>{t('scanner.notFound')}</h3>
+          <p>{t('scanner.notFoundText')}</p>
           <p className="scanner-code">{result.code}</p>
-          <button className="btn" onClick={() => onManual('')}>Добавить вручную</button>
-          <button className="btn ghost" onClick={scanAgain}>Сканировать снова</button>
+          <button className="btn" onClick={() => onManual('')}>{t('scanner.manual')}</button>
+          <button className="btn ghost" onClick={scanAgain}>{t('scanner.again')}</button>
         </div>
       )}
 
       {result?.status === 'offline' && (
         <div className="scanner-card">
-          <h3>Нет связи с базой</h3>
-          <p>Не удалось проверить штрихкод. Проверьте интернет и попробуйте ещё раз.</p>
+          <h3>{t('scanner.offline')}</h3>
+          <p>{t('scanner.offlineText')}</p>
           <p className="scanner-code">{result.code}</p>
-          <button className="btn" onClick={() => handleCode(result.code)}>Повторить</button>
-          <button className="btn ghost" onClick={() => onManual('')}>Добавить вручную</button>
+          <button className="btn" onClick={() => handleCode(result.code)}>{t('common.retry')}</button>
+          <button className="btn ghost" onClick={() => onManual('')}>{t('scanner.manual')}</button>
         </div>
       )}
 
       <div className="scanner-bottom">
-        <button className="btn ghost scanner-cancel" onClick={close}>Отмена</button>
+        <button className="btn ghost scanner-cancel" onClick={close}>{t('common.cancel')}</button>
       </div>
     </div>
   )
 }
 
 // Отказы камеры. Текст должен говорить, что делать дальше, а не как называется
-// исключение в браузере.
-const FAILURES = {
-  denied: {
-    title: 'Нет доступа к камере',
-    text: 'Разрешите камеру для EatAps в настройках браузера — на iPhone это «Настройки → Safari → Камера» — и откройте сканер заново.',
-  },
-  nocamera: {
-    title: 'Камера не найдена',
-    text: 'На этом устройстве нет доступной камеры.',
-  },
-  busy: {
-    title: 'Камера занята',
-    text: 'Её использует другое приложение или вкладка. Закройте их и попробуйте снова.',
-  },
-  insecure: {
-    title: 'Камера недоступна',
-    text: 'Браузер разрешает камеру только на защищённом соединении (https).',
-  },
-  unsupported: {
-    title: 'Браузер не умеет включать камеру',
-    text: 'Откройте EatAps в Safari или Chrome — или добавьте продукт вручную.',
-  },
-  failed: {
-    title: 'Не удалось включить камеру',
-    text: 'Попробуйте закрыть и открыть сканер заново.',
-  },
-}
+// исключение в браузере. Тексты — в словаре: scanner.fail.<причина>.
+const FAILURES = new Set(['denied', 'nocamera', 'busy', 'insecure', 'unsupported', 'failed'])

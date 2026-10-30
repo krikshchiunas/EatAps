@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { plural } from '../lib/text.js'
-import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel } from '../lib/foods.js'
+import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel, amountLabel, unitLabel, formatAmount } from '../lib/foods.js'
+import { foodName, methodLabel, portionLabel, alcLabel } from '../lib/foodNames.js'
+import { t, getLang, locale } from '../lib/i18n.js'
 import {
   memoryBoost, frequentFoods, recentFoods, memoryPortion,
   repeatEntry, toPer100, favoriteKey, MAX_FAVORITES,
@@ -52,29 +53,15 @@ const isHotDrink = (food) => {
   return /(чай|кофе|капучино|латте|американо|эспрессо|раф|какао|матча|цикори|глинтвейн|горячий шоколад|мокко|флэт|флет|flat white|glühwein)/.test(n)
 }
 
+// Подпись категории — из словаря (add.sec.<ключ>) в момент показа.
 const SECTIONS = [
-  { key: 'mine', label: 'Моё' },
-  { key: 'drink', label: 'Напитки' },
-  { key: 'alcohol', label: 'Алкоголь' },
-  { key: 'grain', label: 'Крупы' },
-  { key: 'meat', label: 'Мясо' },
-  { key: 'poultry', label: 'Птица' },
-  { key: 'fish', label: 'Рыба' },
-  { key: 'veg', label: 'Овощи' },
-  { key: 'fruit', label: 'Фрукты' },
-  { key: 'dairy', label: 'Молочное' },
-  { key: 'cheese', label: 'Сыры' },
-  { key: 'nut', label: 'Орехи' },
-  { key: 'bread', label: 'Хлеб' },
-  { key: 'pastry', label: 'Выпечка' },
-  { key: 'snack', label: 'Снеки' },
-  { key: 'sweet', label: 'Сладкое' },
-  { key: 'sauce', label: 'Соусы' },
-  { key: 'dish', label: 'Блюда' },
-  { key: 'dessert', label: 'Десерты' },
-  { key: 'mcdonalds', label: 'Макдоналдс' },
-  { key: 'fastfood', label: 'Фастфуд' },
-]
+  'mine', 'drink', 'alcohol', 'grain', 'meat', 'poultry', 'fish', 'veg', 'fruit', 'dairy', 'cheese',
+  'nut', 'bread', 'pastry', 'snack', 'sweet', 'sauce', 'dish', 'dessert', 'mcdonalds', 'fastfood',
+].map((key) => ({ key, get label() { return t(`add.sec.${key}`) } }))
+
+// Название в середине фразы («Собери бутерброд»). В немецком существительное
+// пишется с заглавной всегда — там регистр не трогаем.
+const lowerName = (s) => (getLang() === 'de' ? s : s.toLocaleLowerCase(locale()))
 
 const norm = normalizeQuery
 
@@ -240,7 +227,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     const controller = new AbortController()
     // «Ищем…» показываем ПОСЛЕ паузы, а не на каждое нажатие клавиши: при
     // быстром наборе надпись мигала на каждой букве и запрос уходил зря.
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       if (!alive) return
       setRemoteState('loading')
       let timedOut = false
@@ -265,7 +252,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     }, 350)
     return () => {
       alive = false
-      clearTimeout(t)
+      clearTimeout(timer)
       controller.abort()
     }
   }, [query, mode, selected, retryTick])
@@ -303,10 +290,10 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     lastQuick.current = { key, at: now }
 
     const id = onAdd({ mealId, type, ...payload })
-    const amount = payload.grams > 0 ? `${payload.grams} ${payload.unit || 'г'}` : `${payload.kcal} ккал`
+    const amount = payload.grams > 0 ? amountLabel(payload.grams, payload.unit || 'г') : t('units.kcalN', { n: payload.kcal })
     showToast(
-      `${label || payload.name} · ${amount}`,
-      id && onRemove ? () => { onRemove(id); showToast('Отменено') } : null,
+      `${label || foodName(payload.name)} · ${amount}`,
+      id && onRemove ? () => { onRemove(id); showToast(t('common.undone')) } : null,
     )
   }
 
@@ -332,10 +319,10 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     if (!product) return
     const res = toggleFavorite(product)
     if (res === 'full') {
-      showToast(`В избранном максимум ${MAX_FAVORITES} — открепите ненужное`)
+      showToast(t('add.favFull', { max: MAX_FAVORITES }))
       return
     }
-    showToast(res === 'added' ? 'В избранном' : 'Убрано из избранного')
+    showToast(res === 'added' ? t('add.favAdded') : t('add.favRemoved'))
   }
 
   // Добавить блюдо из шаблона — сразу всеми строками, как оно и было записано.
@@ -343,7 +330,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     const entries = templateToEntries(tpl, mealId).map((e) => ({ ...e, type }))
     if (!entries.length) return
     const n = entries.length
-    if (onAddMany) onAddMany(entries, `${tpl.name} · ${n} ${plural(n, 'продукт', 'продукта', 'продуктов')}`)
+    if (onAddMany) onAddMany(entries, `${tpl.name} · ${t('count.products', { count: n })}`)
     else entries.forEach((e) => onAdd(e))
     onClose()
   }
@@ -528,7 +515,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     } else {
       setManualDrink({ name: '', ml: '250', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '', caffeine: '' })
     }
-    if (!alsoAdd) { showToast('Сохранено в «Моё»'); return }
+    if (!alsoAdd) { showToast(t('add.savedToMine')); return }
     emit({ type, name: entry.name, emoji: entry.emoji, cat: entry.cat, unit, grams: addGrams, ...scale(entry, addGrams) })
     onClose()
   }
@@ -542,21 +529,21 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
       {editRcp && (
         <RecipeEditorSheet
           recipe={editRcp}
-          onSave={(r, updated) => { saveRecipe(r); showToast(updated ? `«${r.name}» обновлён` : `«${r.name}» сохранён`) }}
+          onSave={(r, updated) => { saveRecipe(r); showToast(updated ? t('add.recipeUpdated', { name: r.name }) : t('add.recipeSaved', { name: r.name })) }}
           onClose={() => setEditRcp(null)}
         />
       )}
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
-          <h2 className="h2">Добавить в «{mealLabel}»</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <h2 className="h2">{t('add.title', { meal: mealLabel })}</h2>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
 
         <div className="seg" style={{ marginBottom: 18 }}>
-          <button className={mode === 'search' ? 'on' : ''} onClick={() => setMode('search')}>Поиск</button>
-          <button className={mode === 'manual' ? 'on' : ''} onClick={() => setMode('manual')}>Вручную</button>
-          <button className="seg-scan" onClick={() => setScanning(true)} aria-label="Сканировать штрихкод" title="Сканировать штрихкод">📷</button>
+          <button className={mode === 'search' ? 'on' : ''} onClick={() => setMode('search')}>{t('add.search')}</button>
+          <button className={mode === 'manual' ? 'on' : ''} onClick={() => setMode('manual')}>{t('add.manual')}</button>
+          <button className="seg-scan" onClick={() => setScanning(true)} aria-label={t('add.scan')} title={t('add.scan')}>📷</button>
         </div>
 
         {mode === 'search' && !selected && !alcItem && !openTpl && !openRcp && (
@@ -566,8 +553,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
               type="search"
               enterKeyHint="search"
               autoComplete="off"
-              aria-label="Поиск продукта"
-              placeholder="Найдите продукт, напр. чечевица"
+              aria-label={t('add.searchAria')}
+              placeholder={t('add.searchPlaceholder')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               // Enter на мобильной клавиатуре должен убирать её и показывать
@@ -582,7 +569,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 <button
                   className={`chip ${!section ? 'on' : ''}`}
                   onClick={() => setSection(null)}
-                >Всё</button>
+                >{t('add.all')}</button>
                 {SECTIONS.map((s) => (
                   <button
                     key={s.key}
@@ -614,22 +601,22 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                   className="btn soft"
                   style={{ height: 44, marginBottom: 14 }}
                   onClick={() => setEditRcp('new')}
-                >＋ Новый рецепт</button>
+                >＋ {t('add.newRecipe')}</button>
 
                 {templates.length > 0 && (
                   <div style={{ marginBottom: 6 }}>
-                    <SectionLabel text="Мои блюда" count={templates.length} />
-                    {templates.map((t) => {
-                      const tot = templateTotals(t)
+                    <SectionLabel text={t('add.myDishes')} count={templates.length} />
+                    {templates.map((tpl) => {
+                      const tot = templateTotals(tpl)
                       return (
                         <MemoryRow
-                          key={t.id}
-                          emoji={t.emoji || '🍽️'}
-                          name={t.name}
-                          meta={`${t.items.length} ${plural(t.items.length, 'продукт', 'продукта', 'продуктов')}`}
-                          quickLabel={`${tot.kcal} ккал`}
-                          onQuick={() => addTemplate(t)}
-                          onOpen={() => setOpenTpl(t)}
+                          key={tpl.id}
+                          emoji={tpl.emoji || '🍽️'}
+                          name={tpl.name}
+                          meta={t('count.products', { count: tpl.items.length })}
+                          quickLabel={t('units.kcalN', { n: tot.kcal })}
+                          onQuick={() => addTemplate(tpl)}
+                          onOpen={() => setOpenTpl(tpl)}
                         />
                       )
                     })}
@@ -638,14 +625,14 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
 
                 {recipes.length > 0 && (
                   <div style={{ marginBottom: 6 }}>
-                    <SectionLabel text="Рецепты" count={recipes.length} />
+                    <SectionLabel text={t('add.recipes')} count={recipes.length} />
                     {recipes.map((r) => (
                       <MemoryRow
                         key={r.id}
                         emoji={r.emoji || '🍲'}
                         name={r.name}
-                        meta={`${recipePerServing(r).kcal} ккал / порция`}
-                        quickLabel="1 порция"
+                        meta={t('add.kcalPerServing', { n: recipePerServing(r).kcal })}
+                        quickLabel={amountLabel(1, 'порция')}
                         onQuick={() => addRecipe(r, 1)}
                         onOpen={() => setOpenRcp(r)}
                       />
@@ -654,12 +641,11 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 )}
 
                 {customFoods.filter((f) => f.source === 'custom').length > 0 && (
-                  <SectionLabel text="Свои продукты" count={null} />
+                  <SectionLabel text={t('add.ownFoods')} count={null} />
                 )}
                 {templates.length === 0 && recipes.length === 0 && customFoods.filter((f) => f.source === 'custom').length === 0 && (
                   <p className="muted" style={{ padding: '10px 0', fontSize: 14, lineHeight: 1.5 }}>
-                    Пока пусто. Сохраните приём пищи как блюдо из меню «⋯», заведите рецепт кнопкой выше
-                    или добавьте продукт вручную — всё окажется здесь.
+                    {t('add.mineEmpty')}
                   </p>
                 )}
               </div>
@@ -667,18 +653,18 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
 
             {q && (tplFound.length > 0 || rcpFound.length > 0) && (
               <div style={{ marginBottom: 6 }}>
-                <SectionLabel text="Моё" count={tplFound.length + rcpFound.length} />
-                {tplFound.map((t) => {
-                  const tot = templateTotals(t)
+                <SectionLabel text={t('add.sec.mine')} count={tplFound.length + rcpFound.length} />
+                {tplFound.map((tpl) => {
+                  const tot = templateTotals(tpl)
                   return (
                     <MemoryRow
-                      key={'q-tpl-' + t.id}
-                      emoji={t.emoji || '🍽️'}
-                      name={t.name}
-                      meta={`блюдо · ${t.items.length} ${plural(t.items.length, 'продукт', 'продукта', 'продуктов')} · ${tot.kcal} ккал`}
-                      quickLabel={`${tot.kcal} ккал`}
-                      onQuick={() => addTemplate(t)}
-                      onOpen={() => setOpenTpl(t)}
+                      key={'q-tpl-' + tpl.id}
+                      emoji={tpl.emoji || '🍽️'}
+                      name={tpl.name}
+                      meta={t('add.dishMeta', { list: t('count.products', { count: tpl.items.length }), n: tot.kcal })}
+                      quickLabel={t('units.kcalN', { n: tot.kcal })}
+                      onQuick={() => addTemplate(tpl)}
+                      onOpen={() => setOpenTpl(tpl)}
                     />
                   )
                 })}
@@ -687,8 +673,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                     key={'q-rcp-' + r.id}
                     emoji={r.emoji || '🍲'}
                     name={r.name}
-                    meta={`рецепт · ${recipePerServing(r).kcal} ккал / порция`}
-                    quickLabel="1 порция"
+                    meta={t('add.recipeMeta', { n: recipePerServing(r).kcal })}
+                    quickLabel={amountLabel(1, 'порция')}
                     onQuick={() => addRecipe(r, 1)}
                     onOpen={() => setOpenRcp(r)}
                   />
@@ -702,21 +688,21 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 из кастрюли», не пересчитывая ничего в уме. */}
             {!query.trim() && !section && templates.length > 0 && (
               <div style={{ marginBottom: 6 }}>
-                <SectionLabel text="Мои блюда" count={templates.length} />
-                {templates.slice(0, tplLimit).map((t) => {
-                  const tot = templateTotals(t)
+                <SectionLabel text={t('add.myDishes')} count={templates.length} />
+                {templates.slice(0, tplLimit).map((tpl) => {
+                  const tot = templateTotals(tpl)
                   return (
                     <MemoryRow
-                      key={t.id}
-                      emoji={t.emoji || '🍽️'}
-                      name={t.name}
+                      key={tpl.id}
+                      emoji={tpl.emoji || '🍽️'}
+                      name={tpl.name}
                       // Калории — только на кнопке. Раньше «391 ккал» стояло и
                       // в подписи, и на кнопке: строка от этого переносилась
                       // на две, а второе число ничего не добавляло.
-                      meta={`${t.items.length} ${plural(t.items.length, 'продукт', 'продукта', 'продуктов')}`}
-                      quickLabel={`${tot.kcal} ккал`}
-                      onQuick={() => addTemplate(t)}
-                      onOpen={() => setOpenTpl(t)}
+                      meta={t('count.products', { count: tpl.items.length })}
+                      quickLabel={t('units.kcalN', { n: tot.kcal })}
+                      onQuick={() => addTemplate(tpl)}
+                      onOpen={() => setOpenTpl(tpl)}
                     />
                   )
                 })}
@@ -724,14 +710,14 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                   <button
                     onClick={() => setTplLimit((n) => n + TPL_ROWS)}
                     style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, padding: '10px 0', minHeight: 44 }}
-                  >Ещё {templates.length - tplLimit}</button>
+                  >{t('add.more', { n: templates.length - tplLimit })}</button>
                 )}
               </div>
             )}
 
             {!query.trim() && !section && recipes.length > 0 && (
               <div style={{ marginBottom: 6 }}>
-                <SectionLabel text="Рецепты" count={recipes.length} />
+                <SectionLabel text={t('add.recipes')} count={recipes.length} />
                 {recipes.slice(0, rcpLimit).map((r) => {
                   const per = recipePerServing(r)
                   return (
@@ -739,8 +725,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                       key={r.id}
                       emoji={r.emoji || '🍲'}
                       name={r.name}
-                      meta={`${per.kcal} ккал / порция`}
-                      quickLabel="1 порция"
+                      meta={t('add.kcalPerServing', { n: per.kcal })}
+                      quickLabel={amountLabel(1, 'порция')}
                       onQuick={() => addRecipe(r, 1)}
                       onOpen={() => setOpenRcp(r)}
                     />
@@ -750,12 +736,12 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                   <button
                     onClick={() => setRcpLimit((n) => n + TPL_ROWS)}
                     style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, padding: '10px 0', minHeight: 44 }}
-                  >Ещё {recipes.length - rcpLimit}</button>
+                  >{t('add.more', { n: recipes.length - rcpLimit })}</button>
                 )}
                 <button
                   onClick={() => setEditRcp('new')}
                   style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, padding: '10px 0', minHeight: 44 }}
-                >＋ Новый рецепт</button>
+                >＋ {t('add.newRecipe')}</button>
               </div>
             )}
 
@@ -765,14 +751,14 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 разные вопросы. */}
             {!query.trim() && !section && favoriteRows.length > 0 && (
               <div style={{ marginBottom: 6 }}>
-                <SectionLabel text="Избранное" count={null} />
+                <SectionLabel text={t('add.favorites')} count={null} />
                 {favoriteRows.slice(0, favLimit).map(({ food, key, grams }) => (
                   <MemoryRow
                     key={'fav-' + key}
                     emoji={food.emoji}
-                    name={food.name}
-                    meta={grams > 0 ? `${grams} ${food.unit || 'г'} · ${scale(food, grams).kcal} ккал` : `${food.kcal} ккал / 100 ${food.unit || 'г'}`}
-                    quickLabel={grams > 0 ? `${grams} ${food.unit || 'г'}` : null}
+                    name={foodName(food.name)}
+                    meta={grams > 0 ? `${amountLabel(grams, food.unit || 'г')} · ${t('units.kcalN', { n: scale(food, grams).kcal })}` : t('add.kcalPer100', { n: food.kcal, unit: unitLabel(food.unit || 'г') })}
+                    quickLabel={grams > 0 ? amountLabel(grams, food.unit || 'г') : null}
                     onQuick={() => quickAddFavorite(food, grams)}
                     onOpen={() => pickFood(food)}
                     favorite
@@ -783,19 +769,19 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                   <button
                     onClick={() => setFavLimit((n) => n + MEMORY_ROWS)}
                     style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, padding: '10px 0', minHeight: 44 }}
-                  >Ещё {favoriteRows.length - favLimit} в избранном</button>
+                  >{t('add.moreFav', { n: favoriteRows.length - favLimit })}</button>
                 )}
               </div>
             )}
 
             {!query.trim() && !section && frequentRows.length > 0 && (
               <div style={{ marginBottom: 6 }}>
-                <SectionLabel text="Часто едите" count={null} />
+                <SectionLabel text={t('add.frequent')} count={null} />
                 {frequentRows.map((e) => (
                   <MemoryRow
                     key={'freq-' + e.key}
                     emoji={e.emoji}
-                    name={e.name}
+                    name={foodName(e.name)}
                     meta={memoryMeta(e)}
                     quickLabel={quickLabelFor(e)}
                     onQuick={() => quickAddMemory(e)}
@@ -809,12 +795,12 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
 
             {!query.trim() && !section && recentRows.length > 0 && (
               <div style={{ marginBottom: 6 }}>
-                <SectionLabel text="Недавнее" count={null} />
+                <SectionLabel text={t('add.recent')} count={null} />
                 {recentRows.map((e) => (
                   <MemoryRow
                     key={'rec-' + e.key}
                     emoji={e.emoji}
-                    name={e.name}
+                    name={foodName(e.name)}
                     meta={memoryMeta(e)}
                     quickLabel={quickLabelFor(e)}
                     onQuick={() => quickAddMemory(e)}
@@ -829,7 +815,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
             {section !== 'alcohol' && local.length > 0 && (
               <>
                 <SectionLabel
-                  text={query.trim() ? 'Найдено' : section ? SECTIONS.find((s) => s.key === section)?.label : 'Вся база'}
+                  text={query.trim() ? t('add.found') : section ? SECTIONS.find((s) => s.key === section)?.label : t('add.allDb')}
                   count={local.length}
                 />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -848,7 +834,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                         onDelete={f.source === 'custom' ? () => removeCustomFood(f.id) : null}
                         favorite={favKeys.has(favoriteKey(f))}
                         onFav={simple ? () => toggleFav(f) : null}
-                        quickLabel={g > 0 ? `${g} ${f.unit || 'г'}` : null}
+                        quickLabel={g > 0 ? amountLabel(g, f.unit || 'г') : null}
                         onQuick={g > 0 ? () => quickAdd({ ...scale(f, g), name: f.name, emoji: f.emoji, unit: f.unit || 'г', cat: f.cat, grams: g }) : null}
                       />
                     )
@@ -859,14 +845,14 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                     className="btn soft"
                     style={{ marginTop: 12 }}
                     onClick={() => setLimit((n) => n + PAGE)}
-                  >Показать ещё {Math.min(PAGE, local.length - limit)} из {local.length - limit}</button>
+                  >{t('add.showMore', { n: Math.min(PAGE, local.length - limit), rest: local.length - limit })}</button>
                 )}
               </>
             )}
 
             {query.trim().length >= 2 && (
               <div style={{ marginTop: 18 }}>
-                <SectionLabel text="Глобальная база" count={remote.length || null} />
+                <SectionLabel text={t('add.globalDb')} count={remote.length || null} />
                 {remoteState === 'loading' && (
                   <div style={{ display: 'flex', flexDirection: 'column' }} aria-live="polite">
                     {[0, 1, 2].map((i) => <SkeletonRow key={i} />)}
@@ -876,15 +862,13 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 {(remoteState === 'error' || remoteState === 'offline') && (
                   <div style={{ padding: '8px 0' }}>
                     <p className="muted" style={{ fontSize: 14, margin: '0 0 10px' }}>
-                      {remoteState === 'offline'
-                        ? 'Нет интернета. Своё и найденное выше доступны без сети.'
-                        : 'Глобальная база не ответила. Результаты выше — из вашей базы.'}
+                      {remoteState === 'offline' ? t('add.offline') : t('add.remoteError')}
                     </p>
-                    <button className="chip" onClick={() => setRetryTick((n) => n + 1)}>Повторить</button>
+                    <button className="chip" onClick={() => setRetryTick((n) => n + 1)}>{t('common.retry')}</button>
                   </div>
                 )}
                 {remoteState === 'empty' && (
-                  <p className="muted" style={{ padding: '8px 0', fontSize: 14 }}>В глобальной базе ничего не нашлось.</p>
+                  <p className="muted" style={{ padding: '8px 0', fontSize: 14 }}>{t('add.remoteEmpty')}</p>
                 )}
                 {remote.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -906,39 +890,37 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 Показываем, что можно сделать дальше, а не «нет результатов». */}
             {query.trim().length >= 2 && local.length === 0 && remote.length === 0 && remoteState !== 'loading' && (
               <div style={{ marginTop: 18 }}>
-                <p className="meal-name" style={{ margin: '0 0 6px' }}>Не нашли «{clip(query.trim())}»</p>
+                <p className="meal-name" style={{ margin: '0 0 6px' }}>{t('add.notFound', { q: clip(query.trim()) })}</p>
                 <p className="muted" style={{ fontSize: 14, margin: '0 0 12px' }}>
-                  {query.trim().split(/\s+/).length > 1
-                    ? 'Попробуйте короче — одно слово вместо нескольких, или без бренда.'
-                    : 'Проверьте написание или попробуйте более общее название.'}
+                  {query.trim().split(/\s+/).length > 1 ? t('add.tryShorter') : t('add.checkSpelling')}
                 </p>
                 <div className="row wrap gap8" style={{ marginBottom: 12 }}>
                   {query.trim().split(/\s+/).length > 1 && (
                     <button className="chip" onClick={() => setQuery(query.trim().split(/\s+/)[0])}>
-                      Искать «{clip(query.trim().split(/\s+/)[0], 16)}»
+                      {t('add.searchFor', { q: clip(query.trim().split(/\s+/)[0], 16) })}
                     </button>
                   )}
-                  <button className="chip" onClick={() => { setQuery(''); setSection(null) }}>Показать категории</button>
-                  <button className="chip" onClick={() => setScanning(true)}>📷 Сканировать штрихкод</button>
+                  <button className="chip" onClick={() => { setQuery(''); setSection(null) }}>{t('add.showCategories')}</button>
+                  <button className="chip" onClick={() => setScanning(true)}>📷 {t('add.scan')}</button>
                 </div>
               </div>
             )}
 
             {local.length === 0 && !query.trim() && !hasMemory && section !== 'alcohol' && section !== 'mine' && (
-              <p className="muted" style={{ padding: '10px 0' }}>Начните вводить название продукта.</p>
+              <p className="muted" style={{ padding: '10px 0' }}>{t('add.startTyping')}</p>
             )}
 
             {/* Ручной ввод — всегда доступный выход, когда базы не хватило.
                 Название уже набрано: печатать его второй раз не нужно. */}
             {query.trim() && (
               <button className="btn soft" style={{ marginTop: 14 }} onClick={startManual}>
-                Нет в списке? Добавить «{clip(query.trim())}» вручную
+                {t('add.addManually', { q: clip(query.trim()) })}
               </button>
             )}
 
             {!query.trim() && section !== 'alcohol' && (
               <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 18, textAlign: 'center' }}>
-                Глобальные данные — Open Food Facts (значения на 100 г)
+                {t('add.offNote')}
               </p>
             )}
           </>
@@ -962,7 +944,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
             tpl={openTpl}
             onBack={() => setOpenTpl(null)}
             onAdd={() => addTemplate(openTpl)}
-            onDelete={() => { removeTemplate(openTpl.id); setOpenTpl(null); showToast('Блюдо удалено') }}
+            onDelete={() => { removeTemplate(openTpl.id); setOpenTpl(null); showToast(t('add.dishDeleted')) }}
           />
         )}
 
@@ -972,7 +954,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
             onBack={() => setOpenRcp(null)}
             onAdd={(n) => addRecipe(openRcp, n)}
             onEdit={() => { setEditRcp(openRcp); setOpenRcp(null) }}
-            onDelete={() => { removeRecipe(openRcp.id); setOpenRcp(null); showToast('Рецепт удалён') }}
+            onDelete={() => { removeRecipe(openRcp.id); setOpenRcp(null); showToast(t('add.recipeDeleted')) }}
           />
         )}
 
@@ -1000,12 +982,12 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
             <div className="row gap12" style={{ marginBottom: 18 }}>
               <FoodThumb key={selected.photo || selected.name} food={selected} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="meal-name" style={{ fontSize: 18 }}>{selected.name}</div>
-                <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={clearFood}>← выбрать другой</button>
+                <div className="meal-name" style={{ fontSize: 18 }}>{foodName(selected.name)}</div>
+                <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={clearFood}>{t('add.pickOther')}</button>
               </div>
               <button
                 onClick={() => toggleFav(selected)}
-                aria-label={favKeys.has(favoriteKey(selected)) ? 'Убрать из избранного' : 'Добавить в избранное'}
+                aria-label={favKeys.has(favoriteKey(selected)) ? t('add.unfav') : t('add.fav')}
                 aria-pressed={favKeys.has(favoriteKey(selected))}
                 style={{
                   width: 44, height: 44, flex: '0 0 auto', fontSize: 20,
@@ -1016,7 +998,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
 
             {selected.hasVariants && (
               <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>Способ приготовления</label>
+                <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>{t('add.method')}</label>
                 <div className="row wrap gap8">
                   {selected.methods.map((m) => (
                     <button
@@ -1025,8 +1007,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                       onClick={() => setMethod(m)}
                       style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '8px 14px', lineHeight: 1.25 }}
                     >
-                      <span style={{ fontSize: 15 }}>{m.label}</span>
-                      <span style={{ fontSize: 11, opacity: 0.75 }} className="tabular">{m.kcal} ккал</span>
+                      <span style={{ fontSize: 15 }}>{methodLabel(m.label)}</span>
+                      <span style={{ fontSize: 11, opacity: 0.75 }} className="tabular">{t('units.kcalN', { n: m.kcal })}</span>
                     </button>
                   ))}
                 </div>
@@ -1034,7 +1016,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
             )}
 
             <div className="field">
-              <label>{unit === 'мл' ? 'Объём, мл' : 'Порция, грамм'}</label>
+              <label>{unit === 'мл' ? t('day.volumeMl') : t('add.portionGrams')}</label>
               {(() => {
                 const base = getPortions(selected)
                 // Привычная порция человека — первой и подписанной «как обычно»:
@@ -1043,30 +1025,30 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 // правки — подсказка не подменяет фактическое количество.
                 const mine = memoryPortion(foodMemory, { name: selected.name, unit })
                 const ps = mine > 0
-                  ? [{ label: 'как обычно', grams: mine }, ...base.filter((p) => p.grams !== mine)].slice(0, 6)
+                  ? [{ label: t('add.asUsual'), grams: mine }, ...base.filter((p) => p.grams !== mine)].slice(0, 6)
                   : base
                 return (
                   <>
                     {base[0] && (
                       <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 8px' }}>
-                        Не взвешивая: {base[0].label} ≈ {base[0].grams} {unit}
+                        {t('add.noScale', { label: portionLabel(base[0].label), n: base[0].grams, unit: unitLabel(unit) })}
                       </p>
                     )}
                     <input
                       className="input" type="text" inputMode="decimal" value={grams}
                       onChange={(e) => setGrams(sanitizeAmount(e.target.value))}
-                      aria-label={unit === 'мл' ? 'Объём, мл' : 'Порция, грамм'}
+                      aria-label={unit === 'мл' ? t('day.volumeMl') : t('add.portionGrams')}
                       style={{ marginBottom: 10 }}
                     />
                     {g > HUGE_PORTION && (
                       <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '0 0 10px' }}>
-                        {g} {unit} — это много. Проверьте, не лишний ли ноль.
+                        {t('add.huge', { amount: amountLabel(g, unit) })}
                       </p>
                     )}
                     <div className="row wrap gap8">
                       {ps.map((p) => (
                         <button key={p.label} className={`chip ${g === p.grams ? 'on' : ''}`} onClick={() => setGrams(String(p.grams))}>
-                          {p.label} · {p.grams} {unit}
+                          {portionLabel(p.label)} · {amountLabel(p.grams, unit)}
                         </button>
                       ))}
                     </div>
@@ -1079,14 +1061,14 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
               <div className="field">
                 <div className="row between" style={{ alignItems: 'center' }}>
                   <div>
-                    <label style={{ marginBottom: 2 }}>Сахар, ч.л.</label>
-                    <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>Сколько ложек положили в напиток</p>
+                    <label style={{ marginBottom: 2 }}>{t('add.sugarTsp')}</label>
+                    <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>{t('add.sugarHint')}</p>
                   </div>
                   <Stepper value={sugar} set={setSugar} min={0} />
                 </div>
                 {sugar > 0 && (
                   <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '8px 0 0' }}>
-                    🥄 {sugar} ч.л. ≈ {sugar * SUGAR_TSP.grams} г · +{sugar * SUGAR_TSP.kcal} ккал · +{sugar * SUGAR_TSP.carbs} г сахара
+                    🥄 {t('add.sugarLine', { n: sugar, g: sugar * SUGAR_TSP.grams, kcal: sugar * SUGAR_TSP.kcal, c: sugar * SUGAR_TSP.carbs })}
                   </p>
                 )}
               </div>
@@ -1094,150 +1076,150 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
 
             {needFill && (
               <div className="card" style={{ padding: 14, marginBottom: 14, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
-                <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 2 }}>БЖУ нет в базе</div>
+                <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 2 }}>{t('add.noMacros')}</div>
                 <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 10px' }}>
-                  Известна только калорийность. Впишите с этикетки, на 100 {unit} — или оставьте пустым, тогда останется «неизвестно».
+                  {t('add.noMacrosText', { unit: unitLabel(unit) })}
                 </p>
                 <div className="row gap8">
-                  <input className="input" type="number" inputMode="decimal" placeholder="Белки" aria-label={`Белки на 100 ${unit}`}
+                  <input className="input" type="number" inputMode="decimal" placeholder={t('macro.protein')} aria-label={t('add.per100', { name: t('macro.protein'), unit: unitLabel(unit) })}
                     value={fill.protein} onChange={(e) => setFill({ ...fill, protein: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
-                  <input className="input" type="number" inputMode="decimal" placeholder="Углеводы" aria-label={`Углеводы на 100 ${unit}`}
+                  <input className="input" type="number" inputMode="decimal" placeholder={t('macro.carbs')} aria-label={t('add.per100', { name: t('macro.carbs'), unit: unitLabel(unit) })}
                     value={fill.carbs} onChange={(e) => setFill({ ...fill, carbs: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
-                  <input className="input" type="number" inputMode="decimal" placeholder="Жиры" aria-label={`Жиры на 100 ${unit}`}
+                  <input className="input" type="number" inputMode="decimal" placeholder={t('macro.fat')} aria-label={t('add.per100', { name: t('macro.fat'), unit: unitLabel(unit) })}
                     value={fill.fat} onChange={(e) => setFill({ ...fill, fat: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
                 </div>
               </div>
             )}
 
             <div className="row gap8" style={{ marginBottom: 22 }}>
-              <PreviewStat label="ккал" v={preview.kcal + sugar * SUGAR_TSP.kcal} />
-              <PreviewStat label="белки" v={preview.protein} />
-              <PreviewStat label="угл." v={preview.carbs == null ? null : round1(preview.carbs + sugar * SUGAR_TSP.carbs)} />
-              <PreviewStat label="жиры" v={preview.fat} />
+              <PreviewStat label={t('units.kcal')} v={preview.kcal + sugar * SUGAR_TSP.kcal} />
+              <PreviewStat label={t('day.proteinShort')} v={preview.protein} />
+              <PreviewStat label={t('day.carbsShort')} v={preview.carbs == null ? null : round1(preview.carbs + sugar * SUGAR_TSP.carbs)} />
+              <PreviewStat label={t('day.fatShort')} v={preview.fat} />
             </div>
-            <button className="btn" onClick={addPreset} disabled={g <= 0}>Добавить {preview.kcal + sugar * SUGAR_TSP.kcal} ккал</button>
+            <button className="btn" onClick={addPreset} disabled={g <= 0}>{t('add.addKcal', { n: preview.kcal + sugar * SUGAR_TSP.kcal })}</button>
           </div>
         )}
 
         {mode === 'manual' && (
           <div>
             <div className="seg" style={{ marginBottom: 18 }}>
-              <button className={manualKind === 'food' ? 'on' : ''} onClick={() => setManualKind('food')}>🍽️ Еда</button>
-              <button className={manualKind === 'drink' ? 'on' : ''} onClick={() => setManualKind('drink')}>🥤 Напиток</button>
+              <button className={manualKind === 'food' ? 'on' : ''} onClick={() => setManualKind('food')}>🍽️ {t('add.food')}</button>
+              <button className={manualKind === 'drink' ? 'on' : ''} onClick={() => setManualKind('drink')}>🥤 {t('add.drink')}</button>
             </div>
 
             {manualKind === 'food' && (
               <>
                 <div className="field">
-                  <label>Название</label>
-                  <input className="input" placeholder="Напр. Домашний борщ" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} />
+                  <label>{t('template.name')}</label>
+                  <input className="input" placeholder={t('add.foodNamePh')} value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Значения указаны</label>
+                  <label>{t('add.basis')}</label>
                   <div className="seg">
-                    <button className={manualBasis === 'per100' ? 'on' : ''} onClick={() => setManualBasis('per100')}>На 100 г</button>
-                    <button className={manualBasis === 'perPortion' ? 'on' : ''} onClick={() => setManualBasis('perPortion')}>За порцию</button>
+                    <button className={manualBasis === 'per100' ? 'on' : ''} onClick={() => setManualBasis('per100')}>{t('add.per100g')}</button>
+                    <button className={manualBasis === 'perPortion' ? 'on' : ''} onClick={() => setManualBasis('perPortion')}>{t('add.perPortion')}</button>
                   </div>
                 </div>
 
                 {manualBasis === 'perPortion' && (
                   <div className="field">
-                    <label>Размер порции, г</label>
+                    <label>{t('add.portionSize')}</label>
                     <input className="input" type="number" inputMode="numeric" placeholder="150" value={manual.portion} onChange={(e) => setManual({ ...manual, portion: e.target.value })} />
                   </div>
                 )}
 
                 <div className="field">
-                  <label>Калории, ккал</label>
+                  <label>{t('add.kcalField')}</label>
                   <input className="input" type="number" inputMode="numeric" placeholder="350" value={manual.kcal} onChange={(e) => setManual({ ...manual, kcal: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Белки, г</label>
+                  <label>{t('add.proteinField')}</label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Углеводы, г</label>
+                  <label>{t('add.carbsField')}</label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} />
                 </div>
-                <div className="field" style={{ marginLeft: 18, borderLeft: '2px solid var(--border)', paddingLeft: 12 }}>
-                  <label>из них сахар, г <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(необязательно)</span></label>
+                <div className="field" style={{ marginInlineStart: 18, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 12 }}>
+                  <label>{t('add.sugarField')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('common.optional')}</span></label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.sugar} onChange={(e) => setManual({ ...manual, sugar: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Жиры, г</label>
+                  <label>{t('add.fatField')}</label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.fat} onChange={(e) => setManual({ ...manual, fat: e.target.value })} />
                 </div>
-                <div className="field" style={{ marginLeft: 18, borderLeft: '2px solid var(--border)', paddingLeft: 12 }}>
-                  <label>из них насыщенные, г <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(необязательно)</span></label>
+                <div className="field" style={{ marginInlineStart: 18, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 12 }}>
+                  <label>{t('add.satFatField')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('common.optional')}</span></label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.satFat} onChange={(e) => setManual({ ...manual, satFat: e.target.value })} />
                 </div>
 
                 <ManualNotes check={manualCheck} />
-                <ManualActions check={manualCheck} amount={`${manualState.addGrams} г`} onSave={saveToMine} />
+                <ManualActions check={manualCheck} amount={amountLabel(manualState.addGrams, 'г')} onSave={saveToMine} />
               </>
             )}
 
             {manualKind === 'drink' && (
               <>
                 <div className="field">
-                  <label>Название</label>
-                  <input className="input" placeholder="Напр. Домашний лимонад" value={manualDrink.name} onChange={(e) => setManualDrink({ ...manualDrink, name: e.target.value })} />
+                  <label>{t('template.name')}</label>
+                  <input className="input" placeholder={t('add.drinkNamePh')} value={manualDrink.name} onChange={(e) => setManualDrink({ ...manualDrink, name: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Значения указаны</label>
+                  <label>{t('add.basis')}</label>
                   <div className="seg">
-                    <button className={drinkBasis === 'per100' ? 'on' : ''} onClick={() => setDrinkBasis('per100')}>На 100 мл</button>
-                    <button className={drinkBasis === 'perServing' ? 'on' : ''} onClick={() => setDrinkBasis('perServing')}>За объём</button>
+                    <button className={drinkBasis === 'per100' ? 'on' : ''} onClick={() => setDrinkBasis('per100')}>{t('add.per100ml')}</button>
+                    <button className={drinkBasis === 'perServing' ? 'on' : ''} onClick={() => setDrinkBasis('perServing')}>{t('add.perVolume')}</button>
                   </div>
                 </div>
 
                 {drinkBasis === 'perServing' && (
                   <div className="field">
-                    <label>Объём, мл</label>
+                    <label>{t('day.volumeMl')}</label>
                     <input className="input" type="number" inputMode="numeric" placeholder="250" value={manualDrink.ml} onChange={(e) => setManualDrink({ ...manualDrink, ml: e.target.value })} />
                   </div>
                 )}
 
                 <div className="field">
-                  <label>Калории, ккал</label>
+                  <label>{t('add.kcalField')}</label>
                   <input className="input" type="number" inputMode="numeric" placeholder="42" value={manualDrink.kcal} onChange={(e) => setManualDrink({ ...manualDrink, kcal: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Белки, г</label>
+                  <label>{t('add.proteinField')}</label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.protein} onChange={(e) => setManualDrink({ ...manualDrink, protein: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Углеводы, г</label>
+                  <label>{t('add.carbsField')}</label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.carbs} onChange={(e) => setManualDrink({ ...manualDrink, carbs: e.target.value })} />
                 </div>
-                <div className="field" style={{ marginLeft: 18, borderLeft: '2px solid var(--border)', paddingLeft: 12 }}>
-                  <label>из них сахар, г <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(необязательно)</span></label>
+                <div className="field" style={{ marginInlineStart: 18, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 12 }}>
+                  <label>{t('add.sugarField')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('common.optional')}</span></label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.sugar} onChange={(e) => setManualDrink({ ...manualDrink, sugar: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Жиры, г</label>
+                  <label>{t('add.fatField')}</label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.fat} onChange={(e) => setManualDrink({ ...manualDrink, fat: e.target.value })} />
                 </div>
-                <div className="field" style={{ marginLeft: 18, borderLeft: '2px solid var(--border)', paddingLeft: 12 }}>
-                  <label>из них насыщенные, г <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(необязательно)</span></label>
+                <div className="field" style={{ marginInlineStart: 18, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 12 }}>
+                  <label>{t('add.satFatField')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('common.optional')}</span></label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.satFat} onChange={(e) => setManualDrink({ ...manualDrink, satFat: e.target.value })} />
                 </div>
 
                 <div className="field">
-                  <label>Кофеин, мг <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(необязательно)</span></label>
+                  <label>{t('add.caffeineField')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('common.optional')}</span></label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manualDrink.caffeine} onChange={(e) => setManualDrink({ ...manualDrink, caffeine: e.target.value })} />
                 </div>
 
                 <ManualNotes check={manualCheck} />
-                <ManualActions check={manualCheck} amount={`${manualState.addGrams} мл`} onSave={saveToMine} />
+                <ManualActions check={manualCheck} amount={amountLabel(manualState.addGrams, 'мл')} onSave={saveToMine} />
               </>
             )}
           </div>
@@ -1269,22 +1251,22 @@ function AlcoholSection({ subTab, setSubTab, alcQuery, setAlcQuery, onPick }) {
   return (
     <div>
       <div className="seg" style={{ marginBottom: 14 }}>
-        <button className={subTab === 'beer' ? 'on' : ''} onClick={() => setSubTab('beer')}>🍺 Пиво</button>
-        <button className={subTab === 'spirits' ? 'on' : ''} onClick={() => setSubTab('spirits')}>🥃 Крепкое</button>
-        <button className={subTab === 'cocktails' ? 'on' : ''} onClick={() => setSubTab('cocktails')}>🍹 Коктейли</button>
+        <button className={subTab === 'beer' ? 'on' : ''} onClick={() => setSubTab('beer')}>🍺 {t('add.beer')}</button>
+        <button className={subTab === 'spirits' ? 'on' : ''} onClick={() => setSubTab('spirits')}>🥃 {t('add.spirits')}</button>
+        <button className={subTab === 'cocktails' ? 'on' : ''} onClick={() => setSubTab('cocktails')}>🍹 {t('add.cocktails')}</button>
       </div>
 
       {subTab === 'beer' && (
         <div>
-          <p style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 10 }}>Выберите марку — укажите объём и % алкоголя.</p>
+          <p style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 10 }}>{t('add.beerHint')}</p>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {BEER_BRANDS.map((b) => (
-              <button key={b.name} className="meal-item" style={{ textAlign: 'left', width: '100%' }}
+              <button key={b.name} className="meal-item" style={{ textAlign: 'start', width: '100%' }}
                 onClick={() => onPick({ ...b, category: 'beer', emoji: b.na ? '🫗' : '🍺', defaultMl: 330 })}>
                 <span className="meal-emoji">{b.na ? '🫗' : '🍺'}</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <span className="meal-name" style={{ display: 'block' }}>{b.name}{b.na ? ' (безалкогольное)' : ''}</span>
-                  <span className="meal-meta">{b.alc}% · {b.kcal100} ккал/100 мл</span>
+                  <span className="meal-name" style={{ display: 'block' }}>{b.name}{b.na ? ` ${t('add.nonAlc')}` : ''}</span>
+                  <span className="meal-meta">{b.alc}% · {t('add.kcalPer100ml', { n: b.kcal100 })}</span>
                 </span>
                 <span style={{ color: 'var(--primary)', fontSize: 20 }}>›</span>
               </button>
@@ -1297,25 +1279,25 @@ function AlcoholSection({ subTab, setSubTab, alcQuery, setAlcQuery, onPick }) {
         <div>
           {SPIRIT_TYPES.map((st) => (
             <div key={st.key} style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8 }}>{st.emoji} {st.label}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8 }}>{st.emoji} {alcLabel(st.label)}</div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {st.brands.map((brand) => (
-                  <button key={brand} className="meal-item" style={{ textAlign: 'left', width: '100%' }}
+                  <button key={brand} className="meal-item" style={{ textAlign: 'start', width: '100%' }}
                     onClick={() => onPick({ name: brand, category: 'spirit', spiritLabel: st.label, emoji: st.emoji, defaultAlc: st.defaultAlc, defaultMl: 50 })}>
                     <span className="meal-emoji">{st.emoji}</span>
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span className="meal-name" style={{ display: 'block' }}>{brand}</span>
-                      <span className="meal-meta">{st.label} · обычно {st.defaultAlc}%</span>
+                      <span className="meal-meta">{t('add.spiritMeta', { label: alcLabel(st.label), n: st.defaultAlc })}</span>
                     </span>
                     <span style={{ color: 'var(--primary)', fontSize: 20 }}>›</span>
                   </button>
                 ))}
-                <button className="meal-item" style={{ textAlign: 'left', width: '100%' }}
+                <button className="meal-item" style={{ textAlign: 'start', width: '100%' }}
                   onClick={() => onPick({ name: `Своя ${st.label.toLowerCase()}`, category: 'spirit', spiritLabel: st.label, emoji: st.emoji, defaultAlc: st.defaultAlc, defaultMl: 50, custom: true })}>
                   <span className="meal-emoji">{st.emoji}</span>
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <span className="meal-name" style={{ display: 'block' }}>Своя {st.label.toLowerCase()}</span>
-                    <span className="meal-meta">Ввести % вручную</span>
+                    <span className="meal-name" style={{ display: 'block' }}>{foodName(`Своя ${st.label.toLowerCase()}`)}</span>
+                    <span className="meal-meta">{t('add.enterPct')}</span>
                   </span>
                   <span style={{ color: 'var(--primary)', fontSize: 20 }}>›</span>
                 </button>
@@ -1327,15 +1309,15 @@ function AlcoholSection({ subTab, setSubTab, alcQuery, setAlcQuery, onPick }) {
 
       {subTab === 'cocktails' && (
         <div>
-          <input className="input" placeholder="Поиск на русском или English" value={alcQuery} onChange={(e) => setAlcQuery(e.target.value)} style={{ marginBottom: 12 }} />
+          <input className="input" placeholder={t('add.cocktailSearch')} value={alcQuery} onChange={(e) => setAlcQuery(e.target.value)} style={{ marginBottom: 12 }} />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {filteredCocktails.map((c) => (
-              <button key={c.name} className="meal-item" style={{ textAlign: 'left', width: '100%' }}
+              <button key={c.name} className="meal-item" style={{ textAlign: 'start', width: '100%' }}
                 onClick={() => onPick({ ...c, category: 'cocktail', defaultMl: 200 })}>
                 <span className="meal-emoji">{c.emoji}</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <span className="meal-name" style={{ display: 'block' }}>{c.name}</span>
-                  <span className="meal-meta">{c.nameEn} · {c.alc}% · {c.kcal100} ккал/100 мл</span>
+                  <span className="meal-name" style={{ display: 'block' }}>{foodName(c.name)}</span>
+                  <span className="meal-meta">{c.nameEn} · {c.alc}% · {t('add.kcalPer100ml', { n: c.kcal100 })}</span>
                 </span>
                 <span style={{ color: 'var(--primary)', fontSize: 20 }}>›</span>
               </button>
@@ -1387,47 +1369,47 @@ function AlcoholBuilder({ item, onBack, onAdd, onClose, type }) {
       <div className="row gap12" style={{ marginBottom: 18 }}>
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{item.emoji}</span>
         <div style={{ flex: 1 }}>
-          <div className="meal-name" style={{ fontSize: 18 }}>{item.name}</div>
-          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← назад</button>
+          <div className="meal-name" style={{ fontSize: 18 }}>{foodName(item.name)}</div>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>{t('add.back')}</button>
         </div>
       </div>
 
       <div className="field">
-        <label>Объём, мл</label>
+        <label>{t('day.volumeMl')}</label>
         <input className="input" type="text" inputMode="decimal" value={ml} onChange={(e) => setMl(e.target.value)} style={{ marginBottom: 10 }} />
         <div className="row wrap gap8">
           {quickMls.map((v) => (
             <button key={v} className={`chip ${mlN === v ? 'on' : ''}`} onClick={() => setMl(String(v))}>
-              {v} мл
+              {t('units.mlN', { n: v })}
             </button>
           ))}
         </div>
       </div>
 
       <div className="field">
-        <label>% алкоголя</label>
+        <label>{t('add.alcPct')}</label>
         <input className="input" type="text" inputMode="decimal" value={alcPct} onChange={(e) => setAlcPct(e.target.value)} />
       </div>
 
       <div className="field">
-        <label>Калории, ккал <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(необязательно — считаем автоматически)</span></label>
+        <label>{t('add.kcalField')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('add.autoKcal')}</span></label>
         <input
           className="input"
           type="number"
           inputMode="numeric"
-          placeholder={`≈ ${kcalAuto} (авто)`}
+          placeholder={t('add.autoPh', { n: kcalAuto })}
           value={kcalCustom}
           onChange={(e) => setKcalCustom(e.target.value)}
         />
       </div>
 
       <div className="row gap8" style={{ marginBottom: 22 }}>
-        <PreviewStat label="ккал" v={kcalFinal} />
-        <PreviewStat label="мл" v={mlN} />
-        <PreviewStat label="алк.%" v={alcN} />
+        <PreviewStat label={t('units.kcal')} v={kcalFinal} />
+        <PreviewStat label={t('units.ml')} v={mlN} />
+        <PreviewStat label={t('add.alcShort')} v={alcN} />
       </div>
 
-      <button className="btn" onClick={add} disabled={mlN <= 0}>Добавить {kcalFinal} ккал</button>
+      <button className="btn" onClick={add} disabled={mlN <= 0}>{t('add.addKcal', { n: kcalFinal })}</button>
     </div>
   )
 }
@@ -1476,25 +1458,25 @@ function ProteinShakeBuilder({ selected, prefs, setPref, onBack, onAdd, onClose,
       <div className="row gap12" style={{ marginBottom: 18 }}>
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
-          <div className="meal-name" style={{ fontSize: 18 }}>Протеиновый шейк</div>
-          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
+          <div className="meal-name" style={{ fontSize: 18 }}>{foodName('Протеиновый шейк')}</div>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>{t('add.pickOther')}</button>
         </div>
       </div>
 
-      <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>Основа</label>
+      <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>{t('add.base')}</label>
       <div className="seg" style={{ marginBottom: 18 }}>
-        <button className={base === 'water' ? 'on' : ''} onClick={() => setBase('water')}>💧 Вода</button>
-        <button className={base === 'milk' ? 'on' : ''} onClick={() => setBase('milk')}>🥛 Молоко</button>
+        <button className={base === 'water' ? 'on' : ''} onClick={() => setBase('water')}>💧 {t('add.water')}</button>
+        <button className={base === 'milk' ? 'on' : ''} onClick={() => setBase('milk')}>🥛 {t('add.milk')}</button>
       </div>
 
       {base === 'milk' && (
         <>
           <div className="field">
-            <label>Сколько молока, мл</label>
+            <label>{t('add.milkMl')}</label>
             <input className="input" type="number" inputMode="numeric" value={milkMl} onChange={(e) => setMilkMl(e.target.value)} />
           </div>
           <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>Жирность молока</label>
+            <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>{t('add.milkFat')}</label>
             <div className="row wrap gap8">
               {MILKS.map((m) => (
                 <button key={m.key} className={`pill ${milkKey === m.key ? 'on' : ''}`} onClick={() => setMilkKey(m.key)}>{m.label}</button>
@@ -1505,27 +1487,27 @@ function ProteinShakeBuilder({ selected, prefs, setPref, onBack, onAdd, onClose,
       )}
 
       <div className="field">
-        <label>Сколько порошка протеина, г</label>
+        <label>{t('add.powderG')}</label>
         <input className="input" type="number" inputMode="numeric" value={powder} onChange={(e) => setPowder(e.target.value)} />
       </div>
       <div className="row gap8">
         <div className="field" style={{ flex: 1 }}>
-          <label>Белка на 100 г (с банки)</label>
+          <label>{t('add.powderProtein')}</label>
           <input className="input" type="number" inputMode="numeric" value={per100} onChange={(e) => setPer100(e.target.value)} />
         </div>
         <div className="field" style={{ flex: 1 }}>
-          <label>Ккал на 100 г (с банки)</label>
+          <label>{t('add.powderKcal')}</label>
           <input className="input" type="number" inputMode="numeric" placeholder="380" value={kcalPer100} onChange={(e) => setKcalPer100(e.target.value)} />
         </div>
       </div>
 
       <div className="row gap8" style={{ margin: '4px 0 22px' }}>
-        <PreviewStat label="ккал" v={res.kcal} />
-        <PreviewStat label="белки" v={res.protein} />
-        <PreviewStat label="угл." v={res.carbs} />
-        <PreviewStat label="жиры" v={res.fat} />
+        <PreviewStat label={t('units.kcal')} v={res.kcal} />
+        <PreviewStat label={t('day.proteinShort')} v={res.protein} />
+        <PreviewStat label={t('day.carbsShort')} v={res.carbs} />
+        <PreviewStat label={t('day.fatShort')} v={res.fat} />
       </div>
-      <button className="btn" onClick={add} disabled={!valid}>Добавить {res.kcal} ккал</button>
+      <button className="btn" onClick={add} disabled={!valid}>{t('add.addKcal', { n: res.kcal })}</button>
     </div>
   )
 }
@@ -1570,42 +1552,42 @@ function CustomDrinkBuilder({ selected, onBack, onAdd, onClose, addCustomFood, t
       <div className="row gap12" style={{ marginBottom: 18 }}>
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
-          <div className="meal-name" style={{ fontSize: 18 }}>Свой напиток</div>
-          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
+          <div className="meal-name" style={{ fontSize: 18 }}>{foodName('Свой напиток')}</div>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>{t('add.pickOther')}</button>
         </div>
       </div>
 
-      <p className="muted" style={{ fontSize: 13, marginBottom: 16 }}>Введите данные с этикетки на 100 мл — напиток сохранится, и в следующий раз нужно будет указать только объём.</p>
+      <p className="muted" style={{ fontSize: 13, marginBottom: 16 }}>{t('add.customDrinkHint')}</p>
 
       <div className="field">
-        <label>Название</label>
-        <input className="input" placeholder="Напр. Домашний лимонад" value={name} onChange={(e) => setName(e.target.value)} />
+        <label>{t('template.name')}</label>
+        <input className="input" placeholder={t('add.drinkNamePh')} value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div className="row gap8">
         <div className="field" style={{ flex: 1 }}>
-          <label>Ккал / 100 мл</label>
+          <label>{t('add.kcal100ml')}</label>
           <input className="input" type="number" inputMode="numeric" placeholder="42" value={kcal100} onChange={(e) => setKcal100(e.target.value)} />
         </div>
         <div className="field" style={{ flex: 1 }}>
-          <label>Сахар / 100 мл</label>
+          <label>{t('add.sugar100ml')}</label>
           <input className="input" type="number" inputMode="decimal" placeholder="10" value={sugar100} onChange={(e) => setSugar100(e.target.value)} />
         </div>
         <div className="field" style={{ flex: 1 }}>
-          <label>Белок / 100 мл</label>
+          <label>{t('add.protein100ml')}</label>
           <input className="input" type="number" inputMode="decimal" placeholder="0" value={protein100} onChange={(e) => setProtein100(e.target.value)} />
         </div>
       </div>
       <div className="field">
-        <label>Сколько выпили, мл</label>
+        <label>{t('add.drankMl')}</label>
         <input className="input" type="number" inputMode="numeric" value={ml} onChange={(e) => setMl(e.target.value)} />
       </div>
 
       <div className="row gap8" style={{ margin: '4px 0 22px' }}>
-        <PreviewStat label="ккал" v={res.kcal} />
-        <PreviewStat label="сахар" v={res.carbs} />
-        <PreviewStat label="белки" v={res.protein} />
+        <PreviewStat label={t('units.kcal')} v={res.kcal} />
+        <PreviewStat label={t('add.sugarShort')} v={res.carbs} />
+        <PreviewStat label={t('day.proteinShort')} v={res.protein} />
       </div>
-      <button className="btn" onClick={add} disabled={!valid}>Сохранить и добавить {res.kcal} ккал</button>
+      <button className="btn" onClick={add} disabled={!valid}>{t('add.saveAddKcal', { n: res.kcal })}</button>
     </div>
   )
 }
@@ -1613,9 +1595,9 @@ function CustomDrinkBuilder({ selected, onBack, onAdd, onClose, addCustomFood, t
 function Stepper({ value, set, min = 0, suffix }) {
   return (
     <div className="row gap8" style={{ alignItems: 'center' }}>
-      <button className="iconbtn" onClick={() => set(Math.max(min, value - 1))} aria-label="Меньше">−</button>
+      <button className="iconbtn" onClick={() => set(Math.max(min, value - 1))} aria-label={t('add.less')}>−</button>
       <span className="tabular" style={{ minWidth: 54, textAlign: 'center', fontWeight: 600 }}>{value}{suffix ? ` ${suffix}` : ''}</span>
-      <button className="iconbtn" onClick={() => set(value + 1)} aria-label="Больше">+</button>
+      <button className="iconbtn" onClick={() => set(value + 1)} aria-label={t('add.moreStep')}>+</button>
     </div>
   )
 }
@@ -1625,7 +1607,8 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
   const [baseName, setBaseName] = useState(selected.preset?.base || group.items[0].name)
   const [slices, setSlices] = useState(selected.preset?.slices || 1)
   const [items, setItems] = useState([])
-  const [name, setName] = useState(selected.name)
+  // Своё блюдо человек называет на своём языке — подставляем перевод.
+  const [name, setName] = useState(() => foodName(selected.name))
   const [servings, setServings] = useState(1)
   const [ingQuery, setIngQuery] = useState('')
   const [showCustom, setShowCustom] = useState(false)
@@ -1700,7 +1683,7 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
   const unit = selected.unit || 'шт'
 
   const finish = () => {
-    const finalName = name.trim() || selected.name
+    const finalName = name.trim() || foodName(selected.name)
     addCustomFood({
       name: finalName,
       emoji: selected.emoji,
@@ -1723,15 +1706,15 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
       <div className="row gap12" style={{ marginBottom: 18 }}>
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
-          <div className="meal-name" style={{ fontSize: 18 }}>Собери {selected.name.toLowerCase()}</div>
-          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другое</button>
+          <div className="meal-name" style={{ fontSize: 18 }}>{t('add.build', { name: lowerName(foodName(selected.name)) })}</div>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>{t('add.pickOtherN')}</button>
         </div>
       </div>
 
       <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>{group.label}</label>
       <div className="row wrap gap8" style={{ marginBottom: 14 }}>
         {group.items.map((b) => (
-          <button key={b.name} className={`pill ${baseName === b.name ? 'on' : ''}`} onClick={() => setBaseName(b.name)}>{b.name}</button>
+          <button key={b.name} className={`pill ${baseName === b.name ? 'on' : ''}`} onClick={() => setBaseName(b.name)}>{foodName(b.name)}</button>
         ))}
       </div>
       <div className="row between" style={{ marginBottom: 20 }}>
@@ -1739,29 +1722,29 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
         <Stepper value={slices} set={setSlices} min={1} />
       </div>
 
-      <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>Начинка</label>
+      <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>{t('add.filling')}</label>
       {withMacros.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           {withMacros.map((it) => (
             <div key={it.name} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.emoji} {it.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{it.count} {it.unitName} · {it.grams} г · {it.m.kcal} ккал</div>
+                <div style={{ fontSize: 15, fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.emoji} {foodName(it.name)}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{it.count} {portionLabel(it.unitName)} · {t('units.gN', { n: it.grams })} · {t('units.kcalN', { n: it.m.kcal })}</div>
               </div>
               <Stepper value={it.count} set={(c) => setCount(it.name, c)} min={0} />
             </div>
           ))}
         </div>
       )}
-      <input className="input" placeholder="Добавьте ингредиент, напр. салями" value={ingQuery} onChange={(e) => setIngQuery(e.target.value)} style={{ marginBottom: suggestions.length ? 8 : 12 }} />
+      <input className="input" placeholder={t('add.ingPh')} value={ingQuery} onChange={(e) => setIngQuery(e.target.value)} style={{ marginBottom: suggestions.length ? 8 : 12 }} />
       {suggestions.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           {suggestions.map((ing) => (
-            <button key={ing.name} className="meal-item" style={{ textAlign: 'left', width: '100%' }} onClick={() => addIngredient(ing)}>
+            <button key={ing.name} className="meal-item" style={{ textAlign: 'start', width: '100%' }} onClick={() => addIngredient(ing)}>
               <span className="meal-emoji">{ing.emoji}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
-                <span className="meal-name" style={{ display: 'block' }}>{ing.name}{ing.custom ? ' · моё' : ''}</span>
-                <span className="meal-meta">по умолчанию {ing.def} {ing.unitName} · {ing.kcal} ккал/100 г</span>
+                <span className="meal-name" style={{ display: 'block' }}>{foodName(ing.name)}{ing.custom ? ` · ${t('add.mineTag')}` : ''}</span>
+                <span className="meal-meta">{t('add.ingMeta', { n: ing.def, unit: portionLabel(ing.unitName), kcal: ing.kcal })}</span>
               </span>
               <span style={{ color: 'var(--primary)', fontSize: 22 }}>＋</span>
             </button>
@@ -1770,47 +1753,47 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
       )}
 
       {!showCustom ? (
-        <button className="btn soft" style={{ height: 44, marginBottom: 18 }} onClick={() => setShowCustom(true)}>＋ Добавить свой ингредиент</button>
+        <button className="btn soft" style={{ height: 44, marginBottom: 18 }} onClick={() => setShowCustom(true)}>＋ {t('add.addOwnIng')}</button>
       ) : (
         <div className="card" style={{ padding: 14, marginBottom: 18, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
           <div className="row between" style={{ marginBottom: 10 }}>
-            <span style={{ fontSize: 15, fontWeight: 600 }}>Свой ингредиент</span>
-            <button style={{ fontSize: 13, color: 'var(--ink-3)' }} onClick={() => setShowCustom(false)}>отмена</button>
+            <span style={{ fontSize: 15, fontWeight: 600 }}>{t('add.ownIng')}</span>
+            <button style={{ fontSize: 13, color: 'var(--ink-3)' }} onClick={() => setShowCustom(false)}>{t('add.cancelLower')}</button>
           </div>
-          <input className="input" placeholder="Название (напр. бабушкина котлета)" value={ci.name} onChange={(e) => setCi({ ...ci, name: e.target.value })} style={{ marginBottom: 8 }} />
+          <input className="input" placeholder={t('add.ownIngPh')} value={ci.name} onChange={(e) => setCi({ ...ci, name: e.target.value })} style={{ marginBottom: 8 }} />
           <div className="row gap8" style={{ marginBottom: 8 }}>
-            <input className="input" type="number" inputMode="numeric" placeholder="ккал/100г" value={ci.kcal} onChange={(e) => setCi({ ...ci, kcal: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
-            <input className="input" type="number" inputMode="decimal" placeholder="Б/100г" value={ci.protein} onChange={(e) => setCi({ ...ci, protein: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+            <input className="input" type="number" inputMode="numeric" placeholder={t('add.kcal100')} value={ci.kcal} onChange={(e) => setCi({ ...ci, kcal: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+            <input className="input" type="number" inputMode="decimal" placeholder={t('add.p100')} value={ci.protein} onChange={(e) => setCi({ ...ci, protein: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
           </div>
           <div className="row gap8" style={{ marginBottom: 8 }}>
-            <input className="input" type="number" inputMode="decimal" placeholder="У/100г" value={ci.carbs} onChange={(e) => setCi({ ...ci, carbs: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
-            <input className="input" type="number" inputMode="decimal" placeholder="Ж/100г" value={ci.fat} onChange={(e) => setCi({ ...ci, fat: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
-            <input className="input" type="number" inputMode="numeric" placeholder="грамм" value={ci.grams} onChange={(e) => setCi({ ...ci, grams: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+            <input className="input" type="number" inputMode="decimal" placeholder={t('add.c100')} value={ci.carbs} onChange={(e) => setCi({ ...ci, carbs: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+            <input className="input" type="number" inputMode="decimal" placeholder={t('add.f100')} value={ci.fat} onChange={(e) => setCi({ ...ci, fat: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+            <input className="input" type="number" inputMode="numeric" placeholder={t('add.gramsPh')} value={ci.grams} onChange={(e) => setCi({ ...ci, grams: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
           </div>
-          <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 10px' }}>Все КБЖУ — необязательны, заполните что знаете. «Грамм» — сколько кладёте в блюдо.</p>
-          <button className="btn" style={{ height: 44 }} onClick={addCustom} disabled={!ci.name.trim()}>Добавить и запомнить</button>
+          <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 10px' }}>{t('add.ownIngNote')}</p>
+          <button className="btn" style={{ height: 44 }} onClick={addCustom} disabled={!ci.name.trim()}>{t('add.addRemember')}</button>
         </div>
       )}
 
       <div className="card" style={{ padding: 14, marginBottom: 18, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
         <div className="row between" style={{ marginBottom: 4 }}>
-          <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>В одной {unit === 'шт' ? 'штуке' : unit === 'порция' ? 'порции' : unit}</span>
-          <span className="tabular" style={{ fontWeight: 680, fontSize: 18 }}>{perUnit.kcal} ккал</span>
+          <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>{unit === 'шт' ? t('add.perPiece') : unit === 'порция' ? t('add.perServing') : t('add.perUnit', { unit: unitLabel(unit) })}</span>
+          <span className="tabular" style={{ fontWeight: 680, fontSize: 18 }}>{t('units.kcalN', { n: perUnit.kcal })}</span>
         </div>
-        <div className="tabular" style={{ fontSize: 13, color: 'var(--ink-3)' }}>Б{perUnit.protein} · У{perUnit.carbs} · Ж{perUnit.fat}</div>
+        <div className="tabular" style={{ fontSize: 13, color: 'var(--ink-3)' }}>{macroLabel(perUnit)}</div>
       </div>
 
       <div className="field">
-        <label>Название (сохранится)</label>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Мой бутерброд с салями" />
+        <label>{t('add.nameSaved')}</label>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('add.namePh')} />
       </div>
 
       <div className="row between" style={{ margin: '4px 0 18px' }}>
-        <span style={{ fontSize: 15, fontWeight: 550 }}>Сколько съел, {unit}</span>
+        <span style={{ fontSize: 15, fontWeight: 550 }}>{t('add.howMany', { unit: unitLabel(unit) })}</span>
         <Stepper value={servings} set={setServings} min={1} />
       </div>
 
-      <button className="btn" onClick={finish}>Сохранить и добавить {total.kcal} ккал</button>
+      <button className="btn" onClick={finish}>{t('add.saveAddKcal', { n: total.kcal })}</button>
     </div>
   )
 }
@@ -1833,24 +1816,24 @@ function CompositePortion({ selected, onBack, onAdd, onClose, type }) {
       <div className="row gap12" style={{ marginBottom: 18 }}>
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
-          <div className="meal-name" style={{ fontSize: 18 }}>{selected.name}</div>
-          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
+          <div className="meal-name" style={{ fontSize: 18 }}>{foodName(selected.name)}</div>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>{t('add.pickOther')}</button>
         </div>
       </div>
       <div className="card" style={{ padding: 14, marginBottom: 18, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
-        <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>В одной порции: {selected.kcal} ккал · Б{selected.protein} У{selected.carbs} Ж{selected.fat}</span>
+        <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>{t('add.perServingLine', { kcal: t('units.kcalN', { n: selected.kcal }), macros: macroLabel(selected) })}</span>
       </div>
       <div className="row between" style={{ margin: '4px 0 18px' }}>
-        <span style={{ fontSize: 15, fontWeight: 550 }}>Сколько съел, {unit}</span>
+        <span style={{ fontSize: 15, fontWeight: 550 }}>{t('add.howMany', { unit: unitLabel(unit) })}</span>
         <Stepper value={servings} set={setServings} min={1} />
       </div>
       <div className="row gap8" style={{ marginBottom: 22 }}>
-        <PreviewStat label="ккал" v={total.kcal} />
-        <PreviewStat label="белки" v={total.protein} />
-        <PreviewStat label="угл." v={total.carbs} />
-        <PreviewStat label="жиры" v={total.fat} />
+        <PreviewStat label={t('units.kcal')} v={total.kcal} />
+        <PreviewStat label={t('day.proteinShort')} v={total.protein} />
+        <PreviewStat label={t('day.carbsShort')} v={total.carbs} />
+        <PreviewStat label={t('day.fatShort')} v={total.fat} />
       </div>
-      <button className="btn" onClick={add}>Добавить {total.kcal} ккал</button>
+      <button className="btn" onClick={add}>{t('add.addKcal', { n: total.kcal })}</button>
     </div>
   )
 }
@@ -1884,13 +1867,13 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, remembered }) {
       <div className="row gap12" style={{ marginBottom: 18 }}>
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
-          <div className="meal-name" style={{ fontSize: 18 }}>{selected.name}</div>
-          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>← выбрать другой</button>
+          <div className="meal-name" style={{ fontSize: 18 }}>{foodName(selected.name)}</div>
+          <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>{t('add.pickOther')}</button>
         </div>
       </div>
 
       <div className="field">
-        <label>Жирность, %</label>
+        <label>{t('add.fatPct')}</label>
         <input className="input" type="text" inputMode="decimal" value={fat} onChange={(e) => setFat(e.target.value)} style={{ marginBottom: 10 }} />
         <div className="row wrap gap8">
           {selected.fats.map((v) => (
@@ -1900,29 +1883,29 @@ function DairyPortion({ selected, onBack, onAdd, onClose, type, remembered }) {
       </div>
 
       <div className="field">
-        <label>Порция, грамм</label>
+        <label>{t('add.portionGrams')}</label>
         {getPortions(selected)[0] && (
           <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 8px' }}>
-            Не взвешивая: {getPortions(selected)[0].label} ≈ {getPortions(selected)[0].grams} г
+            {t('add.noScale', { label: portionLabel(getPortions(selected)[0].label), n: getPortions(selected)[0].grams, unit: t('units.g') })}
           </p>
         )}
         <input className="input" type="text" inputMode="decimal" value={grams} onChange={(e) => setGrams(e.target.value)} style={{ marginBottom: 10 }} />
         <div className="row wrap gap8">
           {getPortions(selected).map((p) => (
             <button key={p.label} className={`chip ${g === p.grams ? 'on' : ''}`} onClick={() => setGrams(String(p.grams))}>
-              {p.label} · {p.grams} г
+              {portionLabel(p.label)} · {t('units.gN', { n: p.grams })}
             </button>
           ))}
         </div>
       </div>
 
       <div className="row gap8" style={{ margin: '4px 0 22px' }}>
-        <PreviewStat label="ккал" v={res.kcal} />
-        <PreviewStat label="белки" v={res.protein} />
-        <PreviewStat label="угл." v={res.carbs} />
-        <PreviewStat label="жиры" v={res.fat} />
+        <PreviewStat label={t('units.kcal')} v={res.kcal} />
+        <PreviewStat label={t('day.proteinShort')} v={res.protein} />
+        <PreviewStat label={t('day.carbsShort')} v={res.carbs} />
+        <PreviewStat label={t('day.fatShort')} v={res.fat} />
       </div>
-      <button className="btn" onClick={add} disabled={!valid}>Добавить {res.kcal} ккал</button>
+      <button className="btn" onClick={add} disabled={!valid}>{t('add.addKcal', { n: res.kcal })}</button>
     </div>
   )
 }
@@ -1943,7 +1926,7 @@ function ManualNotes({ check }) {
   return (
     <div role="status" aria-live="polite" style={{ marginBottom: 12 }}>
       {check.errors.map((e, i) => line(e, 'var(--danger)', `e${i}`))}
-      {check.warnings.map((w, i) => line(`Проверьте: ${w}`, 'var(--warn)', `w${i}`))}
+      {check.warnings.map((w, i) => line(t('add.checkWarn', { w }), 'var(--warn)', `w${i}`))}
     </div>
   )
 }
@@ -1954,14 +1937,14 @@ function ManualActions({ check, amount, onSave }) {
     <>
       <div style={{ display: 'flex', gap: 10 }}>
         <button className="btn soft" style={{ marginTop: 0, flex: 1 }} onClick={() => onSave(false)} disabled={blocked}>
-          Сохранить
+          {t('common.save')}
         </button>
         <button className="btn" style={{ marginTop: 0, flex: 1.7 }} onClick={() => onSave(true)} disabled={blocked}>
-          Сохранить и добавить {amount}
+          {t('add.saveAdd', { amount })}
         </button>
       </div>
       <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '10px 0 0' }}>
-        И то и другое сохранит продукт в разделе «Моё» — добавить его снова можно в любой день.
+        {t('add.saveNote')}
       </p>
     </>
   )
@@ -1973,7 +1956,7 @@ function MemoryRow({ emoji, name, meta, quickLabel, onQuick, onOpen, favorite, o
       {onFav ? (
         <button
           onClick={onFav}
-          aria-label={favorite ? `Убрать «${name}» из избранного` : `Добавить «${name}» в избранное`}
+          aria-label={favorite ? t('add.unfavName', { name }) : t('add.favName', { name })}
           aria-pressed={favorite}
           style={{
             width: 40, height: 44, flex: '0 0 auto', fontSize: 17, lineHeight: 1,
@@ -1985,7 +1968,7 @@ function MemoryRow({ emoji, name, meta, quickLabel, onQuick, onOpen, favorite, o
       )}
       <button
         onClick={onOpen}
-        style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', flex: 1, minWidth: 0, minHeight: 44 }}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'start', flex: 1, minWidth: 0, minHeight: 44 }}
       >
         <span className="meal-emoji">{emoji}</span>
         <span style={{ flex: 1, minWidth: 0 }}>
@@ -1996,7 +1979,7 @@ function MemoryRow({ emoji, name, meta, quickLabel, onQuick, onOpen, favorite, o
       {quickLabel && (
         <button
           onClick={onQuick}
-          aria-label={`Записать «${name}», ${quickLabel}`}
+          aria-label={t('add.logName', { name, amount: quickLabel })}
           className="chip"
           style={{ flex: '0 0 auto', minHeight: 44, padding: '10px 12px', fontWeight: 600, color: 'var(--primary)' }}
         >＋ {quickLabel}</button>
@@ -2009,15 +1992,15 @@ function MemoryRow({ emoji, name, meta, quickLabel, onQuick, onOpen, favorite, o
 // столько, чтобы узнать продукт, и не столько, чтобы читать таблицу.
 function memoryMeta(e) {
   const repeat = repeatEntry(e)
-  if (repeat?.grams > 0) return `${repeat.grams} ${e.unit} · ${repeat.kcal} ккал`
-  if (repeat) return `${repeat.kcal} ккал`
-  return `${e.uses} ${plural(e.uses, 'раз', 'раза', 'раз')}`
+  if (repeat?.grams > 0) return `${amountLabel(repeat.grams, e.unit)} · ${t('units.kcalN', { n: repeat.kcal })}`
+  if (repeat) return t('units.kcalN', { n: repeat.kcal })
+  return t('count.times', { count: e.uses })
 }
 
 // Подпись кнопки быстрого добавления — только если количество известно.
 function quickLabelFor(e) {
   const g = e.typicalGrams ?? e.lastGrams
-  return g > 0 ? `${g} ${e.unit}` : null
+  return g > 0 ? amountLabel(g, e.unit) : null
 }
 
 // Закрепить можно то, что переводится «на 100»: без количества пересчитать
@@ -2053,36 +2036,37 @@ function SectionLabel({ text, count }) {
 // Подпись по БЖУ. Если база не знает ни одного из трёх — так и пишем, а не
 // рисуем нули: «Б0 У0 Ж0» человек читает как измеренный факт, а это отсутствие
 // данных. Известное частично показываем через общий macroLabel с прочерками.
-const macroText = (f) => (hasMacros(f) ? macroLabel(f) : 'БЖУ не указаны')
+const macroText = (f) => (hasMacros(f) ? macroLabel(f) : t('add.macrosUnknown'))
 
 function FoodRow({ f, onClick, onDelete, favorite, onFav, quickLabel, onQuick }) {
+  const name = foodName(f.name)
   let subtitle
-  if (f.builder === 'constructor') subtitle = 'собрать из ингредиентов'
-  else if (f.builder === 'protein') subtitle = 'рассчитать по ингредиентам'
-  else if (f.builder === 'custom') subtitle = 'добавить и запомнить свой'
-  else if (f.kind === 'composite') subtitle = `${f.kcal} ккал/порция · моё`
-  else if (f.dairy) subtitle = 'укажите порцию и % жирности'
+  if (f.builder === 'constructor') subtitle = t('add.subConstructor')
+  else if (f.builder === 'protein') subtitle = t('add.subProtein')
+  else if (f.builder === 'custom') subtitle = t('add.subCustom')
+  else if (f.kind === 'composite') subtitle = t('add.subComposite', { n: f.kcal })
+  else if (f.dairy) subtitle = t('add.subDairy')
   // Свой продукт: единица берётся из самого продукта. Раньше здесь были жёстко
   // зашиты «100 мл» и «мой напиток» — собственное БЛЮДО подписывалось как
   // напиток и в чужих единицах.
-  else if (f.source === 'custom') subtitle = `${f.kcal} ккал · ${macroText(f)} / 100 ${f.unit || 'г'} · моё`
-  else if (f.hasVariants) subtitle = `${f.methods.length} способов приготовления`
-  else subtitle = `${f.kcal} ккал · ${macroText(f)} / 100 ${f.unit || 'г'}`
+  else if (f.source === 'custom') subtitle = t('add.subCustomFood', { n: f.kcal, macros: macroText(f), unit: unitLabel(f.unit || 'г') })
+  else if (f.hasVariants) subtitle = t('add.subMethods', { count: f.methods.length })
+  else subtitle = t('add.subFood', { n: f.kcal, macros: macroText(f), unit: unitLabel(f.unit || 'г') })
   const chevron = f.builder || f.hasVariants || f.kind === 'composite' || f.dairy ? '›' : '＋'
   return (
     <div className="meal-item" style={{ gap: 8 }}>
       {onFav && (
         <button
           onClick={onFav}
-          aria-label={favorite ? `Убрать «${f.name}» из избранного` : `Добавить «${f.name}» в избранное`}
+          aria-label={favorite ? t('add.unfavName', { name }) : t('add.favName', { name })}
           aria-pressed={favorite}
           style={{ width: 34, height: 44, flex: '0 0 auto', fontSize: 17, lineHeight: 1, color: favorite ? 'var(--primary)' : 'var(--ink-3)' }}
         >{favorite ? '★' : '☆'}</button>
       )}
-      <button style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', flex: 1, minWidth: 0, minHeight: 44 }} onClick={onClick}>
+      <button style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'start', flex: 1, minWidth: 0, minHeight: 44 }} onClick={onClick}>
         <span className="meal-emoji">{f.emoji}</span>
         <span style={{ flex: 1, minWidth: 0 }}>
-          <span className="meal-name" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+          <span className="meal-name" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
           <span className="meal-meta">{subtitle}</span>
         </span>
         {!quickLabel && <span style={{ color: 'var(--primary)', fontSize: 22, flex: '0 0 auto' }}>{chevron}</span>}
@@ -2090,13 +2074,13 @@ function FoodRow({ f, onClick, onDelete, favorite, onFav, quickLabel, onQuick })
       {quickLabel && (
         <button
           onClick={onQuick}
-          aria-label={`Записать «${f.name}», ${quickLabel}`}
+          aria-label={t('add.logName', { name, amount: quickLabel })}
           className="chip"
           style={{ flex: '0 0 auto', minHeight: 44, padding: '10px 12px', fontWeight: 600, color: 'var(--primary)' }}
         >＋ {quickLabel}</button>
       )}
       {onDelete && (
-        <button onClick={onDelete} aria-label={`Удалить «${f.name}»`} style={{ color: 'var(--ink-3)', fontSize: 18, flex: '0 0 auto', width: 32, height: 44 }}>✕</button>
+        <button onClick={onDelete} aria-label={t('add.deleteName', { name })} style={{ color: 'var(--ink-3)', fontSize: 18, flex: '0 0 auto', width: 32, height: 44 }}>✕</button>
       )}
     </div>
   )
@@ -2159,20 +2143,20 @@ function TemplateScreen({ tpl, onBack, onAdd, onDelete }) {
         <span className="meal-emoji" style={{ width: 44, height: 44, fontSize: 20 }}>{tpl.emoji || '🍽️'}</span>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 650, fontSize: 16 }}>{tpl.name}</div>
-          <button onClick={onBack} className="tap44" style={{ fontSize: 13.5, color: 'var(--primary)', fontWeight: 550, minHeight: 32 }}>← выбрать другое</button>
+          <button onClick={onBack} className="tap44" style={{ fontSize: 13.5, color: 'var(--primary)', fontWeight: 550, minHeight: 32 }}>{t('add.pickOtherN')}</button>
         </div>
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 18, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
         <div className="row between" style={{ marginBottom: 8 }}>
-          <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>Состав · {n}</span>
-          <span className="tabular" style={{ fontWeight: 680, fontSize: 18 }}>{tot.kcal} ккал</span>
+          <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>{t('template.contents', { n })}</span>
+          <span className="tabular" style={{ fontWeight: 680, fontSize: 18 }}>{t('units.kcalN', { n: tot.kcal })}</span>
         </div>
         {tpl.items.map((m, i) => (
           <div key={m.id || i} className="row between" style={{ padding: '5px 0', gap: 10 }}>
-            <span style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.emoji} {m.name}</span>
+            <span style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.emoji} {foodName(m.name)}</span>
             <span className="tabular" style={{ fontSize: 13, color: 'var(--ink-3)', flex: '0 0 auto' }}>
-              {m.grams ? `${m.grams} ${m.unit || 'г'}` : `${m.kcal} ккал`}
+              {m.grams ? amountLabel(m.grams, m.unit || 'г') : t('units.kcalN', { n: m.kcal })}
             </span>
           </div>
         ))}
@@ -2180,7 +2164,7 @@ function TemplateScreen({ tpl, onBack, onAdd, onDelete }) {
       </div>
 
       <button className="btn" onClick={onAdd}>
-        Добавить {n} {plural(n, 'продукт', 'продукта', 'продуктов')}
+        {t('add.addN', { list: t('count.products', { count: n }) })}
       </button>
 
       {/* Удаление — приглушённая ссылка, а не вторая большая кнопка. Рядом с
@@ -2189,19 +2173,19 @@ function TemplateScreen({ tpl, onBack, onAdd, onDelete }) {
           случайное касание ничего не стёрло. */}
       {confirmDelete ? (
         <div className="row gap12" style={{ marginTop: 16 }}>
-          <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDelete(false)}>Отмена</button>
-          <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={onDelete}>Удалить</button>
+          <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDelete(false)}>{t('common.cancel')}</button>
+          <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={onDelete}>{t('common.delete')}</button>
         </div>
       ) : (
         <div style={{ textAlign: 'center', marginTop: 16 }}>
           <button
             onClick={() => setConfirmDelete(true)}
             style={{ fontSize: 14, color: 'var(--ink-3)', minHeight: 44, padding: '0 12px' }}
-          >Удалить блюдо</button>
+          >{t('add.deleteDish')}</button>
         </div>
       )}
       <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '6px 0 0', lineHeight: 1.45, textAlign: 'center' }}>
-        Удаление блюда не трогает уже записанное в дневнике.
+        {t('add.deleteDishNote')}
       </p>
     </div>
   )
@@ -2230,20 +2214,20 @@ function RecipeScreen({ recipe, onBack, onAdd, onEdit, onDelete }) {
         <span className="meal-emoji" style={{ width: 44, height: 44, fontSize: 20 }}>{recipe.emoji || '🍲'}</span>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 650, fontSize: 16 }}>{recipe.name}</div>
-          <button onClick={onBack} className="tap44" style={{ fontSize: 13.5, color: 'var(--primary)', fontWeight: 550, minHeight: 32 }}>← выбрать другой</button>
+          <button onClick={onBack} className="tap44" style={{ fontSize: 13.5, color: 'var(--primary)', fontWeight: 550, minHeight: 32 }}>{t('add.pickOther')}</button>
         </div>
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 16, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
         <div className="row between">
           <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>
-            Вся кастрюля · {recipe.items.length} {plural(recipe.items.length, 'ингредиент', 'ингредиента', 'ингредиентов')}
+            {t('add.wholePot', { list: t('add.ingredients', { count: recipe.items.length }) })}
           </span>
-          <span className="tabular" style={{ fontWeight: 650 }}>{recipeTotals(recipe).kcal} ккал</span>
+          <span className="tabular" style={{ fontWeight: 650 }}>{t('units.kcalN', { n: recipeTotals(recipe).kcal })}</span>
         </div>
         <div style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
-          {recipe.servings} {plural(recipe.servings, 'порция', 'порции', 'порций')} по {per.kcal} ккал
-          {per.grams > 0 ? ` · ≈${per.grams} г` : ''}
+          {t('add.servingsOf', { list: amountLabel(recipe.servings, 'порция'), n: per.kcal })}
+          {per.grams > 0 ? ` · ≈${t('units.gN', { n: per.grams })}` : ''}
         </div>
       </div>
 
@@ -2252,7 +2236,7 @@ function RecipeScreen({ recipe, onBack, onAdd, onEdit, onDelete }) {
       )}
 
       <div className="field">
-        <label>Сколько порций съели</label>
+        <label>{t('add.servingsEaten')}</label>
         <input
           className="input"
           type="number"
@@ -2263,36 +2247,36 @@ function RecipeScreen({ recipe, onBack, onAdd, onEdit, onDelete }) {
         <div className="row wrap gap8" style={{ marginTop: 10 }}>
           {['0.5', '1', '1.5', '2'].map((v) => (
             <button key={v} className={`chip ${servings === v ? 'on' : ''}`} onClick={() => setServings(v)}>
-              {v.replace('.', ',')}
+              {formatAmount(Number(v))}
             </button>
           ))}
         </div>
       </div>
 
       <div className="row gap8" style={{ margin: '4px 0 22px' }}>
-        <PreviewStat label="ккал" v={eaten.kcal} />
-        <PreviewStat label="белки" v={eaten.protein} />
-        <PreviewStat label="угл." v={eaten.carbs} />
-        <PreviewStat label="жиры" v={eaten.fat} />
+        <PreviewStat label={t('units.kcal')} v={eaten.kcal} />
+        <PreviewStat label={t('day.proteinShort')} v={eaten.protein} />
+        <PreviewStat label={t('day.carbsShort')} v={eaten.carbs} />
+        <PreviewStat label={t('day.fatShort')} v={eaten.fat} />
       </div>
 
-      <button className="btn" onClick={() => onAdd(n)} disabled={!(n > 0)}>Добавить {eaten.kcal} ккал</button>
+      <button className="btn" onClick={() => onAdd(n)} disabled={!(n > 0)}>{t('add.addKcal', { n: eaten.kcal })}</button>
 
       {/* Правка и удаление — второстепенные действия одной строкой. Три
           одинаковые кнопки в столбик заставляют выбирать там, где выбор
           очевиден: человек пришёл записать съеденное. */}
       {confirmDelete ? (
         <div className="row gap12" style={{ marginTop: 16 }}>
-          <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDelete(false)}>Отмена</button>
-          <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={onDelete}>Удалить</button>
+          <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDelete(false)}>{t('common.cancel')}</button>
+          <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={onDelete}>{t('common.delete')}</button>
         </div>
       ) : (
         <div className="row between" style={{ marginTop: 14 }}>
           <button onClick={onEdit} style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550, minHeight: 44, padding: '0 4px' }}>
-            Изменить рецепт
+            {t('add.editRecipe')}
           </button>
           <button onClick={() => setConfirmDelete(true)} style={{ fontSize: 14, color: 'var(--ink-3)', minHeight: 44, padding: '0 4px' }}>
-            Удалить
+            {t('common.delete')}
           </button>
         </div>
       )}

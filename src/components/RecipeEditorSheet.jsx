@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
-import { FOODS, scale, searchLocal, sanitizeAmount, macroLabel, getPortions } from '../lib/foods.js'
+import { FOODS, scale, searchLocal, sanitizeAmount, macroLabel, getPortions, unitLabel } from '../lib/foods.js'
+import { foodName } from '../lib/foodNames.js'
+import { t } from '../lib/i18n.js'
 import { makeRecipe, recipeTotals, recipePerServing, MAX_RECIPE_ITEMS } from '../lib/library.js'
 
 const num = (v) => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0 }
@@ -138,8 +140,8 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
       <div className="sheet sheet-tall" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
-          <h2 className="h2">{editing ? 'Изменить рецепт' : 'Новый рецепт'}</h2>
-          <button className="iconbtn" onClick={tryClose} aria-label="Закрыть">✕</button>
+          <h2 className="h2">{editing ? t('add.editRecipe') : t('add.newRecipe')}</h2>
+          <button className="iconbtn" onClick={tryClose} aria-label={t('common.close')}>✕</button>
         </div>
 
         {confirmExit && (
@@ -147,24 +149,22 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
             {/* Фраза целиком условная: «Рецепт не сохранён… потерять ИХ» —
                 рассогласование, а склеивать предложение из кусков нельзя. */}
             <p style={{ fontSize: 14.5, lineHeight: 1.5, margin: '0 0 12px' }}>
-              {editing
-                ? 'Изменения не сохранены. Выйти и потерять их?'
-                : 'Рецепт не сохранён. Выйти и потерять его?'}
+              {editing ? t('recipe.unsavedChanges') : t('recipe.unsaved')}
             </p>
             <div className="row gap12">
-              <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmExit(false)}>Остаться</button>
-              <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={close}>Выйти</button>
+              <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmExit(false)}>{t('recipe.stay')}</button>
+              <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={close}>{t('recipe.leave')}</button>
             </div>
           </div>
         )}
 
         <div className="field">
-          <label>Название</label>
-          <input className="input" placeholder="Напр. Борщ" value={name} onChange={(e) => setName(e.target.value)} />
+          <label>{t('template.name')}</label>
+          <input className="input" placeholder={t('recipe.namePh')} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
 
         <div className="field">
-          <label>Значок</label>
+          <label>{t('recipe.icon')}</label>
           {/* Одна прокручиваемая строка, а не сетка на три ряда: выбор значка —
               мелочь, и он не должен выталкивать ингредиенты за нижний край
               экрана. Тот же приём, что у чипов категорий в поиске. */}
@@ -174,7 +174,7 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
                 key={e}
                 className={`chip ${emoji === e ? 'on' : ''}`}
                 style={{ fontSize: 18, flex: '0 0 auto', minWidth: 52 }}
-                aria-label={`Значок ${e}`}
+                aria-label={t('recipe.iconAria', { e })}
                 aria-pressed={emoji === e}
                 onClick={() => setEmoji(e)}
               >{e}</button>
@@ -183,13 +183,13 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
         </div>
 
         <div className="field">
-          <label>Ингредиенты{rows.length > 0 ? ` · ${rows.length}` : ''}</label>
+          <label>{t('recipe.ingredients')}{rows.length > 0 ? ` · ${rows.length}` : ''}</label>
           <input
             className="input"
             type="search"
             enterKeyHint="search"
             autoComplete="off"
-            placeholder="Найдите продукт, напр. свёкла"
+            placeholder={t('recipe.searchPh')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
@@ -197,7 +197,7 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
           />
           {rows.length >= MAX_RECIPE_ITEMS && (
             <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '8px 0 0' }}>
-              Больше {MAX_RECIPE_ITEMS} ингредиентов в один рецепт не поместится.
+              {t('recipe.tooMany', { max: MAX_RECIPE_ITEMS })}
             </p>
           )}
           {results.length > 0 && (
@@ -207,10 +207,10 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
                   key={f.name}
                   onClick={() => addRow(f)}
                   className="row between"
-                  style={{ width: '100%', minHeight: 44, padding: '8px 4px', textAlign: 'left', gap: 10 }}
+                  style={{ width: '100%', minHeight: 44, padding: '8px 4px', textAlign: 'start', gap: 10 }}
                 >
                   <span style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {f.emoji} {f.name}
+                    {f.emoji} {foodName(f.name)}
                   </span>
                   <span style={{ color: 'var(--primary)', fontSize: 20, flex: '0 0 auto' }}>＋</span>
                 </button>
@@ -221,7 +221,7 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
 
         {rows.length === 0 ? (
           <p className="muted" style={{ fontSize: 14, padding: '4px 0 18px' }}>
-            Добавьте то, что кладёте в кастрюлю. Вес — как на весах, до готовки.
+            {t('recipe.empty')}
           </p>
         ) : (
           <div className="card" style={{ padding: 12, marginBottom: 16, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
@@ -231,27 +231,27 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
               return (
                 <div key={r.key} className="row gap8" style={{ alignItems: 'center', padding: '6px 0', borderTop: i ? '1px solid var(--border)' : 'none' }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {r.emoji} {r.name}
+                    {r.emoji} {foodName(r.name)}
                     <span className="tabular" style={{ color: 'var(--ink-3)', fontSize: 12.5, display: 'block' }}>
-                      {m ? `${m.kcal} ккал` : 'укажите вес'}
+                      {m ? t('units.kcalN', { n: m.kcal }) : t('recipe.enterWeight')}
                     </span>
                   </span>
                   <input
                     className="input tabular"
                     type="number"
                     inputMode="numeric"
-                    aria-label={`Вес: ${r.name}`}
+                    aria-label={t('recipe.weightAria', { name: foodName(r.name) })}
                     value={r.grams}
                     onChange={(e) => {
                       const v = sanitizeAmount(e.target.value)
                       setRows((p) => p.map((x) => (x.key === r.key ? { ...x, grams: v } : x)))
                     }}
-                    style={{ width: 78, flex: '0 0 auto', textAlign: 'right', height: 44 }}
+                    style={{ width: 78, flex: '0 0 auto', textAlign: 'end', height: 44 }}
                   />
-                  <span style={{ fontSize: 13, color: 'var(--ink-3)', flex: '0 0 auto', width: 18 }}>{r.unit}</span>
+                  <span style={{ fontSize: 13, color: 'var(--ink-3)', flex: '0 0 auto', width: 18 }}>{unitLabel(r.unit)}</span>
                   <button
                     onClick={() => setRows((p) => p.filter((x) => x.key !== r.key))}
-                    aria-label={`Убрать ${r.name}`}
+                    aria-label={t('recipe.removeAria', { name: foodName(r.name) })}
                     style={{ width: 34, minHeight: 44, flex: '0 0 auto', color: 'var(--ink-3)', fontSize: 17 }}
                   >✕</button>
                 </div>
@@ -261,7 +261,7 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
         )}
 
         <div className="field">
-          <label>Сколько порций получилось</label>
+          <label>{t('recipe.servings')}</label>
           <input
             className="input tabular"
             type="number"
@@ -279,25 +279,25 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
         {total && per && draft.items.length > 0 && (
           <div className="card" style={{ padding: 14, marginBottom: 16, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
             <div className="row between">
-              <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>Вся кастрюля</span>
-              <span className="tabular" style={{ fontWeight: 650 }}>{total.kcal} ккал{total.grams > 0 ? ` · ${total.grams} г` : ''}</span>
+              <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>{t('recipe.wholePot')}</span>
+              <span className="tabular" style={{ fontWeight: 650 }}>{t('units.kcalN', { n: total.kcal })}{total.grams > 0 ? ` · ${t('units.gN', { n: total.grams })}` : ''}</span>
             </div>
             <div className="row between" style={{ marginTop: 6 }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>Одна порция</span>
-              <span className="tabular" style={{ fontWeight: 680, fontSize: 18 }}>{per.kcal} ккал</span>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{t('recipe.oneServing')}</span>
+              <span className="tabular" style={{ fontWeight: 680, fontSize: 18 }}>{t('units.kcalN', { n: per.kcal })}</span>
             </div>
             <div className="tabular" style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
-              {macroLabel(per)}{per.grams > 0 ? ` · ≈${per.grams} г` : ''}
+              {macroLabel(per)}{per.grams > 0 ? ` · ≈${t('units.gN', { n: per.grams })}` : ''}
             </div>
           </div>
         )}
 
         <div className="field">
-          <label>Заметки (необязательно)</label>
+          <label>{t('recipe.notes')}</label>
           <textarea
             className="input"
             rows={2}
-            placeholder="Напр. варить 40 минут, солить в конце"
+            placeholder={t('recipe.notesPh')}
             value={notes}
             onChange={(e) => setNotes(e.target.value.slice(0, 500))}
             style={{ resize: 'none', fontFamily: 'inherit' }}
@@ -305,7 +305,7 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
         </div>
 
         <button className="btn" onClick={submit} disabled={!valid}>
-          {editing ? 'Сохранить изменения' : 'Сохранить рецепт'}
+          {editing ? t('recipe.saveChanges') : t('recipe.save')}
         </button>
       </div>
     </div>

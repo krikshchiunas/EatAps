@@ -15,6 +15,7 @@
 // цифра из строки «на порцию» попала в поле «на 100 г», лишний ноль в весе,
 // сахар записан в углеводы и ещё раз в сахар.
 // ─────────────────────────────────────────────────────────────────────────────
+import { t } from './i18n.js'
 
 // Больше 900 ккал на 100 г не бывает: это чистый жир (884 у растительного
 // масла). Тот же порог, что и в aiValidate.js, но здесь он только предупреждает.
@@ -35,17 +36,18 @@ const isNum = (v) => v != null && Number.isFinite(+v)
 export function checkManualFood(per100, { portion, basis, unit = 'г' } = {}) {
   const errors = []
   const warnings = []
+  const amt = (n) => t(unit === 'мл' ? 'units.mlN' : 'units.gN', { n })
 
   const name = String(per100?.name ?? '').trim()
-  if (!name) errors.push('Без названия продукт не сохранить')
+  if (!name) errors.push(t('manual.noName'))
 
   const perPortion = basis === 'perPortion' || basis === 'perServing'
   const portionNum = +portion
   if (perPortion) {
     if (!isNum(portionNum) || portionNum <= 0) {
-      errors.push(unit === 'мл' ? 'Укажите объём порции' : 'Укажите вес порции')
+      errors.push(unit === 'мл' ? t('manual.noVolume') : t('manual.noWeight'))
     } else if (portionNum > HUGE_PORTION) {
-      warnings.push(`${portionNum} ${unit} за раз — это много, проверьте, не лишний ли ноль`)
+      warnings.push(t('manual.hugePortion', { amount: amt(portionNum) }))
     }
   }
 
@@ -54,17 +56,17 @@ export function checkManualFood(per100, { portion, basis, unit = 'г' } = {}) {
   const carbs = +per100?.carbs || 0
   const fat = +per100?.fat || 0
 
-  for (const [label, v] of [['Калории', kcal], ['Белки', protein], ['Углеводы', carbs], ['Жиры', fat]]) {
-    if (v < 0) warnings.push(`${label}: отрицательное значение`)
+  for (const [label, v] of [[t('macro.kcal'), kcal], [t('macro.protein'), protein], [t('macro.carbs'), carbs], [t('macro.fat'), fat]]) {
+    if (v < 0) warnings.push(t('manual.negative', { label }))
   }
 
-  const base = `на 100 ${unit}`
+  const base = amt(100)
   if (kcal > MAX_KCAL_PER_100) {
-    warnings.push(`${Math.round(kcal)} ккал ${base} — больше, чем у чистого масла`)
+    warnings.push(t('manual.tooManyKcal', { n: Math.round(kcal), base }))
   }
   const sum = protein + carbs + fat
   if (sum > 100) {
-    warnings.push(`Белки, углеводы и жиры дают ${sum.toFixed(0)} г ${base} — больше самого продукта`)
+    warnings.push(t('manual.macrosOverMass', { n: sum.toFixed(0), base }))
   }
 
   // Сверка с 4/9/4 ккал на грамм. Допуск НЕсимметричный, потому что физика в
@@ -82,24 +84,24 @@ export function checkManualFood(per100, { portion, basis, unit = 'г' } = {}) {
     ? Math.abs(excess) > 50 && Math.abs(excess) > 0.3 * fromMacros
     : excess / 7 > 50
   if (kcal > 0 && sum > 0 && suspicious) {
-    warnings.push(`По белкам, углеводам и жирам выходит ${Math.round(fromMacros)} ккал, а указано ${Math.round(kcal)}`)
+    warnings.push(t('manual.kcalMismatch', { fromMacros: Math.round(fromMacros), kcal: Math.round(kcal) }))
   }
 
   // Вложенные величины: сахар — часть углеводов, насыщенные — часть жиров.
   // Больше целого они быть не могут, и это самая частая ошибка при переносе
   // с упаковки, где они напечатаны отдельной строкой с отступом.
   if (isNum(per100?.sugar) && +per100.sugar > carbs + 0.5) {
-    warnings.push('Сахара больше, чем всех углеводов')
+    warnings.push(t('manual.sugarOverCarbs'))
   }
   if (isNum(per100?.satFat) && +per100.satFat > fat + 0.5) {
-    warnings.push('Насыщенных жиров больше, чем всех жиров')
+    warnings.push(t('manual.satOverFat'))
   }
   if (isNum(per100?.caffeine) && +per100.caffeine > MAX_CAFFEINE_PER_100) {
-    warnings.push(`${Math.round(+per100.caffeine)} мг кофеина ${base} — проверьте, это очень много`)
+    warnings.push(t('manual.tooMuchCaffeine', { n: Math.round(+per100.caffeine), base }))
   }
 
   if (kcal === 0 && sum === 0) {
-    warnings.push('Все значения нулевые — продукт не добавит ничего в дневник')
+    warnings.push(t('manual.allZero'))
   }
 
   return { errors, warnings, ok: errors.length === 0 }
