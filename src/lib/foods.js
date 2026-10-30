@@ -1692,13 +1692,7 @@ export function amountLabel(value, unit = 'г') {
 }
 
 // Подпись единицы без числа: «г», «ml», «Portion».
-export function unitLabel(unit) {
-  if (unit === 'г') return t('units.g')
-  if (unit === 'мл') return t('units.ml')
-  if (unit === 'шт') return t('units.pcs')
-  if (unit === 'порция') return t('units.servingWord')
-  return unit
-}
+export { unitLabel } from './units.js'
 
 // Единая подпись «Б… У… Ж…» для всего приложения.
 //

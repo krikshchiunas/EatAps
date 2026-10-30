@@ -45,4 +45,18 @@ export function weekdaysShort() {
   return Array.from({ length: 7 }, (_, i) => cap(fmtDate(new Date(2024, 0, 1 + i), { weekday })))
 }
 
+// Короткий день недели для подписи на графике: «пн», «Mon», «ن».
+export function dowShort(d) {
+  return fmtDate(d, { weekday: getLang() === 'ar' ? 'narrow' : 'short' })
+}
+
+// «30 окт.», «30 Oct», «30. Okt.» — короткая дата для подписей.
+export function shortDate(d) {
+  return fmtDate(d, { day: 'numeric', month: 'short' })
+}
+
+export function monthShort(m) {
+  return fmtDate(new Date(2000, m, 1), { month: 'short' })
+}
+
 const cap = (s) => s.charAt(0).toLocaleUpperCase() + s.slice(1)

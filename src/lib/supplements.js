@@ -28,20 +28,24 @@
 
 import { MICRO_BY_KEY } from './micronutrients.js'
 import { rankedSearch } from './fuzzy.js'
-import { normalizeQuery } from './foods.js'
+import { normalizeQuery, formatAmount } from './foods.js'
+import { t } from './i18n.js'
+
+// Подпись группы — из словаря (supp.group.<ключ>) в момент показа.
+const group = (key, emoji) => ({ key, emoji, get label() { return t(`supp.group.${key}`) } })
 
 export const SUPP_GROUPS = [
-  { key: 'multi', label: 'Мультивитамины', emoji: '🌈' },
-  { key: 'vitamin', label: 'Витамины', emoji: '💊' },
-  { key: 'mineral', label: 'Минералы', emoji: '🧂' },
-  { key: 'omega', label: 'Омега и жиры', emoji: '🐟' },
-  { key: 'sport', label: 'Спортивные', emoji: '💪' },
-  { key: 'protein', label: 'Протеин и аминокислоты', emoji: '🥤' },
-  { key: 'joint', label: 'Суставы, кожа, волосы', emoji: '🦴' },
-  { key: 'gut', label: 'Пищеварение', emoji: '🦠' },
-  { key: 'sleep', label: 'Сон и нервы', emoji: '🌙' },
-  { key: 'herb', label: 'Травы и адаптогены', emoji: '🌿' },
-  { key: 'anti', label: 'Антиоксиданты', emoji: '🫐' },
+  group('multi', '🌈'),
+  group('vitamin', '💊'),
+  group('mineral', '🧂'),
+  group('omega', '🐟'),
+  group('sport', '💪'),
+  group('protein', '🥤'),
+  group('joint', '🦴'),
+  group('gut', '🦠'),
+  group('sleep', '🌙'),
+  group('herb', '🌿'),
+  group('anti', '🫐'),
 ]
 
 // S(id, name, emoji, group, unit, provides, extra)
@@ -601,36 +605,42 @@ export function makeCustomSupplement({ name, emoji, unit, dose, provides }) {
   }
 }
 
-// Название дозы: «2 капсулы», «5 г», «1 порция». Склонение по-русски —
-// единственное, что тут можно сделать неправильно и увидеть в дневнике
-// «2 капсула».
-const FORMS = {
-  'капсула': ['капсула', 'капсулы', 'капсул'],
-  'таблетка': ['таблетка', 'таблетки', 'таблеток'],
-  'порция': ['порция', 'порции', 'порций'],
-  'пастилка': ['пастилка', 'пастилки', 'пастилок'],
-  'капля': ['капля', 'капли', 'капель'],
-  'саше': ['саше', 'саше', 'саше'],
-  'шт': ['шт', 'шт', 'шт'],
-  'мерная ложка': ['мерная ложка', 'мерные ложки', 'мерных ложек'],
-  'ч. ложка': ['ч. ложка', 'ч. ложки', 'ч. ложек'],
-  'ст. ложка': ['ст. ложка', 'ст. ложки', 'ст. ложек'],
+// Название дозы: «2 капсулы», «5 г», «1 порция». Склонение — единственное,
+// что тут можно сделать неправильно и увидеть в дневнике «2 капсула».
+//
+// Единица приёма в данных — русское слово (так она лежит в дневнике и стеке).
+// Склонения и перевод — в словаре (supp.unit.<id>), здесь только соответствие
+// слова и ключа.
+const UNIT_ID = {
+  'капсула': 'capsule',
+  'таблетка': 'tablet',
+  'порция': 'serving',
+  'пастилка': 'gummy',
+  'капля': 'drop',
+  'саше': 'sachet',
+  'шт': 'piece',
+  'мерная ложка': 'scoop',
+  'ч. ложка': 'tsp',
+  'ст. ложка': 'tbsp',
+  'г': 'g',
+  'мл': 'ml',
 }
 
 export function doseLabel(dose, unit) {
   const n = Number(dose)
   if (!Number.isFinite(n)) return ''
-  const text = (Math.round(n * 100) / 100).toString().replace('.', ',')
-  const forms = FORMS[unit]
-  if (!forms) return `${text} ${unit || ''}`.trim()
-  if (!Number.isInteger(n)) return `${text} ${forms[1]}`
-  const mod10 = n % 10
-  const mod100 = n % 100
-  const form = mod10 === 1 && mod100 !== 11 ? forms[0]
-    : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20) ? forms[1]
-      : forms[2]
-  return `${n} ${form}`
+  const text = formatAmount(n)
+  const id = UNIT_ID[unit]
+  if (!id) return `${text} ${unit || ''}`.trim()
+  return t(`supp.unit.${id}.count`, { n: text, count: n })
 }
+
+// Единица словом («капсула», «capsule») и в составе фраз: «Сколько в ОДНОЙ
+// капсуле?», «Что внутри одной капсулы». Падеж по слову не вывести — у каждой
+// единицы свои формы в словаре.
+export const suppUnitWord = (unit) => (UNIT_ID[unit] ? t(`supp.unit.${UNIT_ID[unit]}.word`) : unit)
+export const suppUnitInOne = (unit) => (UNIT_ID[unit] ? t(`supp.unit.${UNIT_ID[unit]}.inOne`) : t('supp.inOneUnit', { unit }))
+export const suppUnitOfOne = (unit) => (UNIT_ID[unit] ? t(`supp.unit.${UNIT_ID[unit]}.ofOne`) : t('supp.ofOneUnit', { unit }))
 
 // Сумма по добавкам дня. Формат тот же, что у sumFoodMicros, — их складывает
 // microSummary.js, и расходиться они не должны.

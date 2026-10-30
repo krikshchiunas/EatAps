@@ -5,7 +5,9 @@ import common from './ru/common.js'
 import auth from './ru/auth.js'
 import day from './ru/day.js'
 import add from './ru/add.js'
+import stats from './ru/stats.js'
+import supps from './ru/supps.js'
 import system from './ru/system.js'
 
-export const strings = merge(common, auth, day, add, system)
+export const strings = merge(common, auth, day, add, stats, supps, system)
 export const data = {}

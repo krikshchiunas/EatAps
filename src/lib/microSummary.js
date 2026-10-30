@@ -35,6 +35,8 @@
 import { MICRONUTRIENTS, MICRO_GROUPS, microTargets, overThreshold, OVER_RATIO } from './micronutrients.js'
 import { sumFoodMicros } from './foodMicros.js'
 import { sumSuppMicros } from './supplements.js'
+import { t, fmtNum } from './i18n.js'
+import { unitLabel } from './units.js'
 
 // Порог «мало». Порог «перебора» живёт в micronutrients.overThreshold: он
 // зависит от того, чья это цель — личная или справочная, — и от того, есть ли
@@ -170,11 +172,11 @@ export function buildMicroSummary({ meals = [], supps = [], profile = null, goal
         // Единица стоит у ОБОИХ чисел. «600 — выше предела 350 мг» читается так,
         // будто у первого числа единица другая, и человек начинает гадать.
         text: r.ulScope === 'supp'
-          ? `${r.def.label}: из добавок ${fmtShort(r.ulUsed)} ${r.def.unit} при верхнем пределе ${fmtShort(r.ul)} ${r.def.unit}.`
-          : `${r.def.label}: ${fmtShort(r.total)} ${r.def.unit} при верхнем пределе ${fmtShort(r.ul)} ${r.def.unit}.`,
+          ? t('micro.alert.ulSupp', { name: r.def.label, a: amt(r.ulUsed, r.def.unit), ul: amt(r.ul, r.def.unit) })
+          : t('micro.alert.ul', { name: r.def.label, a: amt(r.total, r.def.unit), ul: amt(r.ul, r.def.unit) }),
       })
     } else if (r.status === STATUS.LIMIT) {
-      alerts.push({ key: r.key, level: 'mid', text: `${r.def.label}: ${fmtShort(r.total)} ${r.def.unit} при ориентире ${fmtShort(r.target)} ${r.def.unit}.` })
+      alerts.push({ key: r.key, level: 'mid', text: t('micro.alert.limit', { name: r.def.label, a: amt(r.total, r.def.unit), target: amt(r.target, r.def.unit) }) })
     }
   }
   // Отдельная новость: норму закрыла ЕДА, а добавка сверху оказалась лишней.
@@ -186,7 +188,7 @@ export function buildMicroSummary({ meals = [], supps = [], profile = null, goal
       alerts.push({
         key: r.key,
         level: 'low',
-        text: `${r.def.label}: норму закрыла еда (${fmtShort(r.fromFood)} ${r.def.unit}) — добавка сегодня была лишней.`,
+        text: t('micro.alert.redundant', { name: r.def.label, a: amt(r.fromFood, r.def.unit) }),
       })
     }
   }
@@ -220,8 +222,10 @@ function fmtShort(v) {
   const digits = abs >= 10 ? 0 : abs >= 1 ? 1 : 2
   const fixed = n.toFixed(digits)
   const text = fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
-  return text.replace('.', ',')
+  return fmtNum(Number(text), { maximumFractionDigits: 2, useGrouping: false })
 }
+
+const amt = (v, unit) => `${fmtShort(v)} ${unitLabel(unit)}`
 
 // ── «Сколько мне ещё нужно» для одной добавки ────────────────────────────────
 // Отвечает на вопрос, который человек задаёт перед тем, как проглотить

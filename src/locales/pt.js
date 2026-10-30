@@ -4,6 +4,8 @@ import common from './pt/common.js'
 import auth from './pt/auth.js'
 import day from './pt/day.js'
 import add from './pt/add.js'
+import stats from './pt/stats.js'
+import supps from './pt/supps.js'
 
-export const strings = merge(common, auth, day, add)
+export const strings = merge(common, auth, day, add, stats, supps)
 export const data = {}

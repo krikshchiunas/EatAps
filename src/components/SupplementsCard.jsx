@@ -2,10 +2,13 @@ import { useMemo, useState } from 'react'
 import { buildMicroSummary, STATUS } from '../lib/microSummary.js'
 import { formatMicro } from '../lib/micronutrients.js'
 import { topSourcesFor } from '../lib/foodMicros.js'
-import { doseLabel, scaleProvides } from '../lib/supplements.js'
+import { doseLabel, scaleProvides, suppUnitWord } from '../lib/supplements.js'
 import { sanitizeAmount } from '../lib/foods.js'
 import { perUnitOf, stackKey, stackMicroKeys, suppEntryFromStack, takenMap, takenCount } from '../lib/suppStack.js'
-import { plural } from '../lib/text.js'
+import { suppName } from '../lib/suppNames.js'
+import { foodName } from '../lib/foodNames.js'
+import { unitLabel } from '../lib/units.js'
+import { t } from '../lib/i18n.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Карточка добавок и микронутриентов на экране дня.
@@ -27,13 +30,13 @@ import { plural } from '../lib/text.js'
 // человек с дальтонизмом не отличит «закрыто» от «перебора». Тот же принцип,
 // что у пилюли качества углеводов.
 const TONE = {
-  [STATUS.NONE]: { color: 'var(--ink-3)', bar: 'var(--track)', word: 'нет' },
-  [STATUS.LOW]: { color: 'var(--ink-2)', bar: 'var(--accent)', word: 'мало' },
-  [STATUS.OK]: { color: 'var(--ink-2)', bar: 'var(--primary)', word: 'почти' },
-  [STATUS.DONE]: { color: 'var(--good)', bar: 'var(--good)', word: 'норма' },
-  [STATUS.OVER]: { color: 'var(--warn)', bar: 'var(--warn)', word: 'перебор' },
-  [STATUS.LIMIT]: { color: 'var(--warn)', bar: 'var(--warn)', word: 'выше ориентира' },
-  [STATUS.UL]: { color: 'var(--danger)', bar: 'var(--danger)', word: 'выше предела' },
+  [STATUS.NONE]: { color: 'var(--ink-3)', bar: 'var(--track)', word: 'micro.status.none' },
+  [STATUS.LOW]: { color: 'var(--ink-2)', bar: 'var(--accent)', word: 'micro.status.low' },
+  [STATUS.OK]: { color: 'var(--ink-2)', bar: 'var(--primary)', word: 'micro.status.almost' },
+  [STATUS.DONE]: { color: 'var(--good)', bar: 'var(--good)', word: 'micro.status.done' },
+  [STATUS.OVER]: { color: 'var(--warn)', bar: 'var(--warn)', word: 'micro.status.over' },
+  [STATUS.LIMIT]: { color: 'var(--warn)', bar: 'var(--warn)', word: 'micro.status.aboveGuide' },
+  [STATUS.UL]: { color: 'var(--danger)', bar: 'var(--danger)', word: 'micro.status.aboveUl' },
 }
 
 // Подпись статуса словом. Общей таблицы тут мало, и вот почему.
@@ -47,11 +50,11 @@ const TONE = {
 // Там честнее промолчать, чем изобрести оценку.
 function statusWord(row) {
   if (row.def.kind === 'limit') {
-    if (row.status === STATUS.UL || row.status === STATUS.LIMIT) return 'выше ориентира'
-    return row.total > 0 ? 'в пределах' : 'нет'
+    if (row.status === STATUS.UL || row.status === STATUS.LIMIT) return t('micro.status.aboveGuide')
+    return row.total > 0 ? t('micro.status.within') : t('micro.status.none')
   }
-  if (row.target == null) return row.status === STATUS.UL ? 'выше предела' : ''
-  return (TONE[row.status] || TONE[STATUS.NONE]).word
+  if (row.target == null) return row.status === STATUS.UL ? t('micro.status.aboveUl') : ''
+  return t((TONE[row.status] || TONE[STATUS.NONE]).word)
 }
 
 export default function SupplementsCard({
@@ -80,13 +83,13 @@ export default function SupplementsCard({
     const already = taken.get(stackKey(item))
     if (already) {
       removeSupp(date, already.id)
-      onToast?.(`${item.name} — отметка снята`)
+      onToast?.(t('supp.unmarked', { name: suppName(item) }))
       return
     }
     const entry = suppEntryFromStack(item)
     if (!entry) return
     addSupp(date, entry)
-    onToast?.(`${item.name} · ${doseLabel(entry.dose, entry.unit)}`)
+    onToast?.(`${suppName(item)} · ${doseLabel(entry.dose, entry.unit)}`)
   }
 
   return (
@@ -94,13 +97,13 @@ export default function SupplementsCard({
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'start' }}
       >
         <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
-          <span className="h2" style={{ fontSize: 17 }}>Добавки и витамины</span>
+          <span className="h2" style={{ fontSize: 17 }}>{t('supp.cardTitle')}</span>
           {goal > 0 && (
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-2)', background: 'var(--surface-2)', padding: '4px 12px', borderRadius: 999, whiteSpace: 'nowrap' }}>
-              норма закрыта у {done} из {goal}
+              {t('supp.doneOf', { n: done, total: goal })}
             </span>
           )}
         </span>
@@ -130,7 +133,7 @@ export default function SupplementsCard({
           виде — «выпил / не выпил» это вопрос одного касания, а не двух. */}
       {supplements.length > 0 && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, marginBottom: 8 }}>Мой стек</div>
+          <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, marginBottom: 8 }}>{t('supp.myStack')}</div>
           <div className="stack" style={{ marginTop: 0 }}>
             {supplements.map((item) => {
               const on = taken.has(stackKey(item))
@@ -149,7 +152,7 @@ export default function SupplementsCard({
                 >
                 <button
                   onClick={() => toggleStack(item)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', flex: '1 1 auto', minWidth: 0 }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'start', flex: '1 1 auto', minWidth: 0 }}
                 >
                   <span
                     aria-hidden="true"
@@ -165,15 +168,15 @@ export default function SupplementsCard({
                   </span>
                   <span style={{ flex: '1 1 auto', minWidth: 0 }}>
                     <span style={{ fontSize: 14, fontWeight: 550, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {item.emoji} {item.name}
+                      {item.emoji} {suppName(item)}
                     </span>
                     <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
                       {doseLabel(item.dose, item.unit)}
-                      {times > 1 ? ` · сегодня ${times} ${plural(times, 'раз', 'раза', 'раз')}` : ''}
+                      {times > 1 ? ` · ${t('supp.todayTimes', { list: t('count.times', { count: times }) })}` : ''}
                     </span>
                   </span>
                   <span style={{ fontSize: 12, color: on ? 'var(--good)' : 'var(--ink-3)', flex: '0 0 auto' }}>
-                    {on ? 'выпито' : 'отметить'}
+                    {on ? t('supp.taken') : t('day.strengthMark')}
                   </span>
                 </button>
                 {/* Убрать из стека можно только в развёрнутой карточке: в
@@ -183,9 +186,9 @@ export default function SupplementsCard({
                   <button
                     className="iconbtn"
                     style={{ width: 30, height: 30, fontSize: 14, flex: '0 0 auto' }}
-                    onClick={() => { removeStackItem(item.id); onToast?.(`«${item.name}» убрана из стека`) }}
-                    aria-label={`Убрать ${item.name} из стека`}
-                    title="Убрать из стека"
+                    onClick={() => { removeStackItem(item.id); onToast?.(t('supp.removedFromStack', { name: suppName(item) })) }}
+                    aria-label={t('supp.removeFromStackName', { name: suppName(item) })}
+                    title={t('supp.removeFromStack')}
                   >
                     ✕
                   </button>
@@ -206,7 +209,7 @@ export default function SupplementsCard({
 
       <div className="row gap8" style={{ marginTop: 12 }}>
         <button className="btn ghost" style={{ height: 44, fontSize: 15 }} onClick={onOpenAdd}>
-          ＋ Добавить добавку
+          ＋ {t('supp.add')}
         </button>
       </div>
 
@@ -238,26 +241,26 @@ function OneOffList({ date, supps, supplements, removeSupp, editSupp, saveStackI
       suppId: e.suppId, name: e.name, emoji: e.emoji, unit: e.unit,
       dose: e.dose, provides: perUnitOf(e),
     })
-    onToast?.(saved ? `«${e.name}» теперь в стеке` : 'В стеке слишком много добавок')
+    onToast?.(saved ? t('supp.nowInStack', { name: suppName(e) }) : t('supp.stackTooBig'))
   }
 
   return (
     <div style={{ marginTop: 14 }}>
-      <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, marginBottom: 8 }}>Сегодня разово</div>
+      <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, marginBottom: 8 }}>{t('supp.oneOff')}</div>
       <div className="stack" style={{ marginTop: 0 }}>
         {rows.map((e) => (
           editing === e.id
             ? <DoseEditor key={e.id} entry={e} onCancel={() => setEditing(null)} onSave={(dose) => { editSupp(date, reDose(e, dose)); setEditing(null) }} />
             : (
               <div key={e.id} className="row between" style={{ gap: 10, padding: '8px 12px', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)' }}>
-                <button onClick={() => setEditing(e.id)} style={{ minWidth: 0, flex: '1 1 auto', textAlign: 'left' }}>
+                <button onClick={() => setEditing(e.id)} style={{ minWidth: 0, flex: '1 1 auto', textAlign: 'start' }}>
                   <span style={{ fontSize: 14, fontWeight: 550, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {e.emoji} {e.name}
+                    {e.emoji} {suppName(e)}
                   </span>
-                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{doseLabel(e.dose, e.unit)} · изменить</span>
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{doseLabel(e.dose, e.unit)} · {t('supp.change')}</span>
                 </button>
-                <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 15, flex: '0 0 auto' }} onClick={() => pin(e)} aria-label="Добавить в стек" title="Добавить в стек">📌</button>
-                <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 15, flex: '0 0 auto' }} onClick={() => removeSupp(date, e.id)} aria-label={`Убрать ${e.name}`}>✕</button>
+                <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 15, flex: '0 0 auto' }} onClick={() => pin(e)} aria-label={t('supp.addToStack')} title={t('supp.addToStack')}>📌</button>
+                <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 15, flex: '0 0 auto' }} onClick={() => removeSupp(date, e.id)} aria-label={t('supp.removeName', { name: suppName(e) })}>✕</button>
               </div>
             )
         ))}
@@ -283,18 +286,18 @@ function DoseEditor({ entry, onSave, onCancel }) {
   return (
     <div className="row gap8" style={{ padding: '8px 12px', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)' }}>
       <span style={{ fontSize: 13, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {entry.emoji} {entry.name}
+        {entry.emoji} {suppName(entry)}
       </span>
       <input
         className="input" type="text" inputMode="decimal" value={value}
         onChange={(ev) => setValue(sanitizeAmount(ev.target.value))}
-        style={{ width: 78, flex: '0 0 auto', textAlign: 'right', height: 38 }}
-        aria-label={`Сколько, ${entry.unit}`}
+        style={{ width: 78, flex: '0 0 auto', textAlign: 'end', height: 38 }}
+        aria-label={t('supp.howManyUnit', { unit: suppUnitWord(entry.unit) })}
         autoFocus
       />
-      <span style={{ fontSize: 12, color: 'var(--ink-3)', flex: '0 0 auto' }}>{entry.unit}</span>
-      <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 15, flex: '0 0 auto' }} onClick={() => ok && onSave(n)} disabled={!ok} aria-label="Сохранить">✓</button>
-      <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 15, flex: '0 0 auto' }} onClick={onCancel} aria-label="Отменить">✕</button>
+      <span style={{ fontSize: 12, color: 'var(--ink-3)', flex: '0 0 auto' }}>{suppUnitWord(entry.unit)}</span>
+      <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 15, flex: '0 0 auto' }} onClick={() => ok && onSave(n)} disabled={!ok} aria-label={t('common.save')}>✓</button>
+      <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 15, flex: '0 0 auto' }} onClick={onCancel} aria-label={t('common.undo')}>✕</button>
     </div>
   )
 }
@@ -336,14 +339,14 @@ function MicroRow({ row, meals, onOpenGoal }) {
 
   return (
     <div>
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', textAlign: 'left' }}>
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', textAlign: 'start' }}>
         <div className="row between" style={{ gap: 10, marginBottom: 5 }}>
           <span style={{ fontSize: 14, fontWeight: 550, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {row.def.label}
-            {row.personal && <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500 }}> · моя норма</span>}
+            {row.personal && <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500 }}> · {t('supp.myNorm')}</span>}
           </span>
           <span className="tabular" style={{ fontSize: 13, color: tone.color, flex: '0 0 auto', whiteSpace: 'nowrap' }}>
-            {formatMicro(row.total)}{row.target != null ? ` / ${formatMicro(row.target)}` : ''} {unit}
+            {formatMicro(row.total)}{row.target != null ? ` / ${formatMicro(row.target)}` : ''} {unitLabel(unit)}
           </span>
         </div>
         {/* Полоска из двух частей: сначала еда, потом добавки. Это и есть
@@ -356,9 +359,9 @@ function MicroRow({ row, meals, onOpenGoal }) {
         )}
         <div className="row between" style={{ marginTop: 4, gap: 8 }}>
           <span style={{ fontSize: 11, color: 'var(--ink-3)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {row.fromFood > 0 && `еда ${formatMicro(row.fromFood)}`}
+            {row.fromFood > 0 && t('supp.fromFood', { n: formatMicro(row.fromFood) })}
             {row.fromFood > 0 && row.fromSupp > 0 && ' · '}
-            {row.fromSupp > 0 && `добавки ${formatMicro(row.fromSupp)}`}
+            {row.fromSupp > 0 && t('supp.fromSupps', { n: formatMicro(row.fromSupp) })}
           </span>
           <span style={{ fontSize: 11, color: tone.color, flex: '0 0 auto' }}>{statusWord(row)}</span>
         </div>
@@ -373,27 +376,27 @@ function MicroRow({ row, meals, onOpenGoal }) {
           {row.def.kind !== 'limit' && row.target != null && (
             <p style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5, margin: '0 0 10px' }}>
               {row.remaining > 0
-                ? `Осталось добрать ${formatMicro(row.remaining, unit)}.`
-                : `Норма закрыта, сверх неё ${formatMicro(-row.remaining, unit)}.`}
+                ? t('supp.remaining', { n: formatMicro(row.remaining, unit) })
+                : t('supp.surplus', { n: formatMicro(-row.remaining, unit) })}
               {row.ul != null && (
                 row.ulScope === 'supp'
-                  ? ` Верхний предел для добавок — ${formatMicro(row.ul, unit)}; из таблеток сегодня ${formatMicro(row.ulUsed, unit)}.`
-                  : ` Верхний предел — ${formatMicro(row.ul, unit)}.`
+                  ? ` ${t('supp.ulSupp', { ul: formatMicro(row.ul, unit), used: formatMicro(row.ulUsed, unit) })}`
+                  : ` ${t('supp.ulAll', { ul: formatMicro(row.ul, unit) })}`
               )}
             </p>
           )}
           {row.def.kind === 'limit' && row.target != null && (
             <p style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5, margin: '0 0 10px' }}>
-              Ориентир — не больше {formatMicro(row.target, unit)} в сутки. Сегодня {formatMicro(row.total, unit)}.
+              {t('supp.limitLine', { target: formatMicro(row.target, unit), total: formatMicro(row.total, unit) })}
             </p>
           )}
 
           {sources.length > 0 && (
             <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Больше всего дали</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>{t('supp.topSources')}</div>
               {sources.map((s, i) => (
                 <div key={i} className="row between" style={{ fontSize: 12.5, padding: '2px 0' }}>
-                  <span style={{ color: 'var(--ink-2)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.emoji} {s.name}</span>
+                  <span style={{ color: 'var(--ink-2)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.emoji} {foodName(s.name)}</span>
                   <span className="tabular" style={{ color: 'var(--ink-3)', flex: '0 0 auto' }}>{formatMicro(s.value, unit)}</span>
                 </div>
               ))}
@@ -401,7 +404,7 @@ function MicroRow({ row, meals, onOpenGoal }) {
           )}
 
           <button className="btn soft" style={{ height: 38, fontSize: 13.5 }} onClick={() => onOpenGoal?.(row.def.key)}>
-            {row.personal ? 'Изменить мою норму' : 'Задать свою норму'}
+            {row.personal ? t('supp.editMyNorm') : t('supp.setMyNorm')}
           </button>
         </div>
       )}
@@ -416,12 +419,10 @@ function Disclaimer({ coverage }) {
     <p style={{ fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.5, margin: 0 }}>
       {missed > 0 && (
         <>
-          {missed} {plural(missed, 'продукт', 'продукта', 'продуктов')} из {coverage.total} разобрать не удалось —
-          их витамины и минералы в счёт не вошли. Обычно это товары со штрихкодом и записи, где не указан вес.{' '}
+          {t('supp.missed', { list: t('count.products', { count: missed }), total: coverage.total })}{' '}
         </>
       )}
-      Числа справочные: они показывают, сколько вещества было в съеденном, а не сколько усвоилось. Это ориентир,
-      а не медицинский показатель, и дефицит по нему не определяют — для этого есть анализы.
+      {t('supp.disclaimer')}
     </p>
   )
 }

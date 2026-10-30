@@ -13,46 +13,53 @@ import { sumDay, freeSugarShare, sumAdvanced, satFatLimit } from './nutrition.js
 import { createTargetResolver, weightSummary, activitySummary } from './body.js'
 import { buildInsights } from './insights.js'
 import { normalizeName } from './text.js'
-import { keyOf, fromKey, addDays } from './date.js'
+import { keyOf, fromKey, addDays, dowShort, shortDate, monthShort } from './date.js'
+import { t } from './i18n.js'
+
+// Подписи — геттерами из словаря: справочники живут весь сеанс, язык может
+// смениться посреди него.
+const period = (key, days, gran) => ({ key, days, gran, get label() { return t(`stats.period.${key}`) } })
 
 export const PERIODS = [
-  { key: '7d', days: 7, label: '7 дней', gran: 'day' },
-  { key: '30d', days: 30, label: '30 дней', gran: 'day' },
-  { key: '6m', days: 182, label: '6 мес', gran: 'week' },
-  { key: '1y', days: 365, label: '1 год', gran: 'month' },
+  period('7d', 7, 'day'),
+  period('30d', 30, 'day'),
+  period('6m', 182, 'week'),
+  period('1y', 365, 'month'),
 ]
 
 // Порядок и оформление нутриентов. estimate: значение приблизительное/эвристическое
 // (не лабораторное измерение) — disclaimer поясняет это под графиком в StatsScreen.
+// unit — значение данных ('г', 'ккал'), подпись к нему даёт unitLabel.
+const nutrient = (key, rest, disclaimer = false) => {
+  const def = {
+    key,
+    ...rest,
+    get label() { return t(`stats.nut.${key}.label`) },
+    get short() { return t(`stats.nut.${key}.short`) },
+    get sources() { return t(`stats.nut.${key}.sources`) },
+  }
+  // Не спредом: спред вычислил бы геттер один раз, при загрузке модуля.
+  if (disclaimer) {
+    Object.defineProperty(def, 'disclaimer', { get: () => t(`stats.nut.${key}.disclaimer`), enumerable: true })
+  }
+  return def
+}
+
 export const NUTRIENTS = [
-  { key: 'kcal', label: 'Калории', short: 'Ккал', unit: 'ккал', color: 'var(--primary)' },
-  { key: 'protein', label: 'Белки', short: 'Белки', unit: 'г', color: 'var(--good)' },
-  {
-    key: 'qualityProtein', label: 'Усвояемый белок', short: 'Усв. белок', unit: 'г', color: 'var(--good)', estimate: true,
-    disclaimer: 'Белок, взвешенный по DIAAS — международному показателю качества белка (FAO): каждый продукт засчитывается в той доле, в какой его белок пригоден для строительства тканей. Значения справочные, по типу продукта, а не лабораторные данные конкретной пачки.',
-  },
-  { key: 'fat', label: 'Жиры', short: 'Жиры', unit: 'г', color: 'var(--warn)' },
-  {
-    key: 'satFat', label: 'Насыщенные жиры', short: 'Насыщ. жиры', unit: 'г', color: 'var(--warn)', invert: true, estimate: true,
-    disclaimer: 'Берутся из реальных данных продукта, если они указаны, иначе оцениваются по типу продукта (мясо, молочное, кондитерка и т.п.). Дневной ориентир — не более 10% калорий (рекомендация ВОЗ), отдельно от общей нормы жиров.',
-  },
-  { key: 'carbs', label: 'Углеводы', short: 'Углеводы', unit: 'г', color: 'var(--accent)' },
-  {
-    key: 'complexCarb', label: 'Сложные углеводы', short: 'Слож. угл.', unit: 'г', color: 'var(--accent)', estimate: true,
-    disclaimer: 'Доля углеводов из круп, картофеля, бобовых и цельнозерновых продуктов — продуктовая классификация по типу продукта, а не медицинский показатель «полезных» углеводов. Сахар, сладости и напитки в неё не входят.',
-  },
-  {
-    key: 'sugar', label: 'Оценка сахара', short: 'Сахар', unit: 'г', color: 'var(--danger)', invert: true, estimate: true,
-    disclaimer: '≈ Приблизительная оценка: сахар рассчитан из углеводов там, где не указан отдельно. Это ориентир, а не точное количество свободных сахаров.',
-  },
+  nutrient('kcal', { unit: 'ккал', color: 'var(--primary)' }),
+  nutrient('protein', { unit: 'г', color: 'var(--good)' }),
+  nutrient('qualityProtein', { unit: 'г', color: 'var(--good)', estimate: true }, true),
+  nutrient('fat', { unit: 'г', color: 'var(--warn)' }),
+  nutrient('satFat', { unit: 'г', color: 'var(--warn)', invert: true, estimate: true }, true),
+  nutrient('carbs', { unit: 'г', color: 'var(--accent)' }),
+  nutrient('complexCarb', { unit: 'г', color: 'var(--accent)', estimate: true }, true),
+  nutrient('sugar', { unit: 'г', color: 'var(--danger)', invert: true, estimate: true }, true),
 ]
 
 // Допуск попадания «в норму» (доля от цели). Калории строже, макросы мягче.
 // Экспортируется, чтобы график рисовал ту же зону допуска, что и статусы дней.
 export const TOL = { kcal: 0.1, protein: 0.15, fat: 0.15, carbs: 0.15, sugar: 0 }
 
-const MONTH_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-const DOW_SHORT = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб']
 
 const round1 = (n) => Math.round(n * 10) / 10
 
@@ -247,8 +254,8 @@ function buildBuckets(days, keys, gran, nutKey, ctx) {
       const d = fromKey(k)
       return {
         id: k,
-        label: keys.length <= 7 ? DOW_SHORT[d.getDay()] : String(d.getDate()),
-        full: `${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`,
+        label: keys.length <= 7 ? dowShort(d) : String(d.getDate()),
+        full: shortDate(d),
         value: logged ? dayNutrients(day.meals)[nutKey] : null,
         target: logged ? targetFor(nutKey, ctx.targetsOf(k, day)) : null,
         loggedDays: logged ? 1 : 0,
@@ -286,11 +293,11 @@ function buildBuckets(days, keys, gran, nutKey, ctx) {
       if (gran === 'week') {
         const d = fromKey(gid)
         label = `${d.getDate()}.${d.getMonth() + 1}`
-        full = `неделя с ${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`
+        full = t('stats.weekFrom', { date: shortDate(d) })
       } else {
         const [y, m] = gid.split('-').map(Number)
-        label = MONTH_SHORT[m - 1]
-        full = `${MONTH_SHORT[m - 1]} ${y}`
+        label = monthShort(m - 1)
+        full = `${monthShort(m - 1)} ${y}`
       }
       return {
         id: gid,
@@ -629,7 +636,7 @@ function weeklyStats(days, keys, ctx, today) {
         id: gid,
         start: gid,
         end: endKey,
-        label: `${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`,
+        label: shortDate(d),
         daysInPeriod: memberKeys.length,
         loggedDays: logged,
         // Неделя неполная: обрезана границей периода или ещё идёт.

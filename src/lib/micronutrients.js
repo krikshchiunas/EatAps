@@ -32,19 +32,24 @@
 //      его невозможно, и предупреждать об этом — врать. Такие пределы помечены
 //      ulScope: 'supp' и считаются только от добавок.
 // ─────────────────────────────────────────────────────────────────────────────
+import { t, dataTable, fmtNum } from './i18n.js'
+import { unitLabel } from './units.js'
 
 // Группы — порядок в интерфейсе.
+// Подпись группы — из словаря (micro.group.<ключ>) в момент показа.
+const group = (key, emoji) => ({ key, emoji, get label() { return t(`micro.group.${key}`) } })
+
 export const MICRO_GROUPS = [
-  { key: 'vitamin', label: 'Витамины', emoji: '💊' },
-  { key: 'mineral', label: 'Минералы', emoji: '🧂' },
-  { key: 'fat', label: 'Жирные кислоты', emoji: '🐟' },
-  { key: 'sport', label: 'Спортивные', emoji: '💪' },
-  { key: 'joint', label: 'Суставы и кожа', emoji: '🦴' },
-  { key: 'gut', label: 'ЖКТ', emoji: '🦠' },
-  { key: 'brain', label: 'Сон и нервы', emoji: '🌙' },
-  { key: 'herb', label: 'Травы и адаптогены', emoji: '🌿' },
-  { key: 'anti', label: 'Антиоксиданты', emoji: '🫐' },
-  { key: 'other', label: 'Прочее', emoji: '✨' },
+  group('vitamin', '💊'),
+  group('mineral', '🧂'),
+  group('fat', '🐟'),
+  group('sport', '💪'),
+  group('joint', '🦴'),
+  group('gut', '🦠'),
+  group('brain', '🌙'),
+  group('herb', '🌿'),
+  group('anti', '🫐'),
+  group('other', '✨'),
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,10 +75,15 @@ export const MICRO_GROUPS = [
 //   about     — одна фраза, зачем это, для пояснения в интерфейсе.
 // ─────────────────────────────────────────────────────────────────────────────
 
+//
+// Русские label/short/about — исходник. Остальные языки берут их из таблицы
+// данных micros.<key>; чего там нет, показывается по-русски.
+const microText = (key, field, fallback) => dataTable('micros')?.[key]?.[field] ?? fallback
+
 const D = (key, label, unit, group, rest = {}) => ({
   key,
-  label,
-  short: rest.short || label,
+  get label() { return microText(key, 'label', label) },
+  get short() { return microText(key, 'short', rest.short || label) },
   unit,
   group,
   kind: rest.kind || 'target',
@@ -83,7 +93,7 @@ const D = (key, label, unit, group, rest = {}) => ({
   ulScope: rest.ulScope || 'all',
   fromFood: rest.fromFood !== false,
   optional: rest.optional === true,
-  about: rest.about || '',
+  get about() { return microText(key, 'about', rest.about || '') },
 })
 
 export const MICRONUTRIENTS = [
@@ -396,7 +406,7 @@ export function sanitizeMicroGoal(key, raw) {
 // ── Форматирование ───────────────────────────────────────────────────────────
 // Микронутриенты живут в разных порядках величин: 2,4 мкг B12 и 3400 мг калия.
 // Единое правило: до 10 — одна-две значащие цифры после запятой, дальше целое.
-// Печатаем через запятую — по-русски разделитель именно такой.
+// Разделитель дробной части — по языку интерфейса: по-русски запятая.
 
 export function formatMicro(value, unit) {
   // null и пустая строка — это «неизвестно», а Number(null) даёт ноль. Без
@@ -411,7 +421,7 @@ export function formatMicro(value, unit) {
   const fixed = n.toFixed(digits)
   // Хвостовые нули убираем только у дробной части: «0,90 мг» и «2,0 мкг» —
   // это шум, а «100» ронять до «1» нельзя.
-  const text = fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
-  const ru = text.replace('.', ',')
-  return unit ? `${ru} ${unit}` : ru
+  const trimmed = fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
+  const shown = fmtNum(Number(trimmed), { maximumFractionDigits: 2, useGrouping: false })
+  return unit ? `${shown} ${unitLabel(unit)}` : shown
 }

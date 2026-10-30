@@ -4,12 +4,16 @@ import {
   SUPPLEMENTS, SUPP_GROUPS, POPULAR_SUPPLEMENTS,
   searchSupplements, scaleProvides, makeCustomSupplement, doseLabel,
   doseFields, providesFromFields, unitProvides, unitDose, needsDoseSetup, hasOwnDose,
+  suppUnitWord, suppUnitInOne, suppUnitOfOne,
 } from '../lib/supplements.js'
 import { MICRONUTRIENTS, MICRO_GROUPS, formatMicro } from '../lib/micronutrients.js'
 import { previewSupplement } from '../lib/microSummary.js'
 import { sanitizeAmount } from '../lib/foods.js'
 import { stackItemFromSupplement } from '../lib/suppStack.js'
-import { plural } from '../lib/text.js'
+import { suppName, suppNote, suppWarn } from '../lib/suppNames.js'
+import { unitLabel } from '../lib/units.js'
+import { normalizeQuery } from '../lib/foods.js'
+import { t } from '../lib/i18n.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Лист добавления добавки.
@@ -105,14 +109,14 @@ export default function SupplementSheet({ summary, suppDoses = {}, setSuppDose, 
               <button
                 className="iconbtn"
                 onClick={() => (own || !selected.variable ? setEditingUnit(false) : setSelected(null))}
-                aria-label="Назад"
-              >←</button>
+                aria-label={t('common.back')}
+              >{t('supp.backArrow')}</button>
             )}
             <h2 className="h2" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {!selected ? 'Добавка' : editingUnit ? selected.name : 'Сколько принято'}
+              {!selected ? t('supp.title') : editingUnit ? suppName(selected) : t('supp.howMuchTaken')}
             </h2>
           </div>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть" style={{ flex: '0 0 auto' }}>✕</button>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')} style={{ flex: '0 0 auto' }}>✕</button>
         </div>
 
         {selected && editingUnit ? (
@@ -129,20 +133,20 @@ export default function SupplementSheet({ summary, suppDoses = {}, setSuppDose, 
             <div className="row gap12" style={{ alignItems: 'flex-start', marginBottom: 16 }}>
               <span className="meal-emoji" style={{ width: 42, height: 42, fontSize: 20, flex: '0 0 auto' }}>{selected.emoji}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>{selected.name}</div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>{suppName(selected)}</div>
                 {/* Типовую подпись с этикетки прячем, если человек указал свою
                     банку: «≈ 180 EPA + 120 DHA» рядом с его собственными 500/250
                     читается как спор приложения с самим собой. */}
                 {selected.note && !own && (
-                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.4 }}>{selected.note}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.4 }}>{suppNote(selected)}</div>
                 )}
               </div>
-              <button className="btn soft" style={{ width: 'auto', height: 34, padding: '0 12px', fontSize: 13, flex: '0 0 auto' }} onClick={() => setSelected(null)}>Другая</button>
+              <button className="btn soft" style={{ width: 'auto', height: 34, padding: '0 12px', fontSize: 13, flex: '0 0 auto' }} onClick={() => setSelected(null)}>{t('supp.other')}</button>
             </div>
 
             {selected.warn && (
               <p style={{ fontSize: 13, color: 'var(--warn)', background: 'var(--surface-2)', padding: '10px 12px', borderRadius: 'var(--r-sm)', lineHeight: 1.45, margin: '0 0 16px' }}>
-                ⚠️ {selected.warn}
+                ⚠️ {suppWarn(selected)}
               </p>
             )}
 
@@ -151,23 +155,23 @@ export default function SupplementSheet({ summary, suppDoses = {}, setSuppDose, 
             <button
               onClick={() => setEditingUnit(true)}
               style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'start',
                 padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)', marginBottom: 16,
               }}
             >
               <span style={{ flex: '1 1 auto', minWidth: 0 }}>
                 <span style={{ fontSize: 12, color: 'var(--ink-3)', display: 'block' }}>
-                  {own ? 'Ваша банка · в одной единице' : 'Типовая банка · в одной единице'}
+                  {own ? t('supp.ownJar') : t('supp.typicalJar')}
                 </span>
                 <span style={{ fontSize: 13.5, fontWeight: 550, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {describeUnit(unit)}
                 </span>
               </span>
-              <span style={{ fontSize: 12.5, color: 'var(--primary)', fontWeight: 600, flex: '0 0 auto' }}>изменить</span>
+              <span style={{ fontSize: 12.5, color: 'var(--primary)', fontWeight: 600, flex: '0 0 auto' }}>{t('supp.change')}</span>
             </button>
 
             <div className="field">
-              <label>Сколько ({selected.unit})</label>
+              <label>{t('supp.howManyUnit', { unit: suppUnitWord(selected.unit) })}</label>
               <input
                 className="input" type="text" inputMode="decimal" value={dose}
                 onChange={(e) => setDose(sanitizeAmount(e.target.value))}
@@ -185,23 +189,23 @@ export default function SupplementSheet({ summary, suppDoses = {}, setSuppDose, 
             <PreviewList preview={preview} />
 
             <div className="row gap8" style={{ marginTop: 4 }}>
-              <button className="btn" onClick={() => submit(false)} disabled={!(doseN > 0)}>Записать на сегодня</button>
+              <button className="btn" onClick={() => submit(false)} disabled={!(doseN > 0)}>{t('supp.logToday')}</button>
             </div>
             <button className="btn ghost" style={{ marginTop: 10 }} onClick={() => submit(true)} disabled={!(doseN > 0)}>
-              Записать и добавить в мой стек
+              {t('supp.logAndPin')}
             </button>
           </>
         ) : (
           <>
             <input
-              className="input" placeholder="Найти: креатин, магний, омега-3…"
+              className="input" placeholder={t('supp.searchPh')}
               value={q} onChange={(e) => setQ(e.target.value)}
               style={{ marginBottom: 12 }}
             />
 
             {!q.trim() && (
               <div className="row gap8" style={{ flexWrap: 'wrap', marginBottom: 14 }}>
-                <button className={`chip ${!group ? 'on' : ''}`} onClick={() => setGroup(null)}>Популярное</button>
+                <button className={`chip ${!group ? 'on' : ''}`} onClick={() => setGroup(null)}>{t('supp.popular')}</button>
                 {SUPP_GROUPS.map((g) => (
                   <button key={g.key} className={`chip ${group === g.key ? 'on' : ''}`} onClick={() => setGroup(g.key)}>
                     {g.emoji} {g.label}
@@ -215,26 +219,26 @@ export default function SupplementSheet({ summary, suppDoses = {}, setSuppDose, 
                 <button
                   key={s.id}
                   onClick={() => pick(s)}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)' }}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'start', padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)' }}
                 >
                   <span style={{ fontSize: 19, flex: '0 0 auto' }}>{s.emoji}</span>
                   <span style={{ minWidth: 0, flex: 1 }}>
-                    <span style={{ fontSize: 14.5, fontWeight: 550, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                    <span style={{ fontSize: 14.5, fontWeight: 550, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{suppName(s)}</span>
                     <span style={{ fontSize: 12, color: 'var(--ink-3)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {hasOwnDose(s, suppDoses) ? `ваша банка · ${describeUnit(suppDoses[s.id].provides)}` : mainSubstances(s)}
+                      {hasOwnDose(s, suppDoses) ? t('supp.ownJarLine', { what: describeUnit(suppDoses[s.id].provides) }) : mainSubstances(s)}
                     </span>
                   </span>
                 </button>
               ))}
               {list.length === 0 && (
                 <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.5, textAlign: 'center', padding: '18px 0' }}>
-                  Такой добавки в каталоге нет — соберите свою, и она будет считаться наравне с остальными.
+                  {t('supp.notInCatalog')}
                 </p>
               )}
             </div>
 
             <button className="btn ghost" style={{ marginTop: 14 }} onClick={() => setCustom(true)}>
-              ＋ Своя добавка (с этикетки)
+              ＋ {t('supp.custom')}
             </button>
           </>
         )}
@@ -251,7 +255,7 @@ export default function SupplementSheet({ summary, suppDoses = {}, setSuppDose, 
 function mainSubstances(s) {
   const keys = Object.keys(s.provides)
   const defs = MICRONUTRIENTS.filter((d) => keys.includes(d.key))
-  if (defs.length > 4) return `${defs.length} ${plural(defs.length, 'вещество', 'вещества', 'веществ')}`
+  if (defs.length > 4) return t('supp.substances', { count: defs.length })
   const dosed = scaleProvides(s.provides, s.defaultDose ?? 1)
   return defs.map((d) => `${d.short} ${formatMicro(dosed[d.key], d.unit)}`).join(' · ')
 }
@@ -269,9 +273,9 @@ function doseChoices(s) {
 // Состав единицы одной строкой: «D 50 мкг · K 100 мкг».
 function describeUnit(provides) {
   const keys = Object.keys(provides || {})
-  if (!keys.length) return 'состав не указан'
+  if (!keys.length) return t('supp.noComposition')
   const defs = MICRONUTRIENTS.filter((d) => keys.includes(d.key))
-  if (defs.length > 4) return `${defs.length} ${plural(defs.length, 'вещество', 'вещества', 'веществ')}`
+  if (defs.length > 4) return t('supp.substances', { count: defs.length })
   return defs.map((d) => `${d.short} ${formatMicro(provides[d.key], d.unit)}`).join(' · ')
 }
 
@@ -300,12 +304,10 @@ function UnitEditor({ supp, saved, onSave }) {
   return (
     <>
       <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.5, margin: '0 0 4px' }}>
-        Сколько в ОДНОЙ {supp.unit === 'г' || supp.unit === 'мл' ? `единице (${supp.unit})` : supp.unit === 'порция' ? 'порции' : supp.unit.replace(/а$/, 'е')}?
+        {t('supp.howMuchInOne', { what: suppUnitInOne(supp.unit) })}
       </p>
       <p style={{ fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.45, margin: '0 0 16px' }}>
-        {supp.variable
-          ? 'У разных производителей дозировки сильно отличаются — перепишите со своей банки. Дальше будете указывать только количество.'
-          : 'Числа подставлены типовые. Если на вашей банке другие — поправьте, приложение запомнит.'}
+        {supp.variable ? t('supp.variableNote') : t('supp.typicalNote')}
       </p>
 
       <div className="stack" style={{ marginTop: 0, marginBottom: 18 }}>
@@ -316,18 +318,18 @@ function UnitEditor({ supp, saved, onSave }) {
               className="input" type="text" inputMode="decimal" placeholder="0"
               value={values[f.id] ?? ''}
               onChange={(e) => setValues((v) => ({ ...v, [f.id]: sanitizeAmount(e.target.value) }))}
-              style={{ width: 96, flex: '0 0 auto', textAlign: 'right', height: 42 }}
-              aria-label={`${f.label}, ${f.unit}`}
+              style={{ width: 96, flex: '0 0 auto', textAlign: 'end', height: 42 }}
+              aria-label={`${f.label}, ${unitLabel(f.unit)}`}
             />
-            <span style={{ fontSize: 12.5, color: 'var(--ink-3)', width: 46, flex: '0 0 auto' }}>{f.unit}</span>
+            <span style={{ fontSize: 12.5, color: 'var(--ink-3)', width: 46, flex: '0 0 auto' }}>{unitLabel(f.unit)}</span>
           </div>
         ))}
       </div>
 
-      <button className="btn" onClick={() => onSave(provides)} disabled={!ready}>Запомнить эту банку</button>
+      <button className="btn" onClick={() => onSave(provides)} disabled={!ready}>{t('supp.rememberJar')}</button>
       {!ready && (
         <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '10px 0 0', lineHeight: 1.45 }}>
-          Заполните хотя бы одно поле — иначе считать будет нечего.
+          {t('supp.fillOne')}
         </p>
       )}
     </>
@@ -335,10 +337,10 @@ function UnitEditor({ supp, saved, onSave }) {
 }
 
 const VERDICT = {
-  ul: { color: 'var(--danger)', text: 'выше верхнего предела' },
-  excess: { color: 'var(--warn)', text: 'заметно выше нормы' },
-  completes: { color: 'var(--good)', text: 'закроет норму' },
-  fills: { color: 'var(--ink-3)', text: 'в пределах нормы' },
+  ul: { color: 'var(--danger)' },
+  excess: { color: 'var(--warn)' },
+  completes: { color: 'var(--good)' },
+  fills: { color: 'var(--ink-3)' },
 }
 
 // Совет одной фразой. Важно не соврать о причине: «это уже набрано едой»
@@ -348,12 +350,12 @@ function adviceFor(p) {
   const closedByFood = p.target != null && p.fromFood >= p.target
   if (p.verdict === 'ul') {
     return closedByFood
-      ? `${p.def.label} уйдёт выше верхнего предела, а норму уже закрыла еда — сегодня это лишнее.`
-      : `${p.def.label} уйдёт выше верхнего предела. Столько за сутки получать не стоит.`
+      ? t('supp.adviceUlFood', { name: p.def.label })
+      : t('supp.adviceUl', { name: p.def.label })
   }
   return closedByFood
-    ? `${p.def.label}: норму сегодня уже закрыла еда — добавка сверху не нужна.`
-    : `${p.def.label} уйдёт заметно выше вашей нормы.`
+    ? t('supp.adviceFood', { name: p.def.label })
+    : t('supp.adviceExcess', { name: p.def.label })
 }
 
 function PreviewList({ preview }) {
@@ -364,14 +366,14 @@ function PreviewList({ preview }) {
   const worst = shown.find((p) => p.verdict === 'ul' || p.verdict === 'excess')
   return (
     <div className="card" style={{ padding: 14, marginBottom: 18, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
-      <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, marginBottom: 10 }}>Станет за сегодня</div>
+      <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, marginBottom: 10 }}>{t('supp.willBe')}</div>
       {shown.map((p) => {
         const v = VERDICT[p.verdict] || VERDICT.fills
         return (
           <div key={p.key} className="row between" style={{ gap: 10, padding: '4px 0' }}>
             <span style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.def.label}</span>
             <span className="tabular" style={{ fontSize: 12.5, color: v.color, flex: '0 0 auto', whiteSpace: 'nowrap' }}>
-              {formatMicro(p.before)} → {formatMicro(p.after)}{p.target != null ? ` / ${formatMicro(p.target)}` : ''} {p.def.unit}
+              {formatMicro(p.before)} → {formatMicro(p.after)}{p.target != null ? ` / ${formatMicro(p.target)}` : ''} {unitLabel(p.def.unit)}
             </span>
           </div>
         )
@@ -381,22 +383,11 @@ function PreviewList({ preview }) {
           {adviceFor(worst)}
         </p>
       )}
-      {rest > 0 && <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 8 }}>и ещё {rest}</div>}
+      {rest > 0 && <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 8 }}>{t('supp.andMore', { n: rest })}</div>}
     </div>
   )
 }
 
-// Единица в родительном падеже: «состав одной капсулы», а не «на одну капсула».
-// Списка не избежать — русский падеж по строке не вывести, а склеивать
-// «на одну» + слово в именительном нельзя ни с одним из этих слов.
-const UNIT_OF = {
-  'капсула': 'одной капсулы',
-  'таблетка': 'одной таблетки',
-  'порция': 'одной порции',
-  'г': 'одного грамма',
-  'мл': 'одного миллилитра',
-  'капля': 'одной капли',
-}
 
 // ── Своя добавка ─────────────────────────────────────────────────────────────
 // Ввод по этикетке: название, единица, и сколько чего в одной единице.
@@ -421,11 +412,11 @@ function CustomBuilder({ onBack, onDone, onClose }) {
   const drop = (key) => setRows((r) => { const n = { ...r }; delete n[key]; return n })
 
   const options = useMemo(() => {
-    const query = pq.trim().toLowerCase().replace(/ё/g, 'е')
+    const query = normalizeQuery(pq)
     return MICRONUTRIENTS.filter((d) => {
       if (rows[d.key] != null) return false
       if (!query) return true
-      return d.label.toLowerCase().replace(/ё/g, 'е').includes(query) || d.key.toLowerCase().includes(query)
+      return normalizeQuery(d.label).includes(query) || d.key.toLowerCase().includes(query)
     })
   }, [pq, rows])
 
@@ -433,34 +424,34 @@ function CustomBuilder({ onBack, onDone, onClose }) {
     <>
       <div className="row between" style={{ marginBottom: 14 }}>
         <div className="row gap8">
-          <button className="iconbtn" onClick={onBack} aria-label="Назад">←</button>
-          <h2 className="h2">Своя добавка</h2>
+          <button className="iconbtn" onClick={onBack} aria-label={t('common.back')}>{t('supp.backArrow')}</button>
+          <h2 className="h2">{t('supp.customTitle')}</h2>
         </div>
-        <button className="iconbtn" onClick={onClose} aria-label="Закрыть">✕</button>
+        <button className="iconbtn" onClick={onClose} aria-label={t('common.close')}>✕</button>
       </div>
 
       <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.5, margin: '0 0 16px' }}>
-        Перепишите с этикетки состав одной капсулы, ложки или таблетки — сколько принять, спросим потом.
+        {t('supp.customHint')}
       </p>
 
       <div className="field">
-        <label>Название</label>
-        <input className="input" placeholder="Напр. Комплекс из аптеки" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <label>{t('template.name')}</label>
+        <input className="input" placeholder={t('supp.customNamePh')} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </div>
 
       <div className="field">
-        <label>Единица приёма</label>
+        <label>{t('supp.unitLabel')}</label>
         <div className="row gap8" style={{ flexWrap: 'wrap' }}>
           {['капсула', 'таблетка', 'порция', 'г', 'мл', 'капля'].map((u) => (
-            <button key={u} className={`chip ${unit === u ? 'on' : ''}`} onClick={() => setUnit(u)}>{u}</button>
+            <button key={u} className={`chip ${unit === u ? 'on' : ''}`} onClick={() => setUnit(u)}>{suppUnitWord(u)}</button>
           ))}
         </div>
       </div>
 
       <div className="field">
-        <label>Что внутри {UNIT_OF[unit] || `одной единицы (${unit})`}</label>
+        <label>{t('supp.whatsInside', { what: suppUnitOfOne(unit) })}</label>
         {chosen.length === 0 && (
-          <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 10px' }}>Пока пусто — добавьте хотя бы одно вещество.</p>
+          <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '0 0 10px' }}>{t('supp.addOneSubstance')}</p>
         )}
         <div className="stack" style={{ marginTop: 0 }}>
           {chosen.map((key) => {
@@ -471,20 +462,20 @@ function CustomBuilder({ onBack, onDone, onClose }) {
                 <input
                   className="input" type="text" inputMode="decimal" placeholder="0"
                   value={rows[key]} onChange={(e) => setRows((r) => ({ ...r, [key]: sanitizeAmount(e.target.value) }))}
-                  style={{ width: 92, flex: '0 0 auto', textAlign: 'right' }}
+                  style={{ width: 92, flex: '0 0 auto', textAlign: 'end' }}
                 />
-                <span style={{ fontSize: 12.5, color: 'var(--ink-3)', width: 46, flex: '0 0 auto' }}>{def.unit}</span>
-                <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 14, flex: '0 0 auto' }} onClick={() => drop(key)} aria-label={`Убрать ${def.label}`}>✕</button>
+                <span style={{ fontSize: 12.5, color: 'var(--ink-3)', width: 46, flex: '0 0 auto' }}>{unitLabel(def.unit)}</span>
+                <button className="iconbtn" style={{ width: 32, height: 32, fontSize: 14, flex: '0 0 auto' }} onClick={() => drop(key)} aria-label={t('supp.removeName', { name: def.label })}>✕</button>
               </div>
             )
           })}
         </div>
         <button className="btn soft" style={{ height: 40, fontSize: 14, marginTop: 12 }} onClick={() => setPickerOpen((o) => !o)}>
-          {pickerOpen ? 'Свернуть список' : '＋ Добавить вещество'}
+          {pickerOpen ? t('supp.collapseList') : `＋ ${t('supp.addSubstance')}`}
         </button>
         {pickerOpen && (
           <div style={{ marginTop: 12 }}>
-            <input className="input" placeholder="Найти вещество" value={pq} onChange={(e) => setPq(e.target.value)} style={{ marginBottom: 10 }} />
+            <input className="input" placeholder={t('supp.findSubstance')} value={pq} onChange={(e) => setPq(e.target.value)} style={{ marginBottom: 10 }} />
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
               {MICRO_GROUPS.map((g) => {
                 const items = options.filter((d) => d.group === g.key)
@@ -513,7 +504,7 @@ function CustomBuilder({ onBack, onDone, onClose }) {
           if (supp) onDone(supp)
         }}
       >
-        Дальше
+        {t('supp.next')}
       </button>
     </>
   )

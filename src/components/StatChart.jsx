@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { statusColor } from '../lib/stats.js'
+import { unitLabel } from '../lib/foods.js'
+import { t } from '../lib/i18n.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Лёгкий график нутриента на чистом SVG (без сторонних библиотек).
@@ -66,7 +68,7 @@ export default function StatChart({ series = [], target, color, unit, invert = f
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', overflow: 'visible' }} role="img" aria-label="График нутриента">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', overflow: 'visible' }} role="img" aria-label={t('stats.chartAria')}>
         {/* Зона допуска цели */}
         {bandTop != null && bandBot != null && (
           <rect x={PAD_X} y={Math.min(bandTop, bandBot)} width={W - 2 * PAD_X} height={Math.abs(bandBot - bandTop)} fill={color} opacity="0.07" rx="4" />
@@ -139,7 +141,7 @@ export default function StatChart({ series = [], target, color, unit, invert = f
           }}
         >
           <span className="stat-tip__val" style={{ color }}>
-            {estimate ? '≈' : ''}{Math.round(num(selected.value))} {unit}
+            {estimate ? '≈' : ''}{Math.round(num(selected.value))} {unitLabel(unit)}
           </span>
           <span className="stat-tip__day">{selected.full}</span>
         </div>
