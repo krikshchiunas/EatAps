@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { buildShareData, renderShareCard, cardToBlob } from '../lib/shareCard.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import { t } from '../lib/i18n.js'
+import { useLang } from '../lib/useLang.js'
 
 // Карточка дня для соцсетей.
 //
@@ -15,13 +17,14 @@ export default function ShareCardSheet({ date, onClose }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState(null)
   const [theme, setTheme] = useState(resolvedTheme === 'light' ? 'light' : 'dark')
+  const lang = useLang()
 
   const day = dayOf(date)
   const data = buildShareData(day, date, { name: profile?.name })
 
   useEffect(() => {
     if (canvasRef.current) renderShareCard(canvasRef.current, data, theme)
-  }, [date, theme, day, profile?.name])
+  }, [date, theme, day, profile?.name, lang])
 
   // Системное «Поделиться» доступно не везде (десктопные браузеры, старый
   // Android). Там, где его нет, честно сохраняем файл — а не показываем
@@ -42,11 +45,11 @@ export default function ShareCardSheet({ date, onClose }) {
         a.download = `eataps-${date}.png`
         a.click()
         setTimeout(() => URL.revokeObjectURL(url), 1000)
-        setNote('Картинка сохранена')
+        setNote(t('share.saved'))
       }
     } catch (e) {
       // Отмена системного диалога — не ошибка, о ней сообщать не нужно.
-      if (e?.name !== 'AbortError') setNote('Не удалось поделиться')
+      if (e?.name !== 'AbortError') setNote(t('share.failed'))
     }
     setBusy(false)
   }
@@ -56,8 +59,8 @@ export default function ShareCardSheet({ date, onClose }) {
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 16 }}>
-          <div className="h2" style={{ fontSize: 17 }}>Карточка дня</div>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <div className="h2" style={{ fontSize: 17 }}>{t('share.title')}</div>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
 
         <canvas
@@ -69,23 +72,23 @@ export default function ShareCardSheet({ date, onClose }) {
         />
 
         <div className="seg" style={{ marginBottom: 14 }}>
-          <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>Тёмная</button>
-          <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>Светлая</button>
+          <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>{t('share.dark')}</button>
+          <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>{t('share.light')}</button>
         </div>
 
         <button className="btn" disabled={busy || data.empty} onClick={share}>
-          {busy ? 'Готовим…' : 'Поделиться'}
+          {busy ? t('share.preparing') : t('share.share')}
         </button>
 
         {data.empty && (
           <p className="set-note" style={{ marginBottom: 0 }}>
-            В этот день ничего не записано — делиться пока нечем.
+            {t('share.empty')}
           </p>
         )}
         {note && <p className="set-note" style={{ marginBottom: 0 }}>{note}</p>}
         {!data.empty && !note && (
           <p className="set-note" style={{ marginBottom: 0 }}>
-            На карточку попадает только съеденное. Вес, самочувствие и заметки дня не публикуются.
+            {t('share.note')}
           </p>
         )}
       </div>

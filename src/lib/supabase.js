@@ -6,6 +6,7 @@ import { isMissingColumn } from './pgErrors.js'
 import { log } from './log.js'
 import { newId } from './uuid.js'
 import { DEFAULT_VISIBILITY } from './relationship.js'
+import { t } from './i18n.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -330,14 +331,14 @@ export async function listPosts(userId, { limit = 20, before = null } = {}) {
 }
 
 export async function createPost({ userId, text, imageUrl, visibility = DEFAULT_VISIBILITY }) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const payload = {
     user_id: userId,
     text: text?.trim() ? text.trim() : null,
     image_url: imageUrl || null,
     visibility,
   }
-  if (!payload.text && !payload.image_url) return { error: 'Пустая мысль' }
+  if (!payload.text && !payload.image_url) return { error: t('socialErr.emptyThought') }
   let { data, error } = await supabase.from('posts').insert(payload).select('*').single()
   // Фронтенд задеплоен раньше миграции социального графа: колонки visibility
   // ещё нет. Публикация не должна из-за этого падать — повторяем без неё, и
@@ -351,19 +352,19 @@ export async function createPost({ userId, text, imageUrl, visibility = DEFAULT_
 }
 
 export async function updatePost(postId, { text, imageUrl }) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const payload = {
     text: text?.trim() ? text.trim() : null,
     image_url: imageUrl || null,
   }
-  if (!payload.text && !payload.image_url) return { error: 'Пустая мысль' }
+  if (!payload.text && !payload.image_url) return { error: t('socialErr.emptyThought') }
   const { data, error } = await supabase.from('posts').update(payload).eq('id', postId).select('*').single()
   if (error) return { error: normalizeError(error).message }
   return { ok: data }
 }
 
 export async function deletePost(postId) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { error } = await supabase.from('posts').delete().eq('id', postId)
   return error ? { error: normalizeError(error).message } : { ok: true }
 }
@@ -372,7 +373,7 @@ export async function deletePost(postId) {
 // не сообщает, кто он и что сейчас стоит: он просит «переключить на 🥕/🥦»,
 // остальное решает состояние строки.
 export async function togglePostReaction(postId, reaction) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { data, error } = await supabase.rpc('toggle_post_reaction', {
     p_post_id: postId,
     p_reaction: reaction,
@@ -393,9 +394,9 @@ export async function listPostComments(postId, limit = 100) {
 }
 
 export async function addPostComment({ postId, userId, text }) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const body = (text || '').trim()
-  if (!body) return { error: 'Пустой ответ' }
+  if (!body) return { error: t('socialErr.emptyReply') }
   const { data, error } = await supabase
     .from('post_comments')
     .insert({ post_id: postId, user_id: userId, text: body })
@@ -406,7 +407,7 @@ export async function addPostComment({ postId, userId, text }) {
 }
 
 export async function deletePostComment(commentId) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { error } = await supabase.from('post_comments').delete().eq('id', commentId)
   return error ? { error: normalizeError(error).message } : { ok: true }
 }
@@ -414,13 +415,13 @@ export async function deletePostComment(commentId) {
 // ---------------- Чат ----------------
 // Сжать фото до ~1280px по длинной стороне, JPEG q=0.8 — быстро уходит по сети.
 async function compressImageFile(file, maxSize = 1280, quality = 0.8) {
-  if (!file || !file.type?.startsWith('image/')) throw new Error('Это не изображение')
+  if (!file || !file.type?.startsWith('image/')) throw new Error(t('socialErr.notImage'))
   const url = URL.createObjectURL(file)
   try {
     const img = await new Promise((res, rej) => {
       const i = new Image()
       i.onload = () => res(i)
-      i.onerror = () => rej(new Error('Не удалось прочитать фото'))
+      i.onerror = () => rej(new Error(t('socialErr.photoRead')))
       i.src = url
     })
     const scale = Math.min(1, maxSize / Math.max(img.width, img.height))
@@ -430,7 +431,7 @@ async function compressImageFile(file, maxSize = 1280, quality = 0.8) {
     canvas.width = w
     canvas.height = h
     canvas.getContext('2d').drawImage(img, 0, 0, w, h)
-    return await new Promise((res, rej) => canvas.toBlob((b) => b ? res(b) : rej(new Error('Пустой блоб')), 'image/jpeg', quality))
+    return await new Promise((res, rej) => canvas.toBlob((b) => b ? res(b) : rej(new Error(t('socialErr.photoEncode'))), 'image/jpeg', quality))
   } finally {
     URL.revokeObjectURL(url)
   }
@@ -439,7 +440,7 @@ async function compressImageFile(file, maxSize = 1280, quality = 0.8) {
 // Заливка в бакет. Путь всегда начинается с папки пользователя — политики
 // хранилища разрешают запись только туда (см. schema.sql и миграции).
 async function uploadImage(bucket, userId, file) {
-  if (!supabase) throw new Error('Нет подключения')
+  if (!supabase) throw new Error(t('net.offline'))
   const blob = await compressImageFile(file)
   const path = `${userId}/${newId()}.jpg`
   const { error } = await supabase.storage.from(bucket).upload(path, blob, {
@@ -596,14 +597,14 @@ export function subscribeToSentUpdates(myId, friendId, onUpdate) {
 // почти одновременно с двух устройств не разъезжается сильнее, чем на один
 // лишний клик, который тут же поправит realtime-событие.
 export async function toggleMessageReaction(messageId, emoji = '🥕') {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { data, error } = await supabase.rpc('toggle_message_reaction', { p_message_id: messageId, p_emoji: emoji })
   if (error) return { error: normalizeError(error).message }
   return { ok: data }
 }
 
 export async function sendChatMessage({ sender, recipient, text, imageUrl, mealRef, replyTo, replySnapshot, forwardedName }) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const payload = {
     sender,
     recipient,
@@ -614,7 +615,7 @@ export async function sendChatMessage({ sender, recipient, text, imageUrl, mealR
     reply_snapshot: replySnapshot || null,
     forwarded_name: forwardedName || null,
   }
-  if (!payload.text && !payload.image_url && !payload.meal_ref) return { error: 'Пустое сообщение' }
+  if (!payload.text && !payload.image_url && !payload.meal_ref) return { error: t('socialErr.emptyMessage') }
   let { data, error } = await supabase.from('messages').insert(payload).select(MSG_COLS).single()
   if (error && isMissingColumn(error)) {
     // Колонка отсутствует → RETURNING падает на этапе планирования запроса,
@@ -768,7 +769,7 @@ export async function listConversations(myId, limit = 200) {
 // Данные удаляем всегда (RLS: свои); аккаунт — через RPC delete_current_user
 // (SECURITY DEFINER, см. schema.sql). Если RPC нет — возвращаем partial.
 export async function deleteAccount(userId) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
+  if (!supabase) return { error: t('net.noServer') }
   // uid приходит из уже загруженной сессии — лишний сетевой getUser() здесь
   // только добавлял точку отказа. Подстраховываемся локальным чтением сессии.
   let uid = userId
@@ -827,7 +828,7 @@ export async function amICoach(userId) {
 // человек вводит осознанно и целиком. UUID принимаем по-прежнему — им
 // пользуется поддержка, когда разбирает обращение.
 export async function inviteCoach({ myId, targetId }) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
+  if (!supabase) return { error: t('net.noServer') }
   const raw = (targetId || '').trim().replace(/^@+/, '')
 
   let coach
@@ -838,23 +839,23 @@ export async function inviteCoach({ myId, targetId }) {
       p_username: raw.toLowerCase(),
     })
     if (error) return { error: normalizeError(error).message }
-    if (!data) return { error: 'Пользователь с таким ником не найден' }
+    if (!data) return { error: t('socialErr.userNotFound') }
     coach = data
   } else {
-    return { error: 'Ник — от 3 до 20 символов: латиница, цифры, _' }
+    return { error: t('socialErr.nickFormatLong') }
   }
 
-  if (coach === myId) return { error: 'Это ваш собственный ник' }
+  if (coach === myId) return { error: t('socialErr.ownNick') }
 
   const { error } = await supabase.from('coach_links').insert({ coach, client: myId })
   if (error) {
-    if (error.code === '23505') return { error: 'Приглашение этому тренеру уже отправлено' }
+    if (error.code === '23505') return { error: t('socialErr.alreadyInvited') }
     // Политика insert требует, чтобы приглашаемый был в таблице coaches.
     // Отдельного кода у отказа RLS нет, поэтому объясняем самую вероятную причину.
-    if (error.code === '42501') return { error: 'Этот пользователь не подтверждён как тренер' }
+    if (error.code === '42501') return { error: t('socialErr.notCoach') }
     return { error: error.message }
   }
-  return { ok: 'Приглашение отправлено' }
+  return { ok: t('socialErr.invited') }
 }
 
 // Связи текущего пользователя: где он клиент и где он тренер.
@@ -893,13 +894,13 @@ export async function listCoachLinks(myId) {
 }
 
 export async function acceptCoachLink(rowId) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { error } = await supabase.from('coach_links').update({ status: 'accepted' }).eq('id', rowId)
   return error ? { error: error.message } : { ok: true }
 }
 
 export async function removeCoachLink(rowId) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { error } = await supabase.from('coach_links').delete().eq('id', rowId)
   return error ? { error: error.message } : { ok: true }
 }
@@ -918,9 +919,9 @@ export async function listDayComments(clientId, day) {
 }
 
 export async function addDayComment({ clientId, authorId, day, text }) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const body = String(text || '').trim()
-  if (!body) return { error: 'Пустой комментарий' }
+  if (!body) return { error: t('socialErr.emptyComment') }
   const { data, error } = await supabase
     .from('day_comments')
     .insert({ client: clientId, author: authorId, day, text: body.slice(0, 2000) })
@@ -930,7 +931,7 @@ export async function addDayComment({ clientId, authorId, day, text }) {
 }
 
 export async function deleteDayComment(id) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { error } = await supabase.from('day_comments').delete().eq('id', id)
   return error ? { error: error.message } : { ok: true }
 }
@@ -970,7 +971,7 @@ export async function listChallenges(myId) {
 }
 
 export async function createChallenge({ myId, title, kind, starts_on, ends_on }) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { data, error } = await supabase
     .from('challenges')
     .insert({ owner: myId, title: title.trim(), kind, starts_on, ends_on })
@@ -985,18 +986,18 @@ export async function createChallenge({ myId, title, kind, starts_on, ends_on })
 }
 
 export async function joinChallenge({ challengeId, myId }) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { error } = await supabase.from('challenge_members').insert({ challenge: challengeId, user_id: myId })
   if (error) {
-    if (error.code === '23505') return { error: 'Вы уже участвуете' }
-    if (error.code === '23503') return { error: 'Челлендж не найден' }
+    if (error.code === '23505') return { error: t('socialErr.alreadyJoined') }
+    if (error.code === '23503') return { error: t('socialErr.challengeNotFound') }
     return { error: error.message }
   }
   return { ok: true }
 }
 
 export async function leaveChallenge({ challengeId, myId }) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { error } = await supabase
     .from('challenge_members').delete()
     .eq('challenge', challengeId).eq('user_id', myId)
@@ -1004,7 +1005,7 @@ export async function leaveChallenge({ challengeId, myId }) {
 }
 
 export async function deleteChallenge(challengeId) {
-  if (!supabase) return { error: 'Нет подключения' }
+  if (!supabase) return { error: t('net.offline') }
   const { error } = await supabase.from('challenges').delete().eq('id', challengeId)
   return error ? { error: error.message } : { ok: true }
 }

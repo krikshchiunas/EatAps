@@ -13,6 +13,7 @@ import { useStore } from '../store.jsx'
 import FeedScreen from './FeedScreen.jsx'
 import PublicProfile from './PublicProfile.jsx'
 import ChatView from './ChatView.jsx'
+import { t } from '../lib/i18n.js'
 
 export default function FeedTab({ onChatClosed }) {
   const { supabaseEnabled, user } = useStore()
@@ -22,10 +23,10 @@ export default function FeedTab({ onChatClosed }) {
   if (!supabaseEnabled || !user) {
     return (
       <div className="screen">
-        <h1 className="h1" style={{ margin: '4px 0 20px' }}>Лента</h1>
+        <h1 className="h1" style={{ margin: '4px 0 20px' }}>{t('feed.title')}</h1>
         <div className="card">
           <p className="muted" style={{ fontSize: 15 }}>
-            Войдите в аккаунт (вкладка «Профиль»), чтобы видеть ленту.
+            {t('feed.loginPrompt')}
           </p>
         </div>
       </div>
@@ -34,7 +35,7 @@ export default function FeedTab({ onChatClosed }) {
 
   return (
     <div className="screen">
-      <h1 className="h1" style={{ margin: '4px 0 16px' }}>Лента</h1>
+      <h1 className="h1" style={{ margin: '4px 0 16px' }}>{t('feed.title')}</h1>
 
       <FeedScreen onOpenProfile={setProfileUser} />
 

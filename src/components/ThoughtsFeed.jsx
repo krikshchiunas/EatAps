@@ -22,20 +22,22 @@ import { Avatar } from './FriendsScreen.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import { visibilityLabel, VISIBILITY, DEFAULT_VISIBILITY } from '../lib/relationship.js'
 import { setPostVisibility } from '../lib/social.js'
+import { t, fmtDate, locale, isRtl } from '../lib/i18n.js'
 
 const MAX_TEXT = 2000
 
 export function timeAgo(iso) {
-  const t = Date.parse(iso)
-  if (!Number.isFinite(t)) return ''
-  const mins = Math.floor((Date.now() - t) / 60000)
-  if (mins < 1) return 'только что'
-  if (mins < 60) return `${mins} мин назад`
+  const ts = Date.parse(iso)
+  if (!Number.isFinite(ts)) return ''
+  const mins = Math.floor((Date.now() - ts) / 60000)
+  if (mins < 1) return t('time.justNow')
+  const ago = (n, unit) => new Intl.RelativeTimeFormat(locale(), { style: 'short' }).format(-n, unit)
+  if (mins < 60) return ago(mins, 'minute')
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours} ч назад`
+  if (hours < 24) return ago(hours, 'hour')
   const days = Math.floor(hours / 24)
-  if (days < 7) return `${days} дн назад`
-  return new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+  if (days < 7) return ago(days, 'day')
+  return fmtDate(ts, { day: 'numeric', month: 'short' })
 }
 
 // ── Создание и правка мысли ───────────────────────────────────────────────────
@@ -57,7 +59,7 @@ export function ComposerSheet({ post, userId, onClose, onSaved }) {
     try {
       setImageUrl(await uploadPostImage(userId, file))
     } catch (ex) {
-      setErr(ex.message || 'Не удалось загрузить фото')
+      setErr(ex.message || t('thought.photoFailed'))
     } finally {
       setBusy(false)
     }
@@ -87,13 +89,13 @@ export function ComposerSheet({ post, userId, onClose, onSaved }) {
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 16 }}>
-          <h2 className="h2" style={{ fontSize: 18 }}>{post ? 'Изменить мысль' : 'Новая мысль'}</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <h2 className="h2" style={{ fontSize: 18 }}>{post ? t('thought.editTitle') : t('thought.newTitle')}</h2>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
 
         <textarea
           className="input"
-          placeholder="О чём думаете? Что сегодня ели и почему именно это…"
+          placeholder={t('thought.placeholder')}
           value={text}
           onChange={(e) => setText(e.target.value.slice(0, MAX_TEXT))}
           rows={4}
@@ -106,8 +108,8 @@ export function ComposerSheet({ post, userId, onClose, onSaved }) {
             <img src={imageUrl} alt="" style={{ width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 14, display: 'block' }} />
             <button
               onClick={() => setImageUrl(null)}
-              style={{ position: 'absolute', top: 8, right: 8, width: 32, height: 32, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 15 }}
-              aria-label="Убрать фото"
+              style={{ position: 'absolute', top: 8, insetInlineEnd: 8, width: 32, height: 32, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 15 }}
+              aria-label={t('thought.removePhoto')}
             >
               ✕
             </button>
@@ -115,7 +117,7 @@ export function ComposerSheet({ post, userId, onClose, onSaved }) {
         )}
 
         <div style={{ marginBottom: 12 }}>
-          <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>Кто увидит</div>
+          <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('thought.whoSees')}</div>
           <div className="row gap8" style={{ flexWrap: 'wrap' }}>
             {VISIBILITY.map((v) => (
               <button
@@ -135,10 +137,10 @@ export function ComposerSheet({ post, userId, onClose, onSaved }) {
 
         <div className="row gap8">
           <button className="btn ghost" style={{ flex: '0 0 auto', width: 'auto', padding: '0 18px' }} disabled={busy} onClick={() => fileRef.current?.click()}>
-            📷 Фото
+            📷 {t('chat.photo')}
           </button>
           <button className="btn" style={{ flex: 1 }} disabled={busy || (!text.trim() && !imageUrl)} onClick={save}>
-            {busy ? 'Сохраняем…' : post ? 'Сохранить' : 'Опубликовать'}
+            {busy ? t('thought.saving') : post ? t('common.save') : t('thought.publish')}
           </button>
         </div>
         <input ref={fileRef} type="file" accept="image/*" onChange={pickImage} style={{ display: 'none' }} />
@@ -193,22 +195,22 @@ export function Comments({ post, myId, isPostOwner, onCountChange }) {
   return (
     <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
       {items === null ? (
-        <p className="muted" style={{ fontSize: 13 }}>Загрузка…</p>
+        <p className="muted" style={{ fontSize: 13 }}>{t('common.loading')}</p>
       ) : items.length === 0 ? (
-        <p className="muted" style={{ fontSize: 13 }}>Ответов пока нет.</p>
+        <p className="muted" style={{ fontSize: 13 }}>{t('thought.noReplies')}</p>
       ) : (
         items.map((c) => (
           <div key={c.id} className="row gap10" style={{ alignItems: 'flex-start', marginBottom: 10 }}>
             <Avatar src={c.author_avatar} name={c.author_name} size={28} />
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="row gap8" style={{ alignItems: 'baseline' }}>
-                <span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.author_name || 'Пользователь'}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 620 }}>{c.author_name || t('common.user')}</span>
                 <span className="muted" style={{ fontSize: 11 }}>{timeAgo(c.created_at)}</span>
               </div>
               <div style={{ fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{c.text}</div>
             </div>
             {(c.user_id === myId || isPostOwner) && (
-              <button style={{ fontSize: 12, color: 'var(--ink-3)', flex: '0 0 auto' }} onClick={() => remove(c.id)} aria-label="Удалить ответ">✕</button>
+              <button style={{ fontSize: 12, color: 'var(--ink-3)', flex: '0 0 auto' }} onClick={() => remove(c.id)} aria-label={t('thought.deleteReply')}>✕</button>
             )}
           </div>
         ))
@@ -218,14 +220,14 @@ export function Comments({ post, myId, isPostOwner, onCountChange }) {
         <div className="row gap8" style={{ marginTop: 10 }}>
           <input
             className="input"
-            placeholder="Ответить…"
+            placeholder={t('thought.replyPh')}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') send() }}
             style={{ height: 42, fontSize: 14, flex: 1 }}
           />
-          <button className="btn" style={{ width: 'auto', height: 42, padding: '0 16px', fontSize: 14, flex: '0 0 auto' }} disabled={busy || !text.trim()} onClick={send}>
-            →
+          <button className="btn" style={{ width: 'auto', height: 42, padding: '0 16px', fontSize: 14, flex: '0 0 auto' }} disabled={busy || !text.trim()} onClick={send} aria-label={t('common.send')}>
+            {isRtl() ? '←' : '→'}
           </button>
         </div>
       )}
@@ -284,7 +286,7 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
             className="row gap10"
             style={{
               alignItems: 'center', minWidth: 0, background: 'none', border: 0,
-              padding: 0, textAlign: 'left', color: 'inherit',
+              padding: 0, textAlign: 'start', color: 'inherit',
               cursor: onOpenProfile ? 'pointer' : 'default',
             }}
           >
@@ -292,7 +294,7 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 14.5, fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authorName}</div>
               <div className="muted" style={{ fontSize: 11.5 }}>
-                {timeAgo(post.created_at)}{post.edited_at ? ' · изменено' : ''}
+                {timeAgo(post.created_at)}{post.edited_at ? ` · ${t('thought.edited')}` : ''}
                 {isMine && post.visibility && post.visibility !== 'followers'
                   ? ' · ' + visibilityLabel(post.visibility)
                   : ''}
@@ -302,13 +304,13 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
         </div>
         {isMine && (
           <div style={{ position: 'relative', flex: '0 0 auto' }}>
-            <button className="iconbtn" style={{ width: 32, height: 32 }} onClick={() => setMenu((m) => !m)} aria-label="Действия с мыслью">⋯</button>
+            <button className="iconbtn" style={{ width: 32, height: 32 }} onClick={() => setMenu((m) => !m)} aria-label={t('thought.actions')}>⋯</button>
             {menu && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 19 }} onClick={() => setMenu(false)} />
                 <div className="friend-menu" style={{ minWidth: 170 }}>
-                  <button onClick={() => { setMenu(false); onEdit(post) }}>✏️ Изменить</button>
-                  <button className="danger" onClick={() => { setMenu(false); onDelete(post) }}>🗑️ Удалить</button>
+                  <button onClick={() => { setMenu(false); onEdit(post) }}>✏️ {t('common.edit')}</button>
+                  <button className="danger" onClick={() => { setMenu(false); onDelete(post) }}>🗑️ {t('common.delete')}</button>
                 </div>
               </>
             )}
@@ -326,8 +328,8 @@ export function PostCard({ post, myId, authorName, authorAvatar, onChange, onEdi
       )}
 
       <div className="row gap8" style={{ marginTop: 12, flexWrap: 'wrap' }}>
-        {btn('🥕', post.carrots, 'Мне нравится')}
-        {btn('🥦', post.broccoli, 'Не моё')}
+        {btn('🥕', post.carrots, t('thought.like'))}
+        {btn('🥦', post.broccoli, t('thought.notMine'))}
         <button
           onClick={() => setOpen((o) => !o)}
           style={{
@@ -374,7 +376,7 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
       setUnavailable(Boolean(res.unavailable))
     } catch {
       setPosts([])
-      setErr('Не удалось загрузить мысли')
+      setErr(t('thought.loadFailed'))
     }
   }, [userId])
 
@@ -393,7 +395,7 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
     return (
       <div className="card">
         <p className="muted" style={{ fontSize: 14 }}>
-          Войдите в аккаунт, чтобы публиковать мысли и отвечать друзьям.
+          {t('thought.loginPrompt')}
         </p>
       </div>
     )
@@ -402,7 +404,7 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
   if (unavailable) {
     return (
       <div className="card">
-        <p className="muted" style={{ fontSize: 14 }}>Раздел пока недоступен.</p>
+        <p className="muted" style={{ fontSize: 14 }}>{t('thought.unavailable')}</p>
       </div>
     )
   }
@@ -411,18 +413,18 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
     <>
       {isOwnProfile && (
         <button className="btn" style={{ marginBottom: 14 }} onClick={() => setComposer({ post: null })}>
-          ＋ Новая мысль
+          ＋ {t('thought.newTitle')}
         </button>
       )}
 
       {posts === null ? (
-        <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
+        <p className="muted" style={{ fontSize: 14 }}>{t('common.loading')}</p>
       ) : posts.length === 0 ? (
         <div className="card">
           <p className="muted" style={{ fontSize: 14 }}>
             {isOwnProfile
-              ? 'Здесь появятся ваши мысли — фото и заметки, которые видят друзья.'
-              : 'Пока ни одной мысли.'}
+              ? t('thought.emptyOwn')
+              : t('thought.emptyOther')}
           </p>
         </div>
       ) : (
@@ -456,7 +458,7 @@ export default function ThoughtsFeed({ userId, isOwnProfile, authorName, authorA
 
       {confirmDelete && (
         <ConfirmDialog
-          text="Удалить эту мысль? Ответы и реакции на неё тоже исчезнут."
+          text={t('thought.confirmDelete')}
           onYes={() => { const p = confirmDelete; setConfirmDelete(null); remove(p) }}
           onNo={() => setConfirmDelete(null)}
         />

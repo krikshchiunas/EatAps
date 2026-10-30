@@ -15,6 +15,7 @@ import { supabase } from './supabase.js'
 import { normalizeError } from './authErrors.js'
 import { toRelationship, EMPTY_RELATIONSHIP } from './relationship.js'
 import { isMissingColumn } from './pgErrors.js'
+import { t } from './i18n.js'
 
 // «Миграция ещё не прогнана»: функции или таблицы нет. Это не ошибка
 // приложения — раздел просто недоступен, и красный текст тут не нужен.
@@ -46,8 +47,8 @@ export async function getRelationship(userId) {
 // которые уже стоят в политике.
 
 export async function follow(myId, targetId) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
-  if (!myId || !targetId || myId === targetId) return { error: 'Нельзя подписаться на себя' }
+  if (!supabase) return { error: t('net.noServer') }
+  if (!myId || !targetId || myId === targetId) return { error: t('socialErr.selfFollow') }
   const { error } = await supabase
     .from('follows')
     .insert({ follower_id: myId, following_id: targetId })
@@ -58,7 +59,7 @@ export async function follow(myId, targetId) {
 }
 
 export async function unfollow(myId, targetId) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
+  if (!supabase) return { error: t('net.noServer') }
   const { error } = await supabase
     .from('follows')
     .delete()
@@ -70,7 +71,7 @@ export async function unfollow(myId, targetId) {
 // Убрать чужую подписку на себя — без блокировки. Политика follows разрешает
 // удаление и объекту подписки, не только подписчику.
 export async function removeFollower(myId, followerId) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
+  if (!supabase) return { error: t('net.noServer') }
   const { error } = await supabase
     .from('follows')
     .delete()
@@ -103,14 +104,14 @@ export async function listFollowing(userId, { limit = 50, offset = 0 } = {}) {
 // в строках, которые ему не видны.
 
 export async function block(myId, targetId) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
+  if (!supabase) return { error: t('net.noServer') }
   const { error } = await supabase.from('blocks').insert({ blocker_id: myId, blocked_id: targetId })
   if (error && error.code !== '23505') return fail(error)
   return { ok: true }
 }
 
 export async function unblock(myId, targetId) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
+  if (!supabase) return { error: t('net.noServer') }
   const { error } = await supabase.from('blocks')
     .delete().eq('blocker_id', myId).eq('blocked_id', targetId)
   return error ? fail(error) : { ok: true }
@@ -151,11 +152,11 @@ export async function searchUsers(query, { limit = 20 } = {}) {
 // «свободен ли» и записью всегда есть промежуток, в который его может занять
 // кто-то другой. Поэтому единственный надёжный ответ — тот, что вернул INSERT.
 export async function setUsername(username) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
+  if (!supabase) return { error: t('net.noServer') }
   const { data, error } = await supabase.rpc('set_username', { p_username: username })
   if (error) {
-    if (error.code === '23505') return { error: 'Этот ник уже занят' }
-    if (error.code === '22023') return { error: 'От 3 до 20 символов: латиница, цифры, _' }
+    if (error.code === '23505') return { error: t('socialErr.nickTaken') }
+    if (error.code === '22023') return { error: t('socialErr.nickFormat') }
     return fail(error)
   }
   return { ok: data }
@@ -279,7 +280,7 @@ export function subscribeToNotifications(myId, onChange) {
 // умолчанию, и «изменение видимости» получается на ровном месте). Красная
 // ошибка здесь была бы про то, чего пользователь не делал и не может починить.
 export async function setPostVisibility(postId, visibility) {
-  if (!supabase) return { error: 'Нет подключения к серверу' }
+  if (!supabase) return { error: t('net.noServer') }
   const { error } = await supabase.from('posts').update({ visibility }).eq('id', postId)
   if (error && isMissingColumn(error)) return { ok: true, unsupported: true }
   return error ? fail(error) : { ok: true }

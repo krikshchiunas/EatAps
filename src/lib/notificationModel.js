@@ -1,26 +1,32 @@
 // Уведомления — ЧИСТАЯ часть: во что превращается строка из list_notifications.
-// Без зависимостей, чтобы проверяться под голым `node --test`.
+// Из зависимостей только словарь — он тоже проверяется под голым `node --test`.
+import { t } from './i18n.js'
+
+const group = (key, types) => ({ key, types, get label() { return t(`notif.group.${key}`) } })
 
 // Группы «Заявки» больше нет: заявок в друзья не существует — дружба
 // возникает из взаимной подписки, и оба события уже лежат в «Людях».
 export const NOTIFICATION_GROUPS = [
-  { key: 'social',   label: 'Люди',     types: ['FOLLOW', 'FRIEND_ACCEPTED'] },
-  { key: 'posts',    label: 'Мысли',    types: ['POST_REACTION', 'POST_COMMENT'] },
-  { key: 'messages', label: 'Сообщения', types: ['MESSAGE'] },
+  group('social',   ['FOLLOW', 'FRIEND_ACCEPTED']),
+  group('posts',    ['POST_REACTION', 'POST_COMMENT']),
+  group('messages', ['MESSAGE']),
 ]
 
 // Текст события. Имя актора подставляется вызывающим кодом отдельно, чтобы
 // его можно было отрисовать ссылкой на профиль, а не строкой.
 export function notificationText(n) {
   switch (n.type) {
-    case 'FOLLOW':          return 'подписался на вас'
+    case 'FOLLOW':          return t('notif.follow')
     // Приходит тому, кто подписался первым: второй подписался в ответ, и
     // подписка стала дружбой.
-    case 'FRIEND_ACCEPTED': return 'подписался в ответ — теперь вы друзья'
-    case 'POST_REACTION':   return `отреагировал${n.metadata?.reaction ? ' ' + n.metadata.reaction : ''} на вашу мысль`
-    case 'POST_COMMENT':    return 'ответил на вашу мысль'
-    case 'MESSAGE':         return 'написал вам'
-    default:                return 'новое событие'
+    case 'FRIEND_ACCEPTED': return t('notif.friendAccepted')
+    case 'POST_REACTION':
+      return n.metadata?.reaction
+        ? t('notif.reactedWith', { reaction: n.metadata.reaction })
+        : t('notif.reacted')
+    case 'POST_COMMENT':    return t('notif.comment')
+    case 'MESSAGE':         return t('notif.message')
+    default:                return t('notif.other')
   }
 }
 

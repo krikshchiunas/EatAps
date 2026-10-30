@@ -13,6 +13,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store.jsx'
 import { searchUsers } from '../lib/social.js'
 import PeopleList from './PeopleList.jsx'
+import { t } from '../lib/i18n.js'
 
 const MIN_QUERY = 3
 
@@ -32,7 +33,7 @@ export default function UserSearch({ onOpenProfile }) {
 
     setBusy(true)
     const mine = ++reqId.current
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       try {
         const found = await searchUsers(q)
         // Ответы на устаревшие запросы игнорируем: без этого более медленный
@@ -41,12 +42,12 @@ export default function UserSearch({ onOpenProfile }) {
         setResults(found)
         setErr(null)
       } catch (e) {
-        if (mine === reqId.current) setErr(e.message || 'Поиск недоступен')
+        if (mine === reqId.current) setErr(e.message || t('search.failed'))
       } finally {
         if (mine === reqId.current) setBusy(false)
       }
     }, 280)
-    return () => clearTimeout(t)
+    return () => clearTimeout(timer)
   }, [query])
 
   const short = query.trim().length > 0 && query.trim().length < MIN_QUERY
@@ -57,21 +58,21 @@ export default function UserSearch({ onOpenProfile }) {
         className="input"
         type="search"
         inputMode="search"
-        placeholder="Ник, например denis"
+        placeholder={t('search.placeholder')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        aria-label="Поиск людей по нику"
+        aria-label={t('search.aria')}
         style={{ marginBottom: 12 }}
       />
 
       {short && (
         <p className="muted" style={{ fontSize: 13, textAlign: 'center', padding: '16px 0' }}>
-          Введите ещё {MIN_QUERY - query.trim().length} символ(а)
+          {t('search.moreChars', { count: MIN_QUERY - query.trim().length })}
         </p>
       )}
 
       {busy && !short && (
-        <p className="muted" style={{ fontSize: 13, textAlign: 'center', padding: '16px 0' }}>Ищем…</p>
+        <p className="muted" style={{ fontSize: 13, textAlign: 'center', padding: '16px 0' }}>{t('search.searching')}</p>
       )}
 
       {err && <p style={{ fontSize: 13, color: 'var(--danger)' }}>{err}</p>}
@@ -81,7 +82,7 @@ export default function UserSearch({ onOpenProfile }) {
           people={results}
           myId={myId}
           onOpen={onOpenProfile}
-          empty="Никого не нашли. Ник нужно ввести целиком или с начала — по имени поиск не ищет."
+          empty={t('search.empty')}
         />
       )}
     </div>

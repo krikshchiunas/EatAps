@@ -14,9 +14,10 @@ import { Avatar } from './FriendsScreen.jsx'
 import FollowButton from './FollowButton.jsx'
 import { getRelationship } from '../lib/social.js'
 import { EMPTY_RELATIONSHIP, relationshipLabel } from '../lib/relationship.js'
+import { t } from '../lib/i18n.js'
 
 export function PersonRow({ person, myId, rel, onRelChange, onOpen, showFollow = true }) {
-  const name = person.display_name || person.username || 'Без имени'
+  const name = person.display_name || person.username || t('common.noName')
   const label = rel ? relationshipLabel(rel) : null
 
   return (
@@ -26,7 +27,7 @@ export function PersonRow({ person, myId, rel, onRelChange, onOpen, showFollow =
         className="row gap10"
         style={{
           alignItems: 'center', minWidth: 0, flex: 1, background: 'none',
-          border: 0, padding: 0, textAlign: 'left', color: 'inherit', cursor: 'pointer',
+          border: 0, padding: 0, textAlign: 'start', color: 'inherit', cursor: 'pointer',
         }}
       >
         <Avatar src={person.avatar_url} name={name} size={44} />
@@ -52,7 +53,7 @@ export function PersonRow({ person, myId, rel, onRelChange, onOpen, showFollow =
   )
 }
 
-export default function PeopleList({ people, myId, onOpen, showFollow = true, empty = 'Пусто' }) {
+export default function PeopleList({ people, myId, onOpen, showFollow = true, empty = t('people.empty') }) {
   const [rels, setRels] = useState({})
 
   useEffect(() => {

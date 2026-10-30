@@ -22,7 +22,7 @@ export default {
     add: 'Add',
     edit: 'Edit',
     optional: '(optional)',
-    noName: 'Untitled',
+    noName: 'No name',
     user: 'User',
     you: 'You',
     actions: 'Actions',

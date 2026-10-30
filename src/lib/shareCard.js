@@ -13,11 +13,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { sumDay } from './nutrition.js'
 import { fromKey } from './date.js'
+import { t, fmtDate, isRtl } from './i18n.js'
+import { foodName } from './foodNames.js'
 
 export const CARD_W = 1080
 export const CARD_H = 1350
-
-const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
 
 // Палитры карточки. Совпадают с темами приложения, но заданы явно: читать
 // значения CSS-переменных на canvas нельзя, а «примерно похожий» зелёный
@@ -48,7 +48,7 @@ export function buildShareData(day, dateKey, { name } = {}) {
   const top = [...byName.values()].sort((a, b) => b.kcal - a.kcal).slice(0, 5)
 
   return {
-    dateLabel: `${d.getDate()} ${MONTHS[d.getMonth()]}`,
+    dateLabel: fmtDate(d, { day: 'numeric', month: 'long' }),
     name: (name || '').trim(),
     kcal: Math.round(totals.kcal),
     protein: Math.round(totals.protein),
@@ -92,56 +92,66 @@ function ellipsize(ctx, text, maxWidth) {
 }
 
 // Рисует карточку в готовый canvas. Возвращает тот же canvas.
+//
+// Для арабского макет зеркалится целиком: X() отражает координату от правого
+// края, а «начало» и «конец» строки меняются местами. Одних ctx.direction мало —
+// он разворачивает текст внутри строки, но не переносит её к правому краю.
 export function renderShareCard(canvas, data, themeKey = 'dark') {
-  const t = CARD_THEMES[themeKey] || CARD_THEMES.dark
+  const pal = CARD_THEMES[themeKey] || CARD_THEMES.dark
   canvas.width = CARD_W
   canvas.height = CARD_H
   const ctx = canvas.getContext('2d')
 
+  const rtl = isRtl()
+  const X = (x) => (rtl ? CARD_W - x : x)
+  const START = rtl ? 'right' : 'left'
+  const END = rtl ? 'left' : 'right'
+  ctx.direction = rtl ? 'rtl' : 'ltr'
+
   const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
 
-  ctx.fillStyle = t.bg
+  ctx.fillStyle = pal.bg
   ctx.fillRect(0, 0, CARD_W, CARD_H)
 
   // Шапка
-  ctx.fillStyle = t.ink3
+  ctx.fillStyle = pal.ink3
   ctx.font = `500 34px ${FONT}`
-  ctx.textAlign = 'left'
-  ctx.fillText('EatAps', 80, 110)
+  ctx.textAlign = START
+  ctx.fillText('EatAps', X(80), 110)
 
-  ctx.fillStyle = t.ink
+  ctx.fillStyle = pal.ink
   ctx.font = `700 76px ${FONT}`
-  ctx.fillText(data.dateLabel, 80, 210)
+  ctx.fillText(data.dateLabel, X(80), 210)
 
   if (data.name) {
-    ctx.fillStyle = t.ink2
+    ctx.fillStyle = pal.ink2
     ctx.font = `500 36px ${FONT}`
-    ctx.fillText(data.name, 80, 268)
+    ctx.fillText(data.name, X(80), 268)
   }
 
   // Главная карточка с калориями
   const cardY = data.name ? 320 : 280
-  ctx.fillStyle = t.surface
+  ctx.fillStyle = pal.surface
   roundRect(ctx, 80, cardY, CARD_W - 160, 300, 40)
   ctx.fill()
 
   ctx.textAlign = 'center'
-  ctx.fillStyle = t.primary
+  ctx.fillStyle = pal.primary
   ctx.font = `700 150px ${FONT}`
   ctx.fillText(String(data.kcal), CARD_W / 2, cardY + 175)
 
-  ctx.fillStyle = t.ink3
+  ctx.fillStyle = pal.ink3
   ctx.font = `500 38px ${FONT}`
-  ctx.fillText('ккал за день', CARD_W / 2, cardY + 235)
+  ctx.fillText(t('share.kcalPerDay'), CARD_W / 2, cardY + 235)
 
   // Полоса макросов
   const barY = cardY + 360
   const barW = CARD_W - 160
   const shares = macroShares(data)
   const segs = [
-    { v: shares.protein, c: t.primary, label: `Б ${data.protein}` },
-    { v: shares.carbs, c: t.accent, label: `У ${data.carbs}` },
-    { v: shares.fat, c: t.ink3, label: `Ж ${data.fat}` },
+    { v: shares.protein, c: pal.primary, label: `${t('macro.p')} ${data.protein}` },
+    { v: shares.carbs, c: pal.accent, label: `${t('macro.c')} ${data.carbs}` },
+    { v: shares.fat, c: pal.ink3, label: `${t('macro.f')} ${data.fat}` },
   ]
 
   if (shares.protein + shares.carbs + shares.fat > 0) {
@@ -152,38 +162,40 @@ export function renderShareCard(canvas, data, themeKey = 'dark') {
     for (const s of segs) {
       const w = barW * s.v
       ctx.fillStyle = s.c
-      ctx.fillRect(x, barY, w + 1, 28)
+      // Лишний пиксель — внахлёст на следующий сегмент, чтобы между ними не
+      // просвечивал фон. В зеркальном макете следующий сегмент лежит левее.
+      ctx.fillRect(rtl ? CARD_W - x - w - 1 : x, barY, w + 1, 28)
       x += w
     }
     ctx.restore()
 
-    ctx.textAlign = 'left'
+    ctx.textAlign = START
     ctx.font = `600 34px ${FONT}`
     let lx = 80
     for (const s of segs) {
       ctx.fillStyle = s.c
-      ctx.fillText(s.label, lx, barY + 86)
+      ctx.fillText(s.label, X(lx), barY + 86)
       lx += ctx.measureText(s.label).width + 46
     }
   }
 
   // Что было съедено
   let y = barY + 170
-  ctx.textAlign = 'left'
-  ctx.fillStyle = t.ink2
+  ctx.textAlign = START
+  ctx.fillStyle = pal.ink2
   ctx.font = `600 36px ${FONT}`
-  ctx.fillText(data.empty ? 'Записей нет' : 'Что было', 80, y)
+  ctx.fillText(data.empty ? t('share.noEntries') : t('share.whatWasEaten'), X(80), y)
   y += 30
 
   for (const item of data.top) {
     y += 78
-    ctx.fillStyle = t.surface
+    ctx.fillStyle = pal.surface
     roundRect(ctx, 80, y - 52, barW, 68, 22)
     ctx.fill()
 
     ctx.font = `400 38px ${FONT}`
-    ctx.fillStyle = t.ink
-    ctx.fillText(item.emoji, 106, y - 4)
+    ctx.fillStyle = pal.ink
+    ctx.fillText(item.emoji, X(106), y - 4)
 
     const kcalText = `${Math.round(item.kcal)}`
     ctx.font = `600 34px ${FONT}`
@@ -191,19 +203,20 @@ export function renderShareCard(canvas, data, themeKey = 'dark') {
 
     ctx.font = `500 34px ${FONT}`
     const nameMax = barW - 190 - kcalW
-    const title = item.count > 1 ? `${item.name} ×${item.count}` : item.name
-    ctx.fillStyle = t.ink
-    ctx.fillText(ellipsize(ctx, title, nameMax), 168, y - 4)
+    const name = foodName(item.name)
+    const title = item.count > 1 ? `${name} ×${item.count}` : name
+    ctx.fillStyle = pal.ink
+    ctx.fillText(ellipsize(ctx, title, nameMax), X(168), y - 4)
 
     ctx.font = `600 34px ${FONT}`
-    ctx.fillStyle = t.ink3
-    ctx.textAlign = 'right'
-    ctx.fillText(kcalText, CARD_W - 106, y - 4)
-    ctx.textAlign = 'left'
+    ctx.fillStyle = pal.ink3
+    ctx.textAlign = END
+    ctx.fillText(kcalText, X(CARD_W - 106), y - 4)
+    ctx.textAlign = START
   }
 
   // Подвал
-  ctx.fillStyle = t.ink3
+  ctx.fillStyle = pal.ink3
   ctx.font = `500 30px ${FONT}`
   ctx.textAlign = 'center'
   ctx.fillText('eataps.com', CARD_W / 2, CARD_H - 70)
@@ -214,6 +227,6 @@ export function renderShareCard(canvas, data, themeKey = 'dark') {
 // Готовое изображение как Blob. Canvas → PNG.
 export function cardToBlob(canvas) {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Не удалось создать изображение'))), 'image/png')
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(t('share.imageFailed')))), 'image/png')
   })
 }

@@ -16,6 +16,7 @@ import {
 } from '../lib/notificationModel.js'
 import { Avatar } from './FriendsScreen.jsx'
 import { timeAgo } from './ThoughtsFeed.jsx'
+import { t } from '../lib/i18n.js'
 
 export default function NotificationsScreen({ onNavigate, onChanged }) {
   const { user, supabaseEnabled } = useStore()
@@ -33,7 +34,7 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
       setUnavailable(Boolean(res.unavailable))
       setItems(res.items)
     } catch (e) {
-      setErr(e.message || 'Не удалось загрузить события')
+      setErr(e.message || t('notif.loadFailed'))
       setItems([])
     }
   }, [supabaseEnabled, myId])
@@ -60,7 +61,7 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
 
   if (unavailable) {
     return <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '32px 16px' }}>
-      Раздел пока недоступен — база ещё не обновлена.
+      {t('social.dbOutdated')}
     </p>
   }
 
@@ -75,7 +76,7 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
       <div className="row between" style={{ alignItems: 'center', marginBottom: 12, gap: 10 }}>
         <div className="row gap8" style={{ flexWrap: 'wrap', minWidth: 0 }}>
           <button className={`pill${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>
-            Все{unread > 0 ? ` · ${unread}` : ''}
+            {t('notif.all')}{unread > 0 ? ` · ${unread}` : ''}
           </button>
           {NOTIFICATION_GROUPS.map((g) => (
             grouped[g.key].length > 0 && (
@@ -87,17 +88,17 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
         </div>
         {unread > 0 && (
           <button className="btn ghost" style={{ width: 'auto', height: 32, padding: '0 12px', fontSize: 13, flex: '0 0 auto' }} onClick={readAll}>
-            Прочитать всё
+            {t('notif.readAll')}
           </button>
         )}
       </div>
 
-      {items === null && <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '28px 0' }}>Загружаем…</p>}
+      {items === null && <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '28px 0' }}>{t('social.loading')}</p>}
 
       {items?.length === 0 && (
         <div style={{ textAlign: 'center', padding: '32px 8px' }}>
           <div style={{ fontSize: 34, marginBottom: 10 }}>🔔</div>
-          <p className="muted" style={{ fontSize: 14 }}>Событий пока нет.</p>
+          <p className="muted" style={{ fontSize: 14 }}>{t('notif.empty')}</p>
         </div>
       )}
 
@@ -107,7 +108,7 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
           onClick={() => open(n)}
           className="row gap10"
           style={{
-            width: '100%', alignItems: 'center', textAlign: 'left',
+            width: '100%', alignItems: 'center', textAlign: 'start',
             padding: '11px 10px', marginBottom: 2, borderRadius: 14, border: 0,
             background: n.read_at ? 'transparent' : 'var(--primary-weak)',
             color: 'inherit', cursor: 'pointer',
@@ -116,7 +117,7 @@ export default function NotificationsScreen({ onNavigate, onChanged }) {
           <Avatar src={n.actor_avatar} name={n.actor_name || n.actor_username} size={40} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 14.5, lineHeight: 1.4 }}>
-              <span style={{ fontWeight: 640 }}>{n.actor_name || n.actor_username || 'Кто-то'}</span>
+              <span style={{ fontWeight: 640 }}>{n.actor_name || n.actor_username || t('notif.someone')}</span>
               {' '}
               <span style={{ color: 'var(--ink-2)' }}>{notificationText(n)}</span>
             </div>

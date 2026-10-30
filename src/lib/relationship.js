@@ -1,8 +1,8 @@
 // Отношение между двумя пользователями — ЧИСТАЯ часть.
 //
-// Без зависимостей и без импорта supabase.js: тот читает import.meta.env при
-// импорте и падает под голым `node --test`. По той же причине отдельно живут
-// pgErrors.js и friendView.js.
+// Без импорта supabase.js: тот читает import.meta.env при импорте и падает под
+// голым `node --test`. По той же причине отдельно живут pgErrors.js и
+// friendView.js. Из зависимостей только словарь подписей — он чистый.
 //
 // Здесь описано, во что превращается ответ RPC get_relationship: набор булевых
 // признаков → одно состояние, по которому экран рисует кнопки. Раньше состояний
@@ -13,6 +13,8 @@
 // (миграция 2026-08-26_nickname_identity). Поэтому friend и mutualFollow здесь
 // всегда совпадают, а полей про заявки не существует вовсе — не «всегда false»,
 // а нет: мёртвое поле рано или поздно кто-нибудь начнёт проверять.
+
+import { t } from './i18n.js'
 
 export const EMPTY_RELATIONSHIP = {
   following: false,
@@ -50,12 +52,12 @@ export function toRelationship(row) {
 // «Вы друзья», а не «Вы подписаны»: человек должен понимать, что именно
 // он сейчас разорвёт.
 export function followAction(rel) {
-  if (rel.blocked) return { kind: 'unblock', label: 'Разблокировать', tone: 'danger' }
+  if (rel.blocked) return { kind: 'unblock', label: t('rel.unblock'), tone: 'danger' }
   if (rel.blockedBy) return null // человек нас заблокировал — кнопки нет вовсе
-  if (rel.friend) return { kind: 'unfollow', label: 'Вы друзья', tone: 'quiet' }
-  if (rel.following) return { kind: 'unfollow', label: 'Вы подписаны', tone: 'quiet' }
-  if (rel.followedBy) return { kind: 'follow', label: 'Подписаться в ответ', tone: 'primary' }
-  return { kind: 'follow', label: 'Подписаться', tone: 'primary' }
+  if (rel.friend) return { kind: 'unfollow', label: t('rel.friends'), tone: 'quiet' }
+  if (rel.following) return { kind: 'unfollow', label: t('rel.following'), tone: 'quiet' }
+  if (rel.followedBy) return { kind: 'follow', label: t('rel.followBack'), tone: 'primary' }
+  return { kind: 'follow', label: t('rel.follow'), tone: 'primary' }
 }
 
 // Можно ли написать личное сообщение. Зеркало серверной политики messages, и
@@ -74,23 +76,24 @@ export function canViewDiary(rel) {
 // взаимную подписку здесь нет: это и есть дружба, и две подписи для одного
 // состояния только путали бы.
 export function relationshipLabel(rel) {
-  if (rel.blocked) return 'Заблокирован'
-  if (rel.friend) return 'Друг'
-  if (rel.following) return 'Вы подписаны'
-  if (rel.followedBy) return 'Подписан на вас'
+  if (rel.blocked) return t('rel.blocked')
+  if (rel.friend) return t('rel.friend')
+  if (rel.following) return t('rel.following')
+  if (rel.followedBy) return t('rel.followedBy')
   return null
 }
 
 // Уровни видимости поста — зеркало типа post_visibility в базе.
-export const VISIBILITY = [
-  { value: 'public',    label: 'Всем',          hint: 'Любой пользователь EatAps' },
-  { value: 'followers', label: 'Подписчикам',   hint: 'Подписчики и друзья' },
-  { value: 'friends',   label: 'Только друзьям', hint: 'Принятые друзья' },
-  { value: 'private',   label: 'Только мне',    hint: 'Никто, кроме вас' },
-]
+const level = (value) => ({
+  value,
+  get label() { return t(`vis.${value}.label`) },
+  get hint() { return t(`vis.${value}.hint`) },
+})
+export const VISIBILITY = [level('public'), level('followers'), level('friends'), level('private')]
 
 export const DEFAULT_VISIBILITY = 'followers'
 
 export function visibilityLabel(value) {
-  return VISIBILITY.find((v) => v.value === value)?.label || 'Подписчикам'
+  const v = VISIBILITY.find((x) => x.value === value) || VISIBILITY.find((x) => x.value === DEFAULT_VISIBILITY)
+  return v.label
 }

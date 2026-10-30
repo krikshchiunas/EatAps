@@ -6,6 +6,7 @@ import ChatView from './ChatView.jsx'
 import UserSearch from './UserSearch.jsx'
 import PublicProfile from './PublicProfile.jsx'
 import { unfollow } from '../lib/social.js'
+import { t } from '../lib/i18n.js'
 
 // Разделы вкладки.
 //
@@ -19,8 +20,8 @@ import { unfollow } from '../lib/social.js'
 // «＋ По ID» нет с тех пор, как исчезли публичные коды: людей находят по нику
 // в «Поиске».
 const VIEWS = [
-  { key: 'friends', label: 'Друзья' },
-  { key: 'search',  label: 'Поиск' },
+  { key: 'friends', get label() { return t('friends.tabFriends') } },
+  { key: 'search',  get label() { return t('friends.tabSearch') } },
 ]
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ function togglePin(id) {
     setArr(PINNED_KEY, arr.filter(x => x !== id))
     return { ok: true }
   }
-  if (arr.length >= 10) return { error: 'Максимум 10 закреплённых' }
+  if (arr.length >= 10) return { error: t('friends.pinLimit', { n: 10 }) }
   setArr(PINNED_KEY, [id, ...arr])
   return { ok: true }
 }
@@ -106,15 +107,15 @@ function FriendMenu({ isPinned, isMuted, onPin, onMute, onRemove, onClose, menuE
     >
       <button role="menuitem" onClick={onPin}>
         <MenuIco d={isPinned ? ICON.unpin : ICON.pin} />
-        {isPinned ? 'Открепить' : 'Закрепить'}
+        {isPinned ? t('friends.unpin') : t('friends.pin')}
       </button>
       <button role="menuitem" onClick={onMute}>
         <MenuIco d={isMuted ? ICON.unmute : ICON.mute} />
-        {isMuted ? 'Включить уведомления' : 'Заглушить'}
+        {isMuted ? t('friends.unmute') : t('friends.mute')}
       </button>
       <button role="menuitem" className="danger" onClick={onRemove}>
         <MenuIco d={ICON.remove} />
-        Удалить из друзей
+        {t('friends.remove')}
       </button>
       {menuErr && <div className="friend-menu-err">{menuErr}</div>}
     </div>
@@ -235,7 +236,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
     if (f.status === 'fulfilled') setFriends(f.value)
     else {
       console.error('Не удалось загрузить друзей:', f.reason)
-      setLoadErr(f.reason?.message || 'Не удалось загрузить список друзей')
+      setLoadErr(f.reason?.message || t('friends.loadFailed'))
     }
     // Диалоги нужны только чтобы поднять наверх тех, с кем недавно переписка.
     // Их сбой — это потеря порядка, а не потеря друзей: список остаётся.
@@ -303,9 +304,9 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
   if (!supabaseEnabled || !user) {
     return (
       <div className="screen" ref={screenRef} style={swipeStyle}>
-        <h1 className="h1" style={{ margin: '4px 0 20px' }}>Друзья</h1>
+        <h1 className="h1" style={{ margin: '4px 0 20px' }}>{t('friends.tabFriends')}</h1>
         <div className="card">
-          <p className="muted" style={{ fontSize: 15 }}>Войдите в аккаунт (вкладка «Профиль»), чтобы находить людей и общаться.</p>
+          <p className="muted" style={{ fontSize: 15 }}>{t('friends.loginPrompt')}</p>
         </div>
       </div>
     )
@@ -316,7 +317,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
       {/* В шапке нет кнопок. «＋ По ID» ушла вместе с публичными кодами —
           людей находят по нику во вкладке «Поиск», а 🏁 переехала в «События»
           в профиле. */}
-      <h1 className="h1" style={{ margin: '4px 0 14px' }}>Общение</h1>
+      <h1 className="h1" style={{ margin: '4px 0 14px' }}>{t('friends.hubTitle')}</h1>
 
       <div className="seg" style={{ marginBottom: 16 }}>
         {VIEWS.map((v) => (
@@ -334,7 +335,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
       <div className="field" style={{ marginBottom: 14 }}>
         <input
           className="input"
-          placeholder="Фильтр по имени или нику…"
+          placeholder={t('friends.filterPh')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={{ height: 46, fontSize: 15 }}
@@ -343,20 +344,20 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
 
       {/* Список друзей */}
       {loading ? (
-        <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
+        <p className="muted" style={{ fontSize: 14 }}>{t('common.loading')}</p>
       ) : loadErr ? (
         /* Честная ошибка вместо «пока никого нет»: список друзей не пуст — он
            не загрузился, и это разные сообщения. */
         <div className="card">
           <p style={{ fontSize: 15, lineHeight: 1.5, color: 'var(--danger)' }}>{loadErr}</p>
-          <button className="btn ghost" style={{ marginTop: 12 }} onClick={reload}>Повторить</button>
+          <button className="btn ghost" style={{ marginTop: 12 }} onClick={reload}>{t('common.retry')}</button>
         </div>
       ) : sorted.length === 0 ? (
         <div className="card">
           <p className="muted" style={{ fontSize: 15, lineHeight: 1.5 }}>
             {query
-              ? 'Никого не нашли.'
-              : 'Пока никого нет. Найдите человека по нику во вкладке «Поиск» и подпишитесь — как только он подпишется в ответ, вы станете друзьями.'}
+              ? t('friends.notFound')
+              : t('friends.empty')}
           </p>
         </div>
       ) : sorted.map((f) => {
@@ -369,7 +370,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
           <div key={f.id} style={{ position: 'relative', marginBottom: 8 }}>
             <button
               className="card"
-              style={{ padding: '12px 48px 12px 14px', width: '100%', textAlign: 'left' }}
+              style={{ paddingBlock: 12, paddingInlineStart: 14, paddingInlineEnd: 48, width: '100%', textAlign: 'start' }}
               onClick={() => setChatFriend({ id: f.id, name: f.name, avatar: f.avatar, username: f.username })}
             >
               <div className="row gap12" style={{ alignItems: 'center' }}>
@@ -382,7 +383,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
                       </svg>
                     )}
                     <span style={{ fontWeight: 600, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {f.name || 'Друг'}
+                      {f.name || t('chat.friend')}
                     </span>
                     {isMuted && (
                       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="var(--ink-3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flex: '0 0 auto' }}>
@@ -417,7 +418,7 @@ export default function FriendsScreen({ unreadCounts = {}, onChatClosed, setTab,
                 setDropUp(window.innerHeight - r.bottom < 210)
                 setOpenMenu(isMenuOpen ? null : f.id)
               }}
-              aria-label="Действия"
+              aria-label={t('common.actions')}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                 <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />

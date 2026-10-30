@@ -6,6 +6,7 @@ import day from './de/day.js'
 import add from './de/add.js'
 import stats from './de/stats.js'
 import supps from './de/supps.js'
+import social from './de/social.js'
 
-export const strings = merge(common, auth, day, add, stats, supps)
+export const strings = merge(common, auth, day, add, stats, supps, social)
 export const data = {}

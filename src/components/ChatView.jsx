@@ -18,6 +18,10 @@ import { createDoubleTap } from '../lib/doubleTap.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import { t, fmtTime, fmtDate } from '../lib/i18n.js'
+import { useLang } from '../lib/useLang.js'
+import { foodName } from '../lib/foodNames.js'
+import { amountLabel } from '../lib/foods.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
@@ -31,7 +35,7 @@ const CARROT = '🥕'
 
 function timeShort(iso) {
   if (!iso) return ''
-  return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  return fmtTime(iso)
 }
 function isSameDay(a, b) {
   return new Date(a).toDateString() === new Date(b).toDateString()
@@ -40,9 +44,9 @@ function dayLabel(iso) {
   const d = new Date(iso)
   const today = new Date()
   const yest = new Date(); yest.setDate(today.getDate() - 1)
-  if (d.toDateString() === today.toDateString()) return 'Сегодня'
-  if (d.toDateString() === yest.toDateString()) return 'Вчера'
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+  if (d.toDateString() === today.toDateString()) return t('date.today')
+  if (d.toDateString() === yest.toDateString()) return t('date.yesterday')
+  return fmtDate(d, { day: 'numeric', month: 'long' })
 }
 // «Был(а) в сети»: свежие отметки — человеческим языком, старые — датой.
 // Пол собеседника нам неизвестен, поэтому нейтральное «Был(а)».
@@ -50,19 +54,19 @@ function lastSeenLabel(iso) {
   if (!iso) return ''
   const then = new Date(iso)
   const mins = Math.floor((Date.now() - then.getTime()) / 60000)
-  if (mins < 1) return 'Был(а) только что'
-  if (mins < 60) return `Был(а) ${mins} мин назад`
+  if (mins < 1) return t('chat.seenJustNow')
+  if (mins < 60) return t('chat.seenMinsAgo', { n: mins })
   const today = new Date()
-  if (then.toDateString() === today.toDateString()) return `Был(а) в ${timeShort(iso)}`
+  if (then.toDateString() === today.toDateString()) return t('chat.seenAt', { time: timeShort(iso) })
   const yest = new Date(); yest.setDate(today.getDate() - 1)
-  if (then.toDateString() === yest.toDateString()) return `Был(а) вчера в ${timeShort(iso)}`
-  return `Был(а) ${then.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`
+  if (then.toDateString() === yest.toDateString()) return t('chat.seenYesterdayAt', { time: timeShort(iso) })
+  return t('chat.seenOn', { date: fmtDate(then, { day: 'numeric', month: 'long' }) })
 }
 
 function previewOf(m) {
   if (m.text) return m.text
-  if (m.image_url) return '📷 Фото'
-  if (m.meal_ref) return '🍽 ' + (normalizeMealCard(m.meal_ref)?.label || 'Блюдо')
+  if (m.image_url) return `📷 ${t('chat.photo')}`
+  if (m.meal_ref) return '🍽 ' + (normalizeMealCard(m.meal_ref)?.label || t('meal.dish'))
   return ''
 }
 // Ссылки в тексте → кликабельные, остальное — как есть.
@@ -79,8 +83,8 @@ function renderText(text) {
 export default function ChatView({ friend, onClose }) {
   const { user, profile } = useStore()
   const myId = user?.id || ''
-  const myName = profile?.name || 'Вы'
-  const friendName = friend.name || 'Друг'
+  const myName = profile?.name || t('common.you')
+  const friendName = friend.name || t('chat.friend')
 
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
@@ -342,7 +346,7 @@ export default function ChatView({ friend, onClose }) {
   // Прыжок к оригиналу reply + подсветка.
   const jumpTo = useCallback((id) => {
     const el = listRef.current?.querySelector(`[data-mid="${id}"]`)
-    if (!el) { flash('Сообщение недоступно'); return }
+    if (!el) { flash(t('chat.unavailable')); return }
     el.scrollIntoView({ block: 'center', behavior: 'smooth' })
     el.classList.remove('msg-flash')
     // reflow, чтобы анимация перезапустилась
@@ -436,8 +440,8 @@ export default function ChatView({ friend, onClose }) {
   }, [myId, friend.id])
 
   const doCopy = useCallback(async (m) => {
-    try { await navigator.clipboard.writeText(m.text || previewOf(m)); flash('Скопировано') }
-    catch { flash('Не удалось скопировать') }
+    try { await navigator.clipboard.writeText(m.text || previewOf(m)); flash(t('chat.copied')) }
+    catch { flash(t('chat.copyFailed')) }
   }, [flash])
 
   // Переключить реакцию на сообщении. Оптимистично — двойной тап обязан
@@ -490,7 +494,7 @@ export default function ChatView({ friend, onClose }) {
     const ids = messagesRef.current.map((m) => m.id).filter((id) => !String(id).startsWith('temp-'))
     hideMessagesLocally(ids)
     setMessages([])
-    flash('Переписка очищена у вас')
+    flash(t('chat.cleared'))
   }, [flash])
 
   // ── delegated gestures on the list: свайп влево — единственный способ
@@ -609,7 +613,7 @@ export default function ChatView({ friend, onClose }) {
       <div className="nav-scrim" {...scrimProps} />
       <div className="chat-overlay" ref={overlayRef} {...panelProps}>
         <header className="chat-header">
-          <button className="chat-back" onClick={handleClose} aria-label="Назад">
+          <button className="chat-back" onClick={handleClose} aria-label={t('common.back')}>
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
           <button className="chat-peer" onClick={() => setProfileOpen(true)}>
@@ -620,17 +624,17 @@ export default function ChatView({ friend, onClose }) {
               <span className="chat-peer-name">{friendName}</span>
               {/* Приоритет: печатает → в сети → был(а) → запасной вариант */}
               {peerTyping ? (
-                <span className="chat-peer-sub typing">печатает…</span>
+                <span className="chat-peer-sub typing">{t('chat.typing')}</span>
               ) : peerOnline ? (
-                <span className="chat-peer-sub online">в сети</span>
+                <span className="chat-peer-sub online">{t('chat.online')}</span>
               ) : peerLastSeen ? (
                 <span className="chat-peer-sub">{lastSeenLabel(peerLastSeen)}</span>
               ) : (
-                <span className="chat-peer-sub">Открыть профиль</span>
+                <span className="chat-peer-sub">{t('chat.openProfile')}</span>
               )}
             </span>
           </button>
-          <button className="chat-more" onClick={() => setMenuOpen(true)} aria-label="Действия">
+          <button className="chat-more" onClick={() => setMenuOpen(true)} aria-label={t('common.actions')}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden>
               <circle cx="12" cy="5" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="12" cy="19" r="1.9" />
             </svg>
@@ -646,7 +650,7 @@ export default function ChatView({ friend, onClose }) {
             peerTyping ? null : (
               <div className="chat-empty">
                 <div className="chat-empty-emoji">👋</div>
-                <p>Сообщений пока нет.<br />Напишите первым!</p>
+                <p>{t('chat.empty')}<br />{t('chat.writeFirst')}</p>
               </div>
             )
           ) : (
@@ -660,7 +664,7 @@ export default function ChatView({ friend, onClose }) {
         </div>
 
         {showJump && (
-          <button className="chat-jump" onClick={() => { pinBottom(true); setShowJump(false) }} aria-label="Вниз">
+          <button className="chat-jump" onClick={() => { pinBottom(true); setShowJump(false) }} aria-label={t('chat.down')}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
           </button>
         )}
@@ -706,7 +710,7 @@ export default function ChatView({ friend, onClose }) {
           остаётся, и это не удаление аккаунта. Хватает «Да / Нет». */}
       {confirmClear && (
         <ConfirmDialog
-          text="Вы уверены, что хотите удалить чат?"
+          text={t('chat.confirmClear')}
           onYes={() => { setConfirmClear(false); clearChatForMe() }}
           onNo={() => setConfirmClear(false)}
         />
@@ -717,7 +721,7 @@ export default function ChatView({ friend, onClose }) {
           m={forwardMsg} myId={myId}
           fromName={forwardMsg.sender === myId ? myName : friendName}
           onClose={() => setForwardMsg(null)}
-          onDone={(name) => { setForwardMsg(null); flash(name ? `Переслано → ${name}` : 'Переслано') }}
+          onDone={(name) => { setForwardMsg(null); flash(name ? t('chat.forwardedTo', { name }) : t('chat.forwarded')) }}
         />
       )}
 
@@ -732,6 +736,9 @@ export default function ChatView({ friend, onClose }) {
 
 // ── message list (memoized — не перерисовывается при вводе текста) ─────────────
 const MessageList = memo(function MessageList({ messages, myId, friendName, onQuoteTap, onImgLoad, onRetry, onOpenMeal }) {
+  // memo отсекает перерисовку от App — без подписки подписи остались бы на
+  // прежнем языке до первого нового сообщения.
+  useLang()
   return messages.map((m, i) => {
     const mine = m.sender === myId
     const prev = messages[i - 1]
@@ -772,7 +779,7 @@ function TypingBubble({ name }) {
   return (
     <div className="msg-row theirs typing-row">
       <div className="msg theirs tail typing-bubble">
-        <span className="typing-name">{name} печатает</span>
+        <span className="typing-name">{t('chat.nameTyping', { name })}</span>
         <span className="typing-dots" aria-hidden><i /><i /><i /></span>
       </div>
     </div>
@@ -801,26 +808,26 @@ function MealRefCard({ meal: raw, onOpen }) {
           <span className="mealcard-label">{meal.label}</span>
           <span className="mealcard-when">{meal.date ? dayLabel(meal.date + 'T12:00:00') : ''}</span>
         </span>
-        <span className="mealcard-kcal">{meal.kcal}<span className="mealcard-kcal-u">ккал</span></span>
+        <span className="mealcard-kcal">{meal.kcal}<span className="mealcard-kcal-u">{t('units.kcal')}</span></span>
       </div>
 
       {!listRedundant && (
         <ul className="mealcard-items">
           {shown.map((it, i) => (
             <li key={i}>
-              <span className="mealcard-item-name">{it.emoji ? it.emoji + ' ' : ''}{it.name}</span>
-              {it.grams ? <span className="mealcard-item-g">{it.grams} {it.unit || 'г'}</span> : null}
+              <span className="mealcard-item-name">{it.emoji ? it.emoji + ' ' : ''}{foodName(it.name)}</span>
+              {it.grams ? <span className="mealcard-item-g">{amountLabel(it.grams, it.unit || 'г')}</span> : null}
             </li>
           ))}
-          {rest > 0 && <li className="mealcard-more">и ещё {rest}</li>}
+          {rest > 0 && <li className="mealcard-more">{t('supp.andMore', { n: rest })}</li>}
         </ul>
       )}
 
       {hasMacros && (
         <div className="mealcard-macros">
-          <span><b>{meal.protein}</b> Б</span>
-          <span><b>{meal.fat}</b> Ж</span>
-          <span><b>{meal.carbs}</b> У</span>
+          <span><b>{meal.protein}</b> {t('macro.p')}</span>
+          <span><b>{meal.fat}</b> {t('macro.f')}</span>
+          <span><b>{meal.carbs}</b> {t('macro.c')}</span>
         </div>
       )}
     </button>
@@ -846,12 +853,12 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, on
       </span>
       <div className={`msg ${mine ? 'mine' : 'theirs'}${tail ? ' tail' : ''}`}>
         {m.forwarded_name && (
-          <div className="msg-forward">Переслано от {m.forwarded_name}</div>
+          <div className="msg-forward">{t('chat.forwardedFrom', { name: m.forwarded_name })}</div>
         )}
         {m.reply_snapshot && (
           <button className="msg-quote" onClick={() => m.reply_to && onQuoteTap(m.reply_to)}>
             <span className="msg-quote-name">{m.reply_snapshot.name}</span>
-            <span className="msg-quote-text">{m.reply_snapshot.image ? '📷 ' : ''}{m.reply_snapshot.text || 'Фото'}</span>
+            <span className="msg-quote-text">{m.reply_snapshot.image ? '📷 ' : ''}{m.reply_snapshot.text || t('chat.photo')}</span>
           </button>
         )}
         {m.meal_ref && <MealRefCard meal={m.meal_ref} onOpen={onOpenMeal} />}
@@ -873,12 +880,12 @@ function MessageRow({ m, mine, tail, grouped, onQuoteTap, onImgLoad, onRetry, on
               'sent' (только что отправили). Проверка на !status пропускала
               'sent', и вилка не появлялась до перезагрузки чата. */}
           {mine && (!status || status === 'sent') && (
-            <span className={`msg-tick${m.read_at ? ' read' : ''}`} title={m.read_at ? 'Прочитано' : 'Отправлено'}>
+            <span className={`msg-tick${m.read_at ? ' read' : ''}`} title={m.read_at ? t('chat.read') : t('chat.delivered')}>
               <ForkTick />
             </span>
           )}
           {mine && status === 'failed' && (
-            <button className="msg-fail" onClick={() => onRetry(m)} title="Повторить">! повторить</button>
+            <button className="msg-fail" onClick={() => onRetry(m)} title={t('common.retry')}>! {t('chat.retryLower')}</button>
           )}
         </div>
         <ReactionBadge reactions={m.reactions} />
@@ -1022,16 +1029,16 @@ function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
         <div className="chat-replybar">
           <span className="chat-replybar-line" />
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="chat-replybar-name">Ответ · {reply.snapshot.name}</div>
-            <div className="chat-replybar-text">{reply.snapshot.image ? '📷 ' : ''}{reply.snapshot.text || 'Фото'}</div>
+            <div className="chat-replybar-name">{t('chat.replyTo', { name: reply.snapshot.name })}</div>
+            <div className="chat-replybar-text">{reply.snapshot.image ? '📷 ' : ''}{reply.snapshot.text || t('chat.photo')}</div>
           </div>
-          <button className="chat-replybar-x" onClick={onCancelReply} aria-label="Отменить">✕</button>
+          <button className="chat-replybar-x" onClick={onCancelReply} aria-label={t('common.undo')}>✕</button>
         </div>
       )}
       {photo && (
         <div className="chat-photo-preview">
           <img src={photo.url} alt="" />
-          <button onClick={() => { URL.revokeObjectURL(photo.url); setPhoto(null) }} aria-label="Убрать фото">✕</button>
+          <button onClick={() => { URL.revokeObjectURL(photo.url); setPhoto(null) }} aria-label={t('chat.removePhoto')}>✕</button>
         </div>
       )}
       {/* Поле-«пилюля»: кнопки вложений живут ВНУТРИ него — так добавление
@@ -1039,12 +1046,12 @@ function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
       <div className="chat-composer-row">
         <div className="chat-inputwrap">
           <div className="chat-tools">
-            <button className="chat-tool" onClick={() => fileRef.current?.click()} aria-label="Отправить фото">
+            <button className="chat-tool" onClick={() => fileRef.current?.click()} aria-label={t('chat.sendPhoto')}>
               <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="5" width="18" height="15" rx="3.5" /><circle cx="12" cy="12.5" r="3.4" /><path d="M8 5 9.4 3h5.2L16 5" />
               </svg>
             </button>
-            <button className="chat-tool" onClick={onPickMeal} aria-label="Отправить приём пищи">
+            <button className="chat-tool" onClick={onPickMeal} aria-label={t('chat.sendMeal')}>
               <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 3v7.2a2.2 2.2 0 0 0 4.4 0V3" /><path d="M7.2 10.4V21" />
                 <path d="M16.5 3c-1.4 1.6-2 3.6-2 5.6 0 1.7.7 3 2 3.4V21" />
@@ -1055,7 +1062,7 @@ function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
           <textarea
             ref={taRef}
             className="chat-textarea"
-            placeholder="Сообщение…"
+            placeholder={t('chat.messagePh')}
             value={text}
             rows={1}
             onChange={(e) => { setText(e.target.value); if (e.target.value.trim()) pingTyping(); else stopTyping() }}
@@ -1063,7 +1070,7 @@ function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
             onBlur={stopTyping}
           />
         </div>
-        <button className={`chat-send${canSend ? ' on' : ''}`} onClick={submit} disabled={!canSend} aria-label="Отправить">
+        <button className={`chat-send${canSend ? ' on' : ''}`} onClick={submit} disabled={!canSend} aria-label={t('common.send')}>
           <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor"><path d="M3.4 20.4l17.6-8.4a.5.5 0 0 0 0-.9L3.4 3.6a.5.5 0 0 0-.7.6l2.3 6.9c.1.2.3.4.5.4l8.9 1.5-8.9 1.5c-.2 0-.4.2-.5.4l-2.3 6.9a.5.5 0 0 0 .7.6z" /></svg>
         </button>
       </div>
@@ -1078,33 +1085,33 @@ function Composer({ reply, onCancelReply, onSend, onPickMeal, onTyping }) {
 const CTX_ACTIONS = [
   {
     key: 'reply',
-    label: 'Ответить',
+    label: 'chat.reply',
     icon: 'M9 14L4 9l5-5 M4 9h11a5 5 0 0 1 5 5v3',
     run: (h) => h.onReply(),
   },
   {
     key: 'copy',
-    label: 'Копировать',
+    label: 'chat.copy',
     icon: 'M9 9h11v11H9z M5 15V4h11',
     show: ({ m }) => !!m.text,
     run: (h) => h.onCopy(),
   },
   {
     key: 'forward',
-    label: 'Переслать',
+    label: 'chat.forward',
     icon: 'M15 5l7 7-7 7 M22 12H4a2 2 0 0 0-2 2v3',
     run: (h) => h.onForward(),
   },
   {
     key: 'retry',
-    label: 'Повторить отправку',
+    label: 'chat.resend',
     icon: 'M21 12a9 9 0 1 1-3-6.7 M21 4v4h-4',
     show: ({ m, mine }) => mine && m.status === 'failed',
     run: (h) => h.onRetry(),
   },
   {
     key: 'delete-me',
-    label: 'Удалить у меня',
+    label: 'chat.deleteForMe',
     icon: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
     danger: true,
     run: (h) => h.onDeleteForMe(),
@@ -1117,9 +1124,9 @@ function MealCardSheet({ meal: raw, onClose }) {
   const meal = normalizeMealCard(raw)
   const items = meal.items || []
   const macros = [
-    { key: 'protein', label: 'Белки', v: meal.protein },
-    { key: 'fat', label: 'Жиры', v: meal.fat },
-    { key: 'carbs', label: 'Углеводы', v: meal.carbs },
+    { key: 'protein', label: t('macro.protein'), v: meal.protein },
+    { key: 'fat', label: t('macro.fat'), v: meal.fat },
+    { key: 'carbs', label: t('macro.carbs'), v: meal.carbs },
   ]
   const hasMacros = macros.some((m) => m.v != null)
   return (
@@ -1134,7 +1141,7 @@ function MealCardSheet({ meal: raw, onClose }) {
             <div className="mealsheet-when">{meal.date ? dayLabel(meal.date + 'T12:00:00') : ''}</div>
           </div>
           <div className="mealsheet-kcal">
-            <b>{meal.kcal}</b><span>ккал</span>
+            <b>{meal.kcal}</b><span>{t('units.kcal')}</span>
           </div>
         </div>
 
@@ -1142,7 +1149,7 @@ function MealCardSheet({ meal: raw, onClose }) {
           <div className="mealsheet-macros">
             {macros.map((m) => (
               <div key={m.key} className="mealsheet-macro">
-                <div className="mealsheet-macro-v">{m.v ?? 0}<span>г</span></div>
+                <div className="mealsheet-macro-v">{m.v ?? 0}<span>{t('units.g')}</span></div>
                 <div className="mealsheet-macro-l">{m.label}</div>
               </div>
             ))}
@@ -1152,14 +1159,14 @@ function MealCardSheet({ meal: raw, onClose }) {
         {/* У поднятых старых записей состав — это сам заголовок; секцию прячем. */}
         {!(items.length === 1 && items[0].name === meal.label) && (
         <>
-        <div className="mealsheet-listlabel">Состав</div>
+        <div className="mealsheet-listlabel">{t('chat.contents')}</div>
         <ul className="mealsheet-list">
           {items.map((it, i) => (
             <li key={i}>
-              <span className="mealsheet-item-name">{it.emoji ? it.emoji + ' ' : ''}{it.name}</span>
+              <span className="mealsheet-item-name">{it.emoji ? it.emoji + ' ' : ''}{foodName(it.name)}</span>
               <span className="mealsheet-item-right">
-                {it.grams ? <span className="mealsheet-item-g">{it.grams} {it.unit || 'г'}</span> : null}
-                <span className="mealsheet-item-k">{it.kcal} ккал</span>
+                {it.grams ? <span className="mealsheet-item-g">{amountLabel(it.grams, it.unit || 'г')}</span> : null}
+                <span className="mealsheet-item-k">{t('units.kcalN', { n: it.kcal })}</span>
               </span>
             </li>
           ))}
@@ -1204,13 +1211,13 @@ function MealPickerSheet({ onClose, onPick }) {
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 12 }}>
-          <h2 className="h2" style={{ fontSize: 18 }}>Отправить приём пищи</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <h2 className="h2" style={{ fontSize: 18 }}>{t('chat.sendMeal')}</h2>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
 
         {dayKeys.length === 0 ? (
           <p className="muted" style={{ fontSize: 14, padding: '10px 0 16px' }}>
-            Пока нечего отправить — сначала запишите приём пищи в дневник.
+            {t('chat.nothingToSend')}
           </p>
         ) : (
           <div className="mealpick-scroll">
@@ -1223,12 +1230,12 @@ function MealPickerSheet({ onClose, onPick }) {
                     <span className="mealpick-meta">
                       <span className="mealpick-name">{g.section.label}</span>
                       <span className="mealpick-sub">
-                        {g.items.map((m) => m.name).join(', ')}
+                        {g.items.map((m) => foodName(m.name)).join(', ')}
                       </span>
                     </span>
                     <span className="mealpick-kcal">
                       {Math.round(g.items.reduce((s, m) => s + (+m.kcal || 0), 0))}
-                      <span className="mealpick-kcal-u"> ккал</span>
+                      <span className="mealpick-kcal-u"> {t('units.kcal')}</span>
                     </span>
                   </button>
                 ))}
@@ -1247,13 +1254,13 @@ function MealPickerSheet({ onClose, onPick }) {
 const CHAT_ACTIONS = [
   {
     key: 'profile',
-    label: 'Профиль друга',
+    label: 'chat.friendProfile',
     icon: 'M12 12a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4z M4.5 20.5a7.5 7.5 0 0 1 15 0',
     run: (h) => h.onProfile(),
   },
   {
     key: 'clear',
-    label: 'Очистить переписку у меня',
+    label: 'chat.clearForMe',
     icon: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
     danger: true,
     run: (h) => h.onClearForMe(),
@@ -1272,7 +1279,7 @@ function ChatMenuSheet({ onClose, ...handlers }) {
             className={`ctx-item${a.danger ? ' danger' : ''}`}
             onClick={() => { a.run(handlers); close() }}
           >
-            <Ico d={a.icon} /> {a.label}
+            <Ico d={a.icon} /> {t(a.label)}
           </button>
         ))}
       </div>
@@ -1298,7 +1305,7 @@ function ContextSheet({ m, mine, onClose, ...handlers }) {
             style={{ '--i': i }}
             onClick={() => { a.run(handlers); close() }}
           >
-            <Ico d={a.icon} /> {a.label}
+            <Ico d={a.icon} /> {t(a.label)}
           </button>
         ))}
       </div>
@@ -1337,7 +1344,7 @@ function ForwardSheet({ m, myId, fromName, onClose, onDone }) {
     })
     setBusy(false)
     if (res.error) return
-    onDone(f.name || 'другу')
+    onDone(f.name || t('chat.toFriend'))
   }
 
   return (
@@ -1345,19 +1352,19 @@ function ForwardSheet({ m, myId, fromName, onClose, onDone }) {
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 14 }}>
-          <h2 className="h2" style={{ fontSize: 18 }}>Переслать</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <h2 className="h2" style={{ fontSize: 18 }}>{t('chat.forward')}</h2>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
         {loading ? (
-          <p className="muted" style={{ fontSize: 14, padding: '10px 0' }}>Загрузка…</p>
+          <p className="muted" style={{ fontSize: 14, padding: '10px 0' }}>{t('common.loading')}</p>
         ) : friends.length === 0 ? (
-          <p className="muted" style={{ fontSize: 14, padding: '10px 0' }}>Нет друзей для пересылки.</p>
+          <p className="muted" style={{ fontSize: 14, padding: '10px 0' }}>{t('chat.noFriendsToForward')}</p>
         ) : (
           friends.map((f) => (
             <button key={f.id} className="fwd-row" disabled={busy} onClick={() => forward(f)}>
               <Avatar src={f.avatar} name={f.name} size={42} />
-              <span className="fwd-name">{f.name || 'Друг'}</span>
-              <span className="fwd-send">Отправить</span>
+              <span className="fwd-name">{f.name || t('chat.friend')}</span>
+              <span className="fwd-send">{t('common.send')}</span>
             </button>
           ))
         )}

@@ -14,6 +14,8 @@
 // строки, дубликаты и список на тысячу позиций.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { t } from './i18n.js'
+
 export const MAX_ITEMS = 24 // больше в профиль просто не влезает по смыслу
 export const MAX_LEN = 40   // «Молоко», «Грибы», а не абзац текста
 
@@ -44,9 +46,9 @@ export function addProfileListItem(list, value) {
   const cur = normalizeProfileList(list)
   const v = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
   if (!v) return { list: cur, error: null }
-  if (cur.length >= MAX_ITEMS) return { list: cur, error: `Не больше ${MAX_ITEMS} пунктов` }
+  if (cur.length >= MAX_ITEMS) return { list: cur, error: t('lists.max', { n: MAX_ITEMS }) }
   if (cur.some((x) => x.toLowerCase() === v.slice(0, MAX_LEN).trim().toLowerCase())) {
-    return { list: cur, error: 'Уже в списке' }
+    return { list: cur, error: t('lists.already') }
   }
   return { list: normalizeProfileList([...cur, v]), error: null }
 }

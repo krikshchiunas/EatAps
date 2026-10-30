@@ -14,6 +14,7 @@ import { listFeed } from '../lib/social.js'
 import { PostCard, ComposerSheet } from './ThoughtsFeed.jsx'
 import { deletePost } from '../lib/supabase.js'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import { t } from '../lib/i18n.js'
 
 export default function FeedScreen({ onOpenProfile }) {
   const { user, supabaseEnabled } = useStore()
@@ -37,7 +38,7 @@ export default function FeedScreen({ onOpenProfile }) {
       setPosts(res.posts)
       setCursor(res.cursor)
     } catch (e) {
-      setErr(e.message || 'Не удалось загрузить ленту')
+      setErr(e.message || t('feed.loadFailed'))
       setPosts([])
     }
   }, [supabaseEnabled, myId])
@@ -56,7 +57,7 @@ export default function FeedScreen({ onOpenProfile }) {
       })
       setCursor(res.cursor)
     } catch (e) {
-      setErr(e.message || 'Не удалось догрузить')
+      setErr(e.message || t('feed.moreFailed'))
     } finally {
       setLoadingMore(false)
     }
@@ -86,13 +87,13 @@ export default function FeedScreen({ onOpenProfile }) {
 
   if (!supabaseEnabled) {
     return <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '32px 16px' }}>
-      Лента доступна после входа в аккаунт.
+      {t('feed.needAccount')}
     </p>
   }
 
   if (unavailable) {
     return <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '32px 16px' }}>
-      Раздел пока недоступен — база ещё не обновлена.
+      {t('social.dbOutdated')}
     </p>
   }
 
@@ -103,18 +104,18 @@ export default function FeedScreen({ onOpenProfile }) {
         style={{ marginBottom: 14 }}
         onClick={() => setComposer({ post: null })}
       >
-        Поделиться мыслью
+        {t('feed.share')}
       </button>
 
       {posts === null && (
-        <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '28px 0' }}>Загружаем…</p>
+        <p className="muted" style={{ fontSize: 14, textAlign: 'center', padding: '28px 0' }}>{t('social.loading')}</p>
       )}
 
       {posts?.length === 0 && (
         <div style={{ textAlign: 'center', padding: '32px 8px' }}>
           <div style={{ fontSize: 34, marginBottom: 10 }}>🥗</div>
           <p className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>
-            Пока пусто. Подпишитесь на кого-нибудь через поиск —<br />их мысли появятся здесь.
+            {t('feed.empty1')}<br />{t('feed.empty2')}
           </p>
         </div>
       )}
@@ -124,7 +125,7 @@ export default function FeedScreen({ onOpenProfile }) {
           key={p.id}
           post={p}
           myId={myId}
-          authorName={p.display_name || p.username || 'Без имени'}
+          authorName={p.display_name || p.username || t('common.noName')}
           authorAvatar={p.avatar_url}
           onChange={replace}
           onEdit={(post) => setComposer({ post })}
@@ -134,7 +135,7 @@ export default function FeedScreen({ onOpenProfile }) {
       ))}
 
       <div ref={sentinel} />
-      {loadingMore && <p className="muted" style={{ fontSize: 13, textAlign: 'center', padding: '12px 0' }}>Загружаем…</p>}
+      {loadingMore && <p className="muted" style={{ fontSize: 13, textAlign: 'center', padding: '12px 0' }}>{t('social.loading')}</p>}
       {err && <p style={{ fontSize: 13, color: 'var(--danger)', marginTop: 10 }}>{err}</p>}
 
       {composer && (
@@ -151,7 +152,7 @@ export default function FeedScreen({ onOpenProfile }) {
 
       {confirmDelete && (
         <ConfirmDialog
-          text="Удалить эту мысль? Ответы и реакции на неё тоже исчезнут."
+          text={t('thought.confirmDelete')}
           onYes={() => doDelete(confirmDelete)}
           onNo={() => setConfirmDelete(null)}
         />
