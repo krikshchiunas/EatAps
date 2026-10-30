@@ -20,16 +20,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { ACTIVITY, computeTargets } from './nutrition.js'
 import { fromKey } from './date.js'
+import { t } from './i18n.js'
 
 // Порядок уровней от «лежал» к «очень активно». ACTIVITY (nutrition.js) остаётся
 // единственным источником коэффициентов — здесь только оформление для выбора дня.
 export const ACTIVITY_ORDER = ['sedentary', 'light', 'moderate', 'high']
 
 export const ACTIVITY_DAY = {
-  sedentary: { emoji: '🛋️', short: 'Лежал', desc: 'Дом, диван, работа сидя — почти без ходьбы' },
-  light: { emoji: '🚶', short: 'Немного', desc: 'Обычный день: дорога, магазин, лёгкая ходьба' },
-  moderate: { emoji: '🏃', short: 'Активно', desc: 'Много ходьбы или тренировка средней тяжести' },
-  high: { emoji: '🔥', short: 'Очень', desc: 'Тяжёлая тренировка или физическая работа весь день' },
+  sedentary: { emoji: '🛋️', get short() { return t('activityMode.sedentaryShort') }, get desc() { return t('activityMode.sedentaryDesc') } },
+  light: { emoji: '🚶', get short() { return t('activityMode.lightShort') }, get desc() { return t('activityMode.lightDesc') } },
+  moderate: { emoji: '🏃', get short() { return t('activityMode.moderateShort') }, get desc() { return t('activityMode.moderateDesc') } },
+  high: { emoji: '🔥', get short() { return t('activityMode.highShort') }, get desc() { return t('activityMode.highDesc') } },
 }
 
 // Разумные границы веса: защита от опечаток («7 кг», «750 кг») — они бы
@@ -91,14 +92,26 @@ export const ACTIVITY_SCORE = { sedentary: 12, light: 37, moderate: 62, high: 87
 // Балл (score) остаётся прежней величиной 0–100 — той самой, из которой
 // scoreToFactor делает множитель к BMR. Шаги лишь дают ей понятную опору:
 // «обычный день» — это ровно та активность, под которую подобран light (1.375).
+//
+// Подписи — геттерами из словаря (activityLevel.<id>): уровни живут весь сеанс,
+// а язык может смениться посреди него.
+function level(score, steps, emoji, id) {
+  return {
+    score, steps, emoji,
+    get label() { return t(`activityLevel.${id}.label`) },
+    get hint() { return t(`activityLevel.${id}.hint`) },
+    get desc() { return t(`activityLevel.${id}.desc`) },
+  }
+}
+
 export const ACTIVITY_LEVELS = [
-  { score: 3,   steps: 500,   emoji: '🛌', label: 'Лежачий день', hint: 'до 1000 шагов', desc: 'Весь день в постели: болезнь, восстановление' },
-  { score: 18,  steps: 3000,  emoji: '🛋️', label: 'Почти не выходил', hint: '≈ 3 000 шагов', desc: 'Дом и работа сидя, до магазина и обратно' },
-  { score: 37,  steps: 7000,  emoji: '🚶', label: 'Обычный день', hint: '≈ 7 000 шагов', desc: 'Дорога, дела, немного ходьбы — как у большинства' },
-  { score: 55,  steps: 12000, emoji: '🚶‍♂️', label: 'Много ходил', hint: '≈ 12 000 шагов', desc: 'Долгая прогулка или день на ногах' },
-  { score: 72,  steps: 20000, emoji: '🏃', label: 'Очень активно', hint: '≈ 20 000 шагов', desc: 'Долгая прогулка, поход или работа на ногах' },
-  { score: 88,  steps: 30000, emoji: '🔥', label: 'На ногах весь день', hint: '≈ 30 000 шагов', desc: 'Тяжёлая физическая работа или долгий поход' },
-  { score: 100, steps: 50000, emoji: '⛰️', label: 'Предел', hint: '≈ 50 000 шагов', desc: 'Марафон, горы, смена на стройке — так не бывает каждый день' },
+  level(3, 500, '🛌', 'bed'),
+  level(18, 3000, '🛋️', 'home'),
+  level(37, 7000, '🚶', 'usual'),
+  level(55, 12000, '🚶‍♂️', 'walked'),
+  level(72, 20000, '🏃', 'active'),
+  level(88, 30000, '🔥', 'feet'),
+  level(100, 50000, '⛰️', 'limit'),
 ]
 
 // Уровень, ближайший к баллу. Балл может прийти любой (старые дни, анкета),
@@ -380,10 +393,10 @@ export function bmi(weight, heightCm) {
 
 export function bmiBand(value) {
   if (value == null) return null
-  if (value < 18.5) return { key: 'under', label: 'ниже нормы', color: 'var(--accent)' }
-  if (value < 25) return { key: 'normal', label: 'в пределах нормы', color: 'var(--good)' }
-  if (value < 30) return { key: 'over', label: 'выше нормы', color: 'var(--warn)' }
-  return { key: 'obese', label: 'значительно выше нормы', color: 'var(--danger)' }
+  if (value < 18.5) return { key: 'under', label: t('bmi.under'), color: 'var(--accent)' }
+  if (value < 25) return { key: 'normal', label: t('bmi.normal'), color: 'var(--good)' }
+  if (value < 30) return { key: 'over', label: t('bmi.over'), color: 'var(--warn)' }
+  return { key: 'obese', label: t('bmi.obese'), color: 'var(--danger)' }
 }
 
 // ── Свод по весу за период ────────────────────────────────────────────────────

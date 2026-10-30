@@ -1,4 +1,5 @@
 import { useStore } from '../store.jsx'
+import { t } from '../lib/i18n.js'
 
 // Сообщение о проблеме с аккаунтом — например, что сессия истекла.
 //
@@ -15,7 +16,7 @@ export default function AuthNotice() {
   return (
     <div className="auth-notice" role="status">
       <span>{authError.message}</span>
-      <button type="button" className="auth-notice__ok" onClick={dismissAuthError}>Понятно</button>
+      <button type="button" className="auth-notice__ok" onClick={dismissAuthError}>{t('common.gotIt')}</button>
     </div>
   )
 }

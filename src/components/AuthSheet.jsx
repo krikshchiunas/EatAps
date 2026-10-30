@@ -4,6 +4,7 @@ import { web3Enabled } from '../lib/web3Config.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 import { normalizeError } from '../lib/authErrors.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import { t } from '../lib/i18n.js'
 
 // Кнопка кошелька — отдельным чанком: вместе с ней уезжает весь @reown/appkit
 // (≈2.7 МБ). Пока он едет, форма входа уже нарисована и работает — почта,
@@ -22,7 +23,7 @@ class Web3ErrorBoundary extends Component {
 // Заглушка на время загрузки чанка: те же класс и текст, поэтому кнопка не
 // «прыгает» и высота листа не меняется, когда кошельки доедут.
 function Web3ButtonPlaceholder() {
-  return <button className="btn ghost" disabled>👛 Web3 кошелёк</button>
+  return <button className="btn ghost" disabled>👛 {t('auth.web3')}</button>
 }
 
 export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onRegistered }) {
@@ -86,7 +87,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
       }
       if (!res.error) onRegistered?.()
       return res
-    }, 'Готово. Подтвердите почту по ссылке из письма — и можно пользоваться приложением.')
+    }, t('auth.registered'))
 
   const emailOk = /\S+@\S+\.\S+/.test(email.trim())
 
@@ -95,18 +96,16 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
-          <h2 className="h2">{isRegister ? 'Регистрация в EatAps' : 'Вход в EatAps'}</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <h2 className="h2">{isRegister ? t('auth.registerTitle') : t('auth.loginTitle')}</h2>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
         <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>
-          {isRegister
-            ? 'Создайте аккаунт — профиль и история сохранятся в облаке и будут доступны на любом устройстве.'
-            : 'Войдите, чтобы данные сохранялись в облаке и синхронизировались между устройствами.'}
+          {isRegister ? t('auth.registerText') : t('auth.loginText')}
         </p>
 
         <div className="stack">
           <button className="btn ghost" disabled={busy} onClick={() => run(() => auth.signInOAuth('google'), null, { beforeAuth: true })}>
-            <span style={{ fontWeight: 700 }}>G</span> Продолжить с Google
+            <span style={{ fontWeight: 700 }}>G</span> {t('auth.google')}
           </button>
           {web3Enabled && (
             <Web3ErrorBoundary>
@@ -119,7 +118,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
 
         <div className="row" style={{ alignItems: 'center', gap: 12, margin: '18px 0' }}>
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>или по email</span>
+          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{t('auth.orEmail')}</span>
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
         </div>
 
@@ -136,26 +135,26 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
             <input className="input" type="email" inputMode="email" autoComplete="email" placeholder="name@mail.com" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div className="field">
-            <label>Пароль</label>
+            <label>{t('auth.password')}</label>
             <input className="input" type="password" autoComplete={isRegister ? 'new-password' : 'current-password'} placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
 
           <div className="row gap8">
             <button type={isRegister ? 'button' : 'submit'} className={isRegister ? 'btn ghost' : 'btn'} style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={isRegister ? doLogin : undefined}>
-              Войти
+              {t('auth.signIn')}
             </button>
             <button type={isRegister ? 'submit' : 'button'} className={isRegister ? 'btn' : 'btn ghost'} style={{ flex: 1 }} disabled={busy || !emailOk || password.length < 6} onClick={isRegister ? undefined : doRegister}>
-              Регистрация
+              {t('auth.signUp')}
             </button>
           </div>
         </form>
 
         <div className="row between" style={{ marginTop: 12 }}>
-          <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} disabled={busy || !emailOk} onClick={() => run(() => auth.signInMagic(email), 'Отправили ссылку для входа на почту.')}>
-            Войти по ссылке (без пароля)
+          <button style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} disabled={busy || !emailOk} onClick={() => run(() => auth.signInMagic(email), t('auth.magicSent'))}>
+            {t('auth.magic')}
           </button>
-          <button style={{ fontSize: 14, color: 'var(--ink-3)' }} disabled={busy || !emailOk} onClick={() => run(() => auth.resetPassword(email), 'Отправили ссылку для сброса пароля.')}>
-            Забыли пароль?
+          <button style={{ fontSize: 14, color: 'var(--ink-3)' }} disabled={busy || !emailOk} onClick={() => run(() => auth.resetPassword(email), t('auth.resetSent'))}>
+            {t('auth.forgot')}
           </button>
         </div>
 
@@ -164,7 +163,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
         )}
 
         <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 18, textAlign: 'center' }}>
-          Продолжая, вы соглашаетесь с обработкой данных (см. Datenschutz в профиле).
+          {t('auth.consent')}
         </p>
       </div>
     </div>

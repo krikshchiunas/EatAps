@@ -6,6 +6,8 @@ import { hasAnyAccountCache } from '../lib/localCache.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import Ring from './Ring.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
+import LanguageButton from './LanguageButton.jsx'
+import { t } from '../lib/i18n.js'
 
 // Вход/регистрация тянут тяжёлый Web3-стек (AppKit) — грузим лениво,
 // только когда пользователь открывает окно входа.
@@ -64,23 +66,25 @@ export default function Onboarding() {
     <div className="screen" style={{ paddingBottom: 40 }}>
       <div className="row between" style={{ marginBottom: 22 }}>
         {step > 0
-          ? <button className="iconbtn" onClick={back} aria-label="Назад">‹</button>
+          ? <button className="iconbtn" onClick={back} aria-label={t('common.back')}>‹</button>
           : <div style={{ width: 40 }} />}
         <div style={{ display: 'flex', gap: 6 }}>
           {STEPS.map((_, i) => (
             <div key={i} style={{ width: i <= step ? 22 : 8, height: 8, borderRadius: 4, background: i <= step ? 'var(--primary)' : 'var(--track)', transition: 'all 0.3s ease' }} />
           ))}
         </div>
-        <div style={{ width: 40 }} />
+        {/* Язык — с первого экрана: человек, открывший приложение не на своём
+            языке, иначе не дочитал бы анкету до настроек. */}
+        <LanguageButton />
       </div>
 
       {name === 'name' && (
-        <StepShell title="Как вас зовут?" hint="Имя увидят друзья. Фото — по желанию.">
+        <StepShell title={t('onboarding.nameTitle')} hint={t('onboarding.nameHint')}>
           <div style={{ marginBottom: 8 }}>
             <AvatarPicker value={data.avatar} onChange={(a) => set({ avatar: a })} />
           </div>
           <div className="field" style={{ marginTop: 18 }}>
-            <label>Имя или никнейм</label>
+            <label>{t('onboarding.nameLabel')}</label>
             <input className="input" value={data.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
           </div>
           <Continue onClick={next} />
@@ -94,11 +98,11 @@ export default function Onboarding() {
                 style={{ marginTop: 12 }}
                 onClick={() => setAuth({ mode: 'login' })}
               >
-                Уже есть аккаунт? Войти
+                {t('onboarding.haveAccount')}
               </button>
               {hasAnyAccountCache() && (
                 <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 14, textAlign: 'center' }}>
-                  На этом устройстве остались данные аккаунта. Войдите — история и цели вернутся.
+                  {t('onboarding.cachedAccount')}
                 </p>
               )}
             </>
@@ -107,27 +111,27 @@ export default function Onboarding() {
       )}
 
       {name === 'sex' && (
-        <StepShell title="Ваш пол" hint="Нужно для точного расчёта обмена веществ">
+        <StepShell title={t('onboarding.sexTitle')} hint={t('onboarding.sexHint')}>
           <div className="stack">
-            <SelectCard on={data.sex === 'male'} onClick={() => set({ sex: 'male' })} emoji="♂" title="Мужской" />
-            <SelectCard on={data.sex === 'female'} onClick={() => set({ sex: 'female' })} emoji="♀" title="Женский" />
+            <SelectCard on={data.sex === 'male'} onClick={() => set({ sex: 'male' })} emoji="♂" title={t('onboarding.male')} />
+            <SelectCard on={data.sex === 'female'} onClick={() => set({ sex: 'female' })} emoji="♀" title={t('onboarding.female')} />
           </div>
           <Continue onClick={next} />
         </StepShell>
       )}
 
       {name === 'body' && (
-        <StepShell title="Основные данные" hint="Возраст, рост и вес">
+        <StepShell title={t('onboarding.bodyTitle')} hint={t('onboarding.bodyHint')}>
           <div className="field">
-            <label>Возраст, лет</label>
+            <label>{t('onboarding.age')}</label>
             <input className="input" type="number" inputMode="numeric" placeholder="27" value={data.age} onChange={(e) => set({ age: e.target.value })} />
           </div>
           <div className="field">
-            <label>Рост, см</label>
+            <label>{t('onboarding.height')}</label>
             <input className="input" type="number" inputMode="numeric" placeholder="182" value={data.height} onChange={(e) => set({ height: e.target.value })} />
           </div>
           <div className="field">
-            <label>Вес, кг</label>
+            <label>{t('onboarding.weight')}</label>
             <input className="input" type="number" inputMode="decimal" placeholder="83" value={data.weight} onChange={(e) => set({ weight: e.target.value })} />
           </div>
           <Continue onClick={next} disabled={!bodyOk} />
@@ -135,7 +139,7 @@ export default function Onboarding() {
       )}
 
       {name === 'activity' && (
-        <StepShell title="Уровень активности" hint="Как часто вы двигаетесь и тренируетесь">
+        <StepShell title={t('onboarding.activityTitle')} hint={t('onboarding.activityHint')}>
           <div className="stack">
             {Object.entries(ACTIVITY).map(([k, v]) => (
               <SelectCard key={k} on={data.activity === k} onClick={() => set({ activity: k })} title={v.label} sub={`× ${v.factor}`} />
@@ -146,10 +150,10 @@ export default function Onboarding() {
       )}
 
       {name === 'goal' && (
-        <StepShell title="Ваша цель" hint="Под неё подстроим норму калорий и белка">
+        <StepShell title={t('onboarding.goalTitle')} hint={t('onboarding.goalHint')}>
           <div className="stack">
             {Object.entries(GOALS).map(([k, v]) => (
-              <SelectCard key={k} on={data.goal === k} onClick={() => set({ goal: k })} title={v.label} sub={v.kcalAdjust === 0 ? 'калории по норме' : `${v.kcalAdjust > 0 ? '+' : ''}${v.kcalAdjust} ккал/день`} />
+              <SelectCard key={k} on={data.goal === k} onClick={() => set({ goal: k })} title={v.label} sub={v.kcalAdjust === 0 ? t('onboarding.kcalNormal') : t('onboarding.kcalPerDay', { n: `${v.kcalAdjust > 0 ? '+' : ''}${v.kcalAdjust}` })} />
             ))}
           </div>
           <Continue onClick={next} />
@@ -158,40 +162,40 @@ export default function Onboarding() {
 
       {name === 'result' && targets && (
         <div>
-          <div className="eyebrow">Ваш профиль готов</div>
-          <h1 className="h1" style={{ margin: '6px 0 24px' }}>Дневная норма</h1>
+          <div className="eyebrow">{t('onboarding.ready')}</div>
+          <h1 className="h1" style={{ margin: '6px 0 24px' }}>{t('onboarding.dailyNorm')}</h1>
           <div className="card" style={{ textAlign: 'center', paddingTop: 28, paddingBottom: 28 }}>
             <Ring value={0} max={targets.calories} size={190}>
               <div>
                 <div className="stat-num tabular" style={{ fontSize: 40 }}>{targets.calories}</div>
-                <div className="muted" style={{ fontSize: 14 }}>ккал в день</div>
+                <div className="muted" style={{ fontSize: 14 }}>{t('onboarding.kcalADay')}</div>
               </div>
             </Ring>
             <div className="row" style={{ gap: 10, marginTop: 24 }}>
-              <MiniStat label="Белки" value={targets.protein} />
-              <MiniStat label="Углеводы" value={targets.carbs} />
-              <MiniStat label="Жиры" value={targets.fat} />
+              <MiniStat label={t('macro.protein')} value={targets.protein} />
+              <MiniStat label={t('macro.carbs')} value={targets.carbs} />
+              <MiniStat label={t('macro.fat')} value={targets.fat} />
             </div>
           </div>
           <div className="card" style={{ marginTop: 14, display: 'flex', justifyContent: 'space-around' }}>
-            <SmallKV k="Базовый обмен" v={`${targets.bmr} ккал`} />
+            <SmallKV k={t('onboarding.bmr')} v={t('units.kcalN', { n: targets.bmr })} />
             <div style={{ width: 1, background: 'var(--border)' }} />
-            <SmallKV k="С активностью" v={`${targets.tdee} ккал`} />
+            <SmallKV k={t('onboarding.tdee')} v={t('units.kcalN', { n: targets.tdee })} />
           </div>
           {needsRegister ? (
             <>
               <button className="btn" style={{ marginTop: 22 }} onClick={() => setAuth({ mode: 'register' })}>
-                Зарегистрироваться и сохранить
+                {t('onboarding.registerSave')}
               </button>
               <button
                 style={{ display: 'block', margin: '14px auto 0', fontSize: 15, color: 'var(--ink-3)', fontWeight: 550 }}
                 onClick={finish}
               >
-                Продолжить без аккаунта
+                {t('onboarding.continueGuest')}
               </button>
             </>
           ) : (
-            <button className="btn" style={{ marginTop: 22 }} onClick={finish}>Открыть приложение</button>
+            <button className="btn" style={{ marginTop: 22 }} onClick={finish}>{t('onboarding.openApp')}</button>
           )}
         </div>
       )}
@@ -230,7 +234,7 @@ function StepShell({ title, hint, children }) {
 
 function SelectCard({ on, onClick, emoji, title, sub }) {
   return (
-    <button onClick={onClick} className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left', width: '100%', borderColor: on ? 'var(--primary)' : 'var(--border)', borderWidth: on ? 2 : 1, padding: on ? 15 : 16 }}>
+    <button onClick={onClick} className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, textAlign: 'start', width: '100%', borderColor: on ? 'var(--primary)' : 'var(--border)', borderWidth: on ? 2 : 1, padding: on ? 15 : 16 }}>
       {emoji && <span style={{ fontSize: 24, width: 30, textAlign: 'center', color: on ? 'var(--primary)' : 'var(--ink-3)' }}>{emoji}</span>}
       <span style={{ flex: 1 }}>
         <span style={{ display: 'block', fontSize: 17, fontWeight: 600 }}>{title}</span>
@@ -244,13 +248,13 @@ function SelectCard({ on, onClick, emoji, title, sub }) {
 }
 
 function Continue({ onClick, disabled }) {
-  return <button className="btn" style={{ marginTop: 26 }} onClick={onClick} disabled={disabled}>Продолжить</button>
+  return <button className="btn" style={{ marginTop: 26 }} onClick={onClick} disabled={disabled}>{t('common.continue')}</button>
 }
 
 function MiniStat({ label, value }) {
   return (
     <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 14, padding: '12px 8px' }}>
-      <div className="stat-num tabular" style={{ fontSize: 20 }}>{value}<span style={{ fontSize: 13, color: 'var(--ink-3)', fontWeight: 500 }}>г</span></div>
+      <div className="stat-num tabular" style={{ fontSize: 20 }}>{value}<span style={{ fontSize: 13, color: 'var(--ink-3)', fontWeight: 500 }}>{t('units.g')}</span></div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{label}</div>
     </div>
   )

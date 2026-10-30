@@ -1,4 +1,5 @@
 import { Component } from 'react'
+import { t } from '../lib/i18n.js'
 
 // Ловит ошибки загрузки/рендера ленивого листа, чтобы падал только он,
 // а не весь сайт (иначе — «зелёный экран»).
@@ -38,19 +39,17 @@ export default class LazyBoundary extends Component {
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <div className="grabber" />
             <div className="row between" style={{ marginBottom: 18 }}>
-              <h2 className="h2">{isNetworkError ? 'Не удалось загрузить' : 'Что-то пошло не так'}</h2>
-              <button className="iconbtn" onClick={this.props.onClose} aria-label="Закрыть">✕</button>
+              <h2 className="h2">{isNetworkError ? t('lazy.netTitle') : t('lazy.crashTitle')}</h2>
+              <button className="iconbtn" onClick={this.props.onClose} aria-label={t('common.close')}>✕</button>
             </div>
             <p className="muted" style={{ fontSize: 14, marginBottom: 16 }}>
-              {isNetworkError
-                ? 'Проверьте подключение к интернету и попробуйте снова.'
-                : 'Произошла внутренняя ошибка. Попробуйте закрыть и открыть заново.'}
+              {isNetworkError ? t('lazy.netText') : t('lazy.crashText')}
             </p>
             <div className="row gap8">
               <button className="btn" onClick={this.retry}>
-                {isNetworkError ? 'Обновить' : 'Попробовать снова'}
+                {isNetworkError ? t('lazy.refresh') : t('lazy.tryAgain')}
               </button>
-              <button className="btn ghost" onClick={this.props.onClose}>Закрыть</button>
+              <button className="btn ghost" onClick={this.props.onClose}>{t('common.close')}</button>
             </div>
           </div>
         </div>

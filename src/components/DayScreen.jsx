@@ -1,5 +1,6 @@
 import { macroLabel, amountLabel } from '../lib/foods.js'
-import { plural } from '../lib/text.js'
+import { foodName } from '../lib/foodNames.js'
+import { t } from '../lib/i18n.js'
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
@@ -278,8 +279,8 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
         {/* Листалка дня — одной группой: ‹ дата ›. Раньше стрелки стояли по
             краям строки, и дата зажималась между ними и кнопками справа. */}
         <div className="day-topbar__nav">
-          <button className="iconbtn" onClick={() => go(-1)} aria-label="Предыдущий день">‹</button>
-          <button className="day-topbar__date tap44" onClick={onOpenCalendar} aria-label="Открыть календарь">
+          <button className="iconbtn" onClick={() => go(-1)} aria-label={t('day.prevDay')}>‹</button>
+          <button className="day-topbar__date tap44" onClick={onOpenCalendar} aria-label={t('day.openCalendar')}>
             <span className="row gap8" style={{ alignItems: 'center' }}>
               <span className="day-topbar__day">{humanDay(date, today)}</span>
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="day-topbar__cal">
@@ -288,32 +289,32 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
             </span>
             <span className="day-topbar__dow">{humanDow(date)}</span>
           </button>
-          <button className="iconbtn" onClick={() => go(1)} aria-label="Следующий день" style={{ opacity: canNext ? 1 : 0.4 }} disabled={!canNext}>›</button>
+          <button className="iconbtn" onClick={() => go(1)} aria-label={t('day.nextDay')} style={{ opacity: canNext ? 1 : 0.4 }} disabled={!canNext}>›</button>
         </div>
         <div className="row gap8">
-          <button className="iconbtn" onClick={onOpenStats} aria-label="Статистика питания">
+          <button className="iconbtn" onClick={onOpenStats} aria-label={t('day.stats')}>
             <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 20V10M10 20V4M16 20v-7M4 20h16" />
             </svg>
           </button>
           <div style={{ position: 'relative' }}>
-            <button className="iconbtn" onClick={() => setDayMenuOpen((o) => !o)} aria-label="Действия с днём" aria-expanded={dayMenuOpen}>⋯</button>
+            <button className="iconbtn" onClick={() => setDayMenuOpen((o) => !o)} aria-label={t('day.dayActions')} aria-expanded={dayMenuOpen}>⋯</button>
             {dayMenuOpen && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 19 }} onClick={() => setDayMenuOpen(false)} />
                 <div className="friend-menu" style={{ minWidth: 250, right: 0 }}>
                   {prevHasMeals && (
-                    <button onClick={() => { const n = repeatDay(prevDate, date); setDayMenuOpen(false); setToast(n ? `Скопировано: ${n} ${plural(n, 'продукт', 'продукта', 'продуктов')}` : 'Копировать нечего') }}>
-                      ♻️ Повторить {date === today ? 'вчерашний день' : 'предыдущий день'}
+                    <button onClick={() => { const n = repeatDay(prevDate, date); setDayMenuOpen(false); setToast(n ? t('day.copied', { list: t('count.products', { count: n }) }) : t('day.nothingToCopy')) }}>
+                      ♻️ {date === today ? t('day.repeatYesterday') : t('day.repeatPrevious')}
                     </button>
                   )}
                   {day.meals.length > 0 && (
                     <button onClick={() => { setShareOpen(true); setDayMenuOpen(false) }}>
-                      📤 Поделиться днём
+                      📤 {t('day.share')}
                     </button>
                   )}
                   <button onClick={() => { setDayStatsExcluded(date, !day.statsExcluded); setDayMenuOpen(false) }}>
-                    {day.statsExcluded ? '📊 Учитывать день в статистике' : '🚫 Не учитывать день в статистике'}
+                    {day.statsExcluded ? `📊 ${t('day.includeStats')}` : `🚫 ${t('day.excludeStats')}`}
                   </button>
                 </div>
               </>
@@ -345,7 +346,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
           summary={microSummary}
           suppDoses={suppDoses}
           setSuppDose={setSuppDose}
-          onAdd={(entry) => { addSupp(date, entry); setToast(`${entry.name} записана`) }}
+          onAdd={(entry) => { addSupp(date, entry); setToast(t('day.suppLogged', { name: entry.name })) }}
           // Ответ стека важнее подтверждения записи и поэтому перекрывает его:
           // «записана» человек и так видит в списке, а вот молчаливый отказ
           // добавить в стек (список полон) не виден ниоткуда. Раньше результат
@@ -353,7 +354,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
           onPin={(item) => {
             if (!item) return
             const saved = saveStackItem(item)
-            setToast(saved ? `«${item.name}» в вашем стеке` : 'В стеке уже 40 добавок — уберите лишние')
+            setToast(saved ? t('day.suppPinned', { name: item.name }) : t('day.stackFull'))
           }}
           onClose={() => setSuppOpen(false)}
         />
@@ -393,7 +394,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
           existing={templates}
           onSave={(tpl, updated) => {
             saveTemplate(tpl)
-            setToast(updated ? `«${tpl.name}» обновлено` : `«${tpl.name}» сохранено в блюда`)
+            setToast(updated ? t('day.tplUpdated', { name: tpl.name }) : t('day.tplSaved', { name: tpl.name }))
           }}
           onClose={() => setSaveTpl(null)}
         />
@@ -402,7 +403,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
       {sectionSheet && (
         <MealSectionSheet
           mode={sectionSheet.mode}
-          title={sectionSheet.mode === 'create' ? 'Новый приём пищи' : sectionSheet.section.label}
+          title={sectionSheet.mode === 'create' ? t('day.newMeal') : sectionSheet.section.label}
           initialName={sectionSheet.section?.customName || ''}
           initialTime={sectionSheet.section?.time || ''}
           initialShowTime={sectionSheet.section?.showTime ?? true}
@@ -432,15 +433,15 @@ function DayBody({
   // Цель считается НА ЭТОТ ДЕНЬ: из веса, актуального на эту дату, и активности
   // этого дня. День на диване и день с тренировкой — разные цели по калориям
   // (см. lib/body.js). Без записей вес и активность берутся из профиля, как раньше.
-  const t = useMemo(() => targetsForDay(days, date, profile) || profile?.targets || {}, [days, date, profile])
+  const goals = useMemo(() => targetsForDay(days, date, profile) || profile?.targets || {}, [days, date, profile])
   // Та же дата и тот же вес, но активность из анкеты — база для подписи
   // «ползунок добавил/убрал N ккал».
   const baseT = useMemo(() => baselineTargetsForDay(days, date, profile) || profile?.targets || {}, [days, date, profile])
   const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0)
-  const calGoal = num(t.calories)
-  const proteinGoal = num(t.protein)
-  const carbGoal = num(t.carbs)
-  const fatGoal = num(t.fat)
+  const calGoal = num(goals.calories)
+  const proteinGoal = num(goals.protein)
+  const carbGoal = num(goals.carbs)
+  const fatGoal = num(goals.fat)
   const hasCalGoal = calGoal > 0
   const remaining = calGoal - totals.kcal
   const satFatMax = hasCalGoal ? satFatLimit(calGoal) : 0
@@ -466,16 +467,16 @@ function DayBody({
         >
           <div>
             <div className="display day-hero__num">{Math.round(hasCalGoal ? Math.abs(remaining) : totals.kcal)}</div>
-            <div className="day-hero__cap">{hasCalGoal ? (remaining >= 0 ? 'ккал осталось' : 'ккал перебор') : 'ккал съедено'}</div>
+            <div className="day-hero__cap">{hasCalGoal ? (remaining >= 0 ? t('day.kcalLeft') : t('day.kcalOver')) : t('day.kcalEaten')}</div>
           </div>
         </Ring>
         {/* sumDay складывает дробные КБЖУ продуктов, и сумма приходит сырым
             float'ом (116.69999999999999). В плитке на первом экране нужны целые
             граммы — точность до десятых остаётся в карточках приёмов пищи. */}
         <div className="day-hero__stats">
-          <HeroStat label="Белки" value={`${Math.round(totals.protein)}${proteinGoal > 0 ? `/${proteinGoal}` : ''}`} />
-          <HeroStat label="Углеводы" value={`${Math.round(totals.carbs)}${carbGoal > 0 ? `/${carbGoal}` : ''}`} />
-          <HeroStat label="Жиры" value={`${Math.round(totals.fat)}${fatGoal > 0 ? `/${fatGoal}` : ''}`} />
+          <HeroStat label={t('macro.protein')} value={`${Math.round(totals.protein)}${proteinGoal > 0 ? `/${proteinGoal}` : ''}`} />
+          <HeroStat label={t('macro.carbs')} value={`${Math.round(totals.carbs)}${carbGoal > 0 ? `/${carbGoal}` : ''}`} />
+          <HeroStat label={t('macro.fat')} value={`${Math.round(totals.fat)}${fatGoal > 0 ? `/${fatGoal}` : ''}`} />
         </div>
       </div>
 
@@ -492,7 +493,7 @@ function DayBody({
         date={date}
         day={day}
         profile={profile}
-        targets={t}
+        targets={goals}
         baseTargets={baseT}
         calGoal={calGoal}
         days={days}
@@ -507,7 +508,7 @@ function DayBody({
       )}
 
       <div className="row between" style={{ margin: '18px 4px 10px' }}>
-        <div className="h2" style={{ fontSize: 17 }}>Приёмы пищи</div>
+        <div className="h2" style={{ fontSize: 17 }}>{t('day.meals')}</div>
       </div>
 
       {sections.map((section, i) => (
@@ -536,14 +537,14 @@ function DayBody({
       ))}
 
       <button className="btn ghost" style={{ height: 46, fontSize: 15, marginTop: 6 }} onClick={onCreateSection}>
-        ＋ Добавить приём пищи
+        ＋ {t('day.addMeal')}
       </button>
 
       <div className="card" style={{ marginTop: 14 }}>
         <div className="row gap10" style={{ alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Белки" value={totals.protein} max={proteinGoal} /></div>
-          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Углеводы" value={totals.carbs} max={carbGoal} color="var(--accent)" /></div>
-          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label="Жиры" value={totals.fat} max={fatGoal} color="var(--warn)" /></div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label={t('macro.protein')} value={totals.protein} max={proteinGoal} /></div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label={t('macro.carbs')} value={totals.carbs} max={carbGoal} color="var(--accent)" /></div>
+          <div style={{ flex: 1, minWidth: 0 }}><MacroBar label={t('macro.fat')} value={totals.fat} max={fatGoal} color="var(--warn)" /></div>
         </div>
 
         {/* Подробности качества — отдельными строками во всю ширину, а не третью
@@ -551,27 +552,27 @@ function DayBody({
             помещались никогда и всегда стояли с многоточием. */}
         <div className="divider" />
         <SubMetricRow
-          label="Усвояемый белок"
-          valueText={`${Math.round(advanced.qualityProtein)} г${advanced.qualityProteinShare != null ? ` · ${Math.round(advanced.qualityProteinShare * 100)}%` : ''}`}
-          sub={advanced.qualityProteinConfidence === 'none' ? 'нет данных' : advanced.qualityProteinConfidence === 'partial' ? 'часть продуктов не опознана' : undefined}
-          explain="Сколько съеденного белка организм действительно может пустить на строительство мышц и тканей. Считается по DIAAS — международному показателю качества белка (FAO): у яиц, молочного, мяса и рыбы засчитывается почти всё, у круп и бобовых — половина-две трети, у коллагена и желатина — ничего, в них нет триптофана. Значения справочные, по типу продукта, а не измерение конкретной пачки — это ориентир, а не медицинский диагноз."
+          label={t('foodInfo.usableProtein')}
+          valueText={`${t('units.gN', { n: Math.round(advanced.qualityProtein) })}${advanced.qualityProteinShare != null ? ` · ${Math.round(advanced.qualityProteinShare * 100)}%` : ''}`}
+          sub={advanced.qualityProteinConfidence === 'none' ? t('common.noData') : advanced.qualityProteinConfidence === 'partial' ? t('day.partUnknown') : undefined}
+          explain={t('day.usableProteinExplain')}
         />
         <SubMetricRow
-          label="Сложные углеводы"
-          valueText={`${advanced.complexCarbConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.complexCarb)} г${totals.carbs > 0 ? ` · ${Math.round((advanced.complexCarb / totals.carbs) * 100)}%` : ''}`}
-          sub={advanced.complexCarbConfidence === 'none' ? 'нет данных' : undefined}
-          explain="Доля углеводов из круп, картофеля, бобовых и цельнозерновых продуктов — продуктовая классификация по типу продукта, а не медицинский показатель «полезных» углеводов. Сахар, сладости, десерты и напитки в неё не входят."
+          label={t('day.complexCarbs')}
+          valueText={`${advanced.complexCarbConfidence !== 'measured' ? '≈' : ''}${t('units.gN', { n: Math.round(advanced.complexCarb) })}${totals.carbs > 0 ? ` · ${Math.round((advanced.complexCarb / totals.carbs) * 100)}%` : ''}`}
+          sub={advanced.complexCarbConfidence === 'none' ? t('common.noData') : undefined}
+          explain={t('day.complexCarbsExplain')}
         />
         <SubMetricRow
-          label="Насыщенные жиры"
-          valueText={`${advanced.satFatConfidence !== 'measured' ? '≈' : ''}${Math.round(advanced.satFat)}${satFatMax > 0 ? `/${satFatMax}` : ''} г`}
+          label={t('day.satFat')}
+          valueText={`${advanced.satFatConfidence !== 'measured' ? '≈' : ''}${t('units.gN', { n: `${Math.round(advanced.satFat)}${satFatMax > 0 ? `/${satFatMax}` : ''}` })}`}
           sub={
-            advanced.satFatConfidence === 'none' ? 'нет данных' :
-            advanced.satFatConfidence === 'partial' ? 'неполные данные' :
-            satFatMax > 0 ? (advanced.satFat > satFatMax ? 'превышен ориентир' : 'в пределах ориентира') : undefined
+            advanced.satFatConfidence === 'none' ? t('common.noData') :
+            advanced.satFatConfidence === 'partial' ? t('day.incomplete') :
+            satFatMax > 0 ? (advanced.satFat > satFatMax ? t('day.overGuide') : t('day.withinGuide')) : undefined
           }
           tone={satFatMax > 0 && advanced.satFat > satFatMax ? 'var(--warn)' : undefined}
-          explain="Насыщенные жиры берутся из реальных данных продукта, если они указаны, иначе оцениваются по типу продукта (мясо, молочное, кондитерка и т.п.) — без точности до грамма. Дневной ориентир — не более 10% калорий (рекомендация ВОЗ), считается отдельно от общей нормы жиров."
+          explain={t('day.satFatExplain')}
         />
       </div>
 
@@ -620,36 +621,36 @@ function MealSectionCard({
             </div>
             {foods.length > 0 && (
               <div className="tabular" style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 1 }}>
-                {Math.round(totals.kcal)} ккал · Б{totals.protein} Ж{totals.fat} У{totals.carbs}
+                {t('units.kcalN', { n: Math.round(totals.kcal) })} · {macroLabel(totals)}
               </div>
             )}
           </div>
         </div>
         <div style={{ position: 'relative', flex: '0 0 auto' }}>
-          <button className="iconbtn tap44" style={{ width: 32, height: 32 }} onClick={() => setMenuOpen((o) => !o)} aria-label="Действия с приёмом">⋯</button>
+          <button className="iconbtn tap44" style={{ width: 32, height: 32 }} onClick={() => setMenuOpen((o) => !o)} aria-label={t('day.mealActions')}>⋯</button>
           {menuOpen && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 19 }} onClick={() => setMenuOpen(false)} />
               <div className="friend-menu" style={{ minWidth: 180 }}>
                 <button onClick={() => { onEditSection(section); setMenuOpen(false) }}>
-                  ✏️ {section.renameable ? 'Название и время' : 'Изменить время'}
+                  ✏️ {section.renameable ? t('day.nameAndTime') : t('day.changeTime')}
                 </button>
                 {prevCount > 0 && (
                   <button onClick={() => {
                     const n = repeatMeal(prevDate, date, section.id)
                     setMenuOpen(false)
-                    onToast?.(`${section.label} повторён: ${n} ${plural(n, 'продукт', 'продукта', 'продуктов')}`)
+                    onToast?.(t('day.mealRepeated', { name: section.label, list: t('count.products', { count: n }) }))
                   }}>
-                    ♻️ Повторить вчерашний
+                    ♻️ {t('day.repeatYesterdayMeal')}
                   </button>
                 )}
                 {foods.length > 0 && (
                   <button onClick={() => { onSaveTemplate(section, foods); setMenuOpen(false) }}>
-                    💾 Сохранить как блюдо
+                    💾 {t('template.title')}
                   </button>
                 )}
-                {canMoveUp && <button onClick={() => { moveMealSection(date, section.id, -1); setMenuOpen(false) }}>⬆️ Выше</button>}
-                {canMoveDown && <button onClick={() => { moveMealSection(date, section.id, 1); setMenuOpen(false) }}>⬇️ Ниже</button>}
+                {canMoveUp && <button onClick={() => { moveMealSection(date, section.id, -1); setMenuOpen(false) }}>⬆️ {t('day.up')}</button>}
+                {canMoveDown && <button onClick={() => { moveMealSection(date, section.id, 1); setMenuOpen(false) }}>⬇️ {t('day.down')}</button>}
               </div>
             </>
           )}
@@ -658,12 +659,12 @@ function MealSectionCard({
 
       {clipboard && (
         <button className="btn soft" style={{ height: 38, fontSize: 13.5, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }} onClick={() => addFood(date, { ...clipboard, mealId: section.id })}>
-          <span>📋</span><span>Вставить «{clipboard.name}»</span>
+          <span>📋</span><span>{t('day.paste', { name: foodName(clipboard.name) })}</span>
         </button>
       )}
 
       {foods.length === 0 ? (
-        <p className="muted" style={{ fontSize: 14, padding: '2px 0 12px' }}>Пока ничего не добавлено</p>
+        <p className="muted" style={{ fontSize: 14, padding: '2px 0 12px' }}>{t('day.empty')}</p>
       ) : (
         foods.map((f) => (
           <SwipeableFoodItem key={f.id} m={f} date={date} removeFood={removeFood} setClipboard={setClipboard} onEdit={onEditFood} onInfo={onFoodInfo} />
@@ -671,7 +672,7 @@ function MealSectionCard({
       )}
 
       <button className="btn soft" style={{ height: 42, fontSize: 14, marginTop: foods.length ? 4 : 0 }} onClick={() => onOpenAdd(section.id, section.label)}>
-        ＋ Добавить продукт
+        ＋ {t('day.addFood')}
       </button>
     </div>
   )
@@ -685,13 +686,13 @@ function SubMetricRow({ label, valueText, sub, tone, explain }) {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 0' }}
+        style={{ width: '100%', textAlign: 'start', display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 0' }}
       >
         <span style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, minWidth: 0, flex: 1 }}>
           {label}
-          <span aria-hidden="true" style={{ color: 'var(--ink-3)', marginLeft: 5, fontSize: 11 }}>{open ? '▴' : '▾'}</span>
+          <span aria-hidden="true" style={{ color: 'var(--ink-3)', marginInlineStart: 5, fontSize: 11 }}>{open ? '▴' : '▾'}</span>
         </span>
-        <span style={{ flex: '0 0 auto', textAlign: 'right' }}>
+        <span style={{ flex: '0 0 auto', textAlign: 'end' }}>
           <span className="tabular" style={{ fontSize: 13.5, color: tone || 'var(--ink)', fontWeight: 600 }}>{valueText}</span>
           {sub && <span style={{ display: 'block', fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{sub}</span>}
         </span>
@@ -705,9 +706,9 @@ function SubMetricRow({ label, valueText, sub, tone, explain }) {
 // полные формулировки («Углеводы можно улучшить») вместе с заголовком не
 // помещались в 375 px — бейдж вылезал за край карточки вместе со стрелкой.
 const GRADE = {
-  good: { color: 'var(--good)', bg: 'var(--primary-weak)', emoji: '🟢', title: 'Хорошо' },
-  ok: { color: 'var(--warn)', bg: 'var(--accent-weak)', emoji: '🟡', title: 'Можно лучше' },
-  bad: { color: 'var(--danger)', bg: 'rgba(192,104,78,0.12)', emoji: '🔴', title: 'Много сахара' },
+  good: { color: 'var(--good)', bg: 'var(--primary-weak)', emoji: '🟢', get title() { return t('day.gradeGood') } },
+  ok: { color: 'var(--warn)', bg: 'var(--accent-weak)', emoji: '🟡', get title() { return t('day.gradeOk') } },
+  bad: { color: 'var(--danger)', bg: 'rgba(192,104,78,0.12)', emoji: '🔴', get title() { return t('day.gradeBad') } },
 }
 
 function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal }) {
@@ -717,11 +718,11 @@ function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal
   const totalB = buckets.reduce((s, [, v]) => s + v, 0) || 1
 
   let hint
-  if (carbsLeft > 20) hint = `Осталось ${Math.round(carbsLeft)} г углеводов — лучше набрать из круп, хлеба, картофеля, бобовых и фруктов, а не из сладкого.`
-  else if (grade.level === 'bad') hint = 'Углеводная цель закрыта, но в основном за счёт сахара. Добавьте клетчатку и сложные углеводы.'
-  else if (grade.sugarOver) hint = 'Сахара многовато. В следующий раз замените сладкое на фрукты, крупы или бобовые.'
-  else if (grade.fiberLow) hint = 'Мало клетчатки — добавьте овощи, бобовые, цельные крупы или фрукты.'
-  else hint = 'Хороший баланс: сахар в норме, клетчатки достаточно.'
+  if (carbsLeft > 20) hint = t('day.hintCarbsLeft', { n: Math.round(carbsLeft) })
+  else if (grade.level === 'bad') hint = t('day.hintSugarGoal')
+  else if (grade.sugarOver) hint = t('day.hintSugarOver')
+  else if (grade.fiberLow) hint = t('day.hintFiberLow')
+  else hint = t('day.hintBalanced')
 
   return (
     <div className="card" style={{ marginTop: 14 }}>
@@ -730,9 +731,9 @@ function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal
           оценка, крупный системный шрифт, узкий экран) — пилюля спокойно уезжает
           на вторую строку. Обрезать заголовок многоточием тут нечестно: это
           единственное, что объясняет, о чём карточка. */}
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}>
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'start' }}>
         <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0 }}>
-          <span className="h2" style={{ fontSize: 17 }}>Качество углеводов</span>
+          <span className="h2" style={{ fontSize: 17 }}>{t('day.carbQuality')}</span>
           {/* Смысл несёт сам текст пилюли — цвет остаётся усилением, а не
               единственным носителем информации. */}
           <span style={{ fontSize: 13, fontWeight: 600, color: g.color, background: g.bg, padding: '4px 12px', borderRadius: 999, whiteSpace: 'nowrap' }}>{g.title}</span>
@@ -742,14 +743,14 @@ function QualityCard({ quality, grade, sugarMax, fiberMax, carbsLeft, carbsTotal
 
       {open && (
         <div style={{ marginTop: 16 }}>
-          <QualityBar label="Свободные сахара" value={quality.freeSugar} max={sugarMax} invert hint={quality.freeSugar > sugarMax ? 'многовато' : 'в норме'} />
+          <QualityBar label={t('foodInfo.freeSugar')} value={quality.freeSugar} max={sugarMax} invert hint={quality.freeSugar > sugarMax ? t('day.tooMuch') : t('day.normal')} />
           <div style={{ height: 12 }} />
-          <QualityBar label="Клетчатка" value={quality.fiber} max={fiberMax} hint={quality.fiber < fiberMax * 0.6 ? 'маловато' : 'ок'} />
+          <QualityBar label={t('foodInfo.fiber')} value={quality.fiber} max={fiberMax} hint={quality.fiber < fiberMax * 0.6 ? t('day.tooLittle') : t('day.ok')} />
 
           {buckets.length > 0 && (
             <>
               <div className="divider" />
-              <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, marginBottom: 10 }}>Источники углеводов</div>
+              <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 550, marginBottom: 10 }}>{t('day.carbSources')}</div>
               <div style={{ display: 'flex', height: 8, borderRadius: 5, overflow: 'hidden', marginBottom: 10 }}>
                 {buckets.map(([k, v]) => (
                   <div key={k} style={{ width: `${(v / totalB) * 100}%`, background: k === 'sweet' ? 'var(--danger)' : k === 'grain' ? 'var(--primary)' : k === 'fruit' ? 'var(--accent)' : k === 'veg' ? 'var(--good)' : 'var(--ink-3)' }} />
@@ -784,7 +785,7 @@ function QualityBar({ label, value, max, invert, hint }) {
     <div>
       <div className="row between" style={{ marginBottom: 6 }}>
         <span style={{ fontSize: 14, fontWeight: 550 }}>{label}</span>
-        <span className="tabular" style={{ fontSize: 14, color: over ? 'var(--warn)' : 'var(--ink-3)' }}>{value} / {max} г {over ? '⚠️' : '✓'}</span>
+        <span className="tabular" style={{ fontSize: 14, color: over ? 'var(--warn)' : 'var(--ink-3)' }}>{value} / {t('units.gN', { n: max })} {over ? '⚠️' : '✓'}</span>
       </div>
       <div style={{ height: 8, borderRadius: 5, background: 'var(--track)', overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 5, transition: 'width 0.5s ease' }} />
@@ -856,12 +857,12 @@ function BodyCard({
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, textAlign: 'left' }}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, textAlign: 'start' }}
       >
-        <span className="h2" style={{ fontSize: 17 }}>Вес и активность</span>
+        <span className="h2" style={{ fontSize: 17 }}>{t('day.bodyTitle')}</span>
         <span className="row gap8" style={{ alignItems: 'center', flex: '0 0 auto' }}>
           <span className="tabular" style={{ fontSize: 13, color: weight != null ? 'var(--ink-2)' : 'var(--ink-3)' }}>
-            {weight != null ? `${weight} кг` : 'вес не указан'}
+            {weight != null ? t('units.kgN', { n: weight }) : t('day.noWeight')}
           </span>
           <span style={{ fontSize: 15 }}>{level.emoji}</span>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}>
@@ -873,14 +874,14 @@ function BodyCard({
       {open && (
         <div style={{ marginTop: 16 }}>
           <div className="field" style={{ marginBottom: 16 }}>
-            <label className="label" htmlFor={`w-${date}`}>Вес утром, кг</label>
+            <label className="label" htmlFor={`w-${date}`}>{t('day.morningWeight')}</label>
             <input
               id={`w-${date}`}
               className="input"
               type="number"
               inputMode="decimal"
               step="0.1"
-              placeholder="например 78.4"
+              placeholder={t('day.weightPlaceholder')}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onBlur={commitWeight}
@@ -888,16 +889,16 @@ function BodyCard({
               style={{ marginTop: 6 }}
             />
             <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6, lineHeight: 1.45 }}>
-              Взвешиваться каждый день не нужно. Последний записанный вес держится до следующего взвешивания.
+              {t('day.weightNote')}
             </p>
           </div>
 
           <div className="activity-zone">
-            <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 4 }}>Сколько ходил</div>
+            <div style={{ fontSize: 14, fontWeight: 550, marginBottom: 4 }}>{t('day.walkedTitle')}</div>
             {/* Шаги, а не эпитеты. «Активный день» у каждого свой, а число шагов
                 человек видит в телефоне и может с ним сверить. */}
             <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 12px', lineHeight: 1.45 }}>
-              Шаги — ориентир, чтобы было с чем сверяться. Приложение их не читает.
+              {t('day.stepsNote')}
             </p>
 
             <div className="row wrap gap8">
@@ -914,7 +915,7 @@ function BodyCard({
 
             <p style={{ fontSize: 12, color: isDefault ? 'var(--ink-3)' : 'var(--ink-2)', marginTop: 10, lineHeight: 1.5, minHeight: 32 }}>
               {level.desc}
-              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — стоит по умолчанию, нажмите, чтобы изменить</span>}
+              {isDefault && <span style={{ color: 'var(--ink-3)' }}> — {t('day.defaultHint')}</span>}
             </p>
 
             {/* ── Силовая тренировка ─────────────────────────────────────────
@@ -926,7 +927,7 @@ function BodyCard({
               onClick={() => setDayStrength(date, !strengthOn)}
               aria-pressed={strengthOn}
               style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'start',
                 padding: '10px 12px', borderRadius: 'var(--r-sm)',
                 background: strengthOn ? 'var(--primary-weak)' : 'var(--surface-2)',
               }}
@@ -944,19 +945,19 @@ function BodyCard({
                 {strengthOn ? '✓' : ''}
               </span>
               <span style={{ flex: '1 1 auto', minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 550, display: 'block' }}>🏋️ Силовая тренировка</span>
+                <span style={{ fontSize: 14, fontWeight: 550, display: 'block' }}>🏋️ {t('day.strength')}</span>
                 <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
                   {strengthOn
-                    ? `Учтена${strengthBonus ? ` · +${strengthBonus} ккал к цели` : ''}`
-                    : `Была сегодня?${strengthBonus ? ` Добавит ≈ ${strengthBonus} ккал` : ''}`}
+                    ? (strengthBonus ? t('day.strengthCountedBonus', { n: strengthBonus }) : t('day.strengthCounted'))
+                    : (strengthBonus ? t('day.strengthAskBonus', { n: strengthBonus }) : t('day.strengthAsk'))}
                 </span>
               </span>
               <span style={{ fontSize: 12, color: strengthOn ? 'var(--good)' : 'var(--ink-3)', flex: '0 0 auto' }}>
-                {strengthOn ? 'была' : 'отметить'}
+                {strengthOn ? t('day.strengthDone') : t('day.strengthMark')}
               </span>
             </button>
             <p style={{ fontSize: 11.5, color: 'var(--ink-3)', margin: '8px 0 0', lineHeight: 1.45 }}>
-              Считается отдельно от ходьбы: занятие на 45–60 минут средней тяжести. Оценка, а не замер.
+              {t('day.strengthNote')}
             </p>
 
             {/* ── Что ставить по умолчанию ───────────────────────────────────
@@ -967,12 +968,12 @@ function BodyCard({
             <button
               onClick={() => setDefaultOpen((o) => !o)}
               aria-expanded={defaultOpen}
-              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'start' }}
             >
               <span style={{ flex: '1 1 auto', minWidth: 0 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 550, display: 'block' }}>Обычный мой день</span>
+                <span style={{ fontSize: 13.5, fontWeight: 550, display: 'block' }}>{t('day.usualDay')}</span>
                 <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-                  подставляется, пока день не отмечен · сейчас {defaultLevel.emoji} {defaultLevel.hint}
+                  {t('day.usualDayHint', { level: `${defaultLevel.emoji} ${defaultLevel.hint}` })}
                 </span>
               </span>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--ink-2)', transform: defaultOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flex: '0 0 auto' }}><polyline points="6 9 12 15 18 9" /></svg>
@@ -991,27 +992,27 @@ function BodyCard({
                   ))}
                 </div>
                 <p style={{ fontSize: 11.5, color: 'var(--ink-3)', margin: '8px 0 0', lineHeight: 1.45 }}>
-                  Меняет только дни, где активность не отмечена вручную. Уже отмеченные дни остаются как есть.
+                  {t('day.usualDayNote')}
                 </p>
               </div>
             )}
 
             {goal && (
               <div className="activity-goal">
-                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Цель на этот день</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>{t('day.goalForDay')}</div>
                 <div className="row" style={{ gap: 14, flexWrap: 'wrap', alignItems: 'baseline' }}>
                   <span className="tabular" style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.4px' }}>
                     {goal.calories}
-                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-3)' }}> ккал</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-3)' }}> {t('units.kcal')}</span>
                   </span>
                   <span className="tabular" style={{ fontSize: 13, color: 'var(--ink-2)' }}>
-                    Б {goal.protein} · Ж {goal.fat} · У {goal.carbs} г
+                    {t('day.goalMacros', { p: goal.protein, f: goal.fat, c: goal.carbs })}
                   </span>
                 </div>
                 <div className="activity-goal__delta" style={{ color: goal.delta === 0 ? 'var(--ink-3)' : 'var(--primary)' }}>
                   {goal.delta === 0
-                    ? 'Столько же, сколько в обычный ваш день'
-                    : `${goal.delta > 0 ? '+' : '−'}${Math.abs(goal.delta)} ккал к обычному дню — ходьба${strengthOn ? ' и силовая' : ''} пересчитали КБЖУ`}
+                    ? t('day.sameAsUsual')
+                    : t(strengthOn ? 'day.deltaWalkStrength' : 'day.deltaWalk', { n: `${goal.delta > 0 ? '+' : '−'}${Math.abs(goal.delta)}` })}
                 </div>
               </div>
             )}
@@ -1035,9 +1036,9 @@ function StatsFlagBanner({ date, day, profile, calGoal, setDayStatsExcluded, con
     return (
       <div className="card" style={{ marginTop: 14, background: 'var(--surface-2)', boxShadow: 'none' }}>
         <div className="row between" style={{ alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 13.5, color: 'var(--ink-2)' }}>🚫 День не учитывается в статистике</span>
+          <span style={{ fontSize: 13.5, color: 'var(--ink-2)' }}>🚫 {t('day.excluded')}</span>
           <button style={{ color: 'var(--primary)', fontWeight: 600, fontSize: 13.5, flex: '0 0 auto' }} onClick={() => setDayStatsExcluded(date, false)}>
-            Учитывать
+            {t('day.include')}
           </button>
         </div>
       </div>
@@ -1047,14 +1048,13 @@ function StatsFlagBanner({ date, day, profile, calGoal, setDayStatsExcluded, con
   if (low && !day.statsConfirmed) {
     return (
       <div className="card" style={{ marginTop: 14, borderColor: 'var(--warn)' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>⚠️ Похоже, день внесён не полностью</div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>⚠️ {t('day.lowTitle')}</div>
         <p className="muted" style={{ fontSize: 13, lineHeight: 1.45, marginBottom: 12 }}>
-          Калорий заметно меньше цели — возможно, вы записали не всё. Такой день не идёт в статистику, пока вы не решите:
-          иначе средние занизятся и аналитика будет врать.
+          {t('day.lowText')}
         </p>
         <div className="row gap8">
-          <button className="btn soft" style={{ height: 40, fontSize: 13.5, width: 'auto', flex: 1 }} onClick={() => confirmDayStats(date)}>Я правда столько съел</button>
-          <button className="btn ghost" style={{ height: 40, fontSize: 13.5, width: 'auto', flex: 1 }} onClick={() => setDayStatsExcluded(date, true)}>Не учитывать</button>
+          <button className="btn soft" style={{ height: 40, fontSize: 13.5, width: 'auto', flex: 1 }} onClick={() => confirmDayStats(date)}>{t('day.lowConfirm')}</button>
+          <button className="btn ghost" style={{ height: 40, fontSize: 13.5, width: 'auto', flex: 1 }} onClick={() => setDayStatsExcluded(date, true)}>{t('day.exclude')}</button>
         </div>
       </div>
     )
@@ -1063,7 +1063,7 @@ function StatsFlagBanner({ date, day, profile, calGoal, setDayStatsExcluded, con
   if (low && day.statsConfirmed) {
     return (
       <div className="card" style={{ marginTop: 14, background: 'var(--surface-2)', boxShadow: 'none' }}>
-        <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>✓ Подтверждено: день учитывается, несмотря на низкие калории</span>
+        <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>✓ {t('day.lowConfirmed')}</span>
       </div>
     )
   }
@@ -1161,12 +1161,12 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit, onInfo }
     <div style={{ position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <button style={{ color: 'var(--on-primary)', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { onEdit(m); reset() }}>
-          <span style={{ fontSize: 20 }}>✏️</span><span style={{ fontSize: 12, fontWeight: 600 }}>Изменить</span>
+          <span style={{ fontSize: 20 }}>✏️</span><span style={{ fontSize: 12, fontWeight: 600 }}>{t('common.edit')}</span>
         </button>
       </div>
       <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: ACTION_W, background: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <button style={{ color: 'var(--on-danger)', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }} onClick={() => { removeFood(date, m.id); reset() }}>
-          <span style={{ fontSize: 20 }}>🗑️</span><span style={{ fontSize: 12, fontWeight: 600 }}>Удалить</span>
+          <span style={{ fontSize: 20 }}>🗑️</span><span style={{ fontSize: 12, fontWeight: 600 }}>{t('common.delete')}</span>
         </button>
       </div>
       <div
@@ -1181,7 +1181,7 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit, onInfo }
         <div className="meal-item" style={{ borderBottom: 'none' }}>
           <span className="meal-emoji">{m.emoji || '🍽️'}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="meal-name">{m.name}</div>
+            <div className="meal-name">{foodName(m.name)}</div>
             <div className="meal-meta">{m.grams ? `${amountLabel(m.grams, m.unit || 'г')} · ` : ''}{macroLabel(m)}</div>
           </div>
           <div className="tabular" style={{ fontWeight: 650, flex: '0 0 auto' }}>{m.kcal}</div>
@@ -1193,8 +1193,8 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit, onInfo }
             onPointerDown={(e) => e.stopPropagation()}
             onPointerUp={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); onInfo?.(m) }}
-            aria-label={`Что внутри: ${m.name}`}
-            title="Что внутри"
+            aria-label={t('day.whatsInside', { name: foodName(m.name) })}
+            title={t('day.whatsInsideTitle')}
           >
             i
           </button>
@@ -1215,17 +1215,17 @@ function EditFoodSheet({ food, onSave, onClose }) {
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
-          <div className="h2" style={{ fontSize: 17 }}>{food.name}</div>
-          <button className="iconbtn" onClick={close}>✕</button>
+          <div className="h2" style={{ fontSize: 17 }}>{foodName(food.name)}</div>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
         {food.grams ? (
           <>
             <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">{food.unit === 'мл' ? 'Объём, мл' : 'Порция, г'}</label>
+              <label className="label">{food.unit === 'мл' ? t('day.volumeMl') : t('day.portionG')}</label>
               <input className="input" type="number" inputMode="decimal" value={grams} onChange={(e) => setGrams(e.target.value)} style={{ marginTop: 6 }} />
             </div>
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 22 }}>
-              {[['ккал', Math.round(food.kcal * scale)], ['белки', +(food.protein * scale).toFixed(1)], ['угл.', +(food.carbs * scale).toFixed(1)], ['жиры', +(food.fat * scale).toFixed(1)]].map(([l, v]) => (
+              {[[t('units.kcal'), Math.round(food.kcal * scale)], [t('day.proteinShort'), +(food.protein * scale).toFixed(1)], [t('day.carbsShort'), +(food.carbs * scale).toFixed(1)], [t('day.fatShort'), +(food.fat * scale).toFixed(1)]].map(([l, v]) => (
                 <div key={l} style={{ textAlign: 'center' }}>
                   <div className="tabular" style={{ fontSize: 20, fontWeight: 680 }}>{v}</div>
                   <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{l}</div>
@@ -1234,17 +1234,16 @@ function EditFoodSheet({ food, onSave, onClose }) {
             </div>
           </>
         ) : (
-          <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>Порция не задана — редактирование недоступно.</p>
+          <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>{t('day.noPortion')}</p>
         )}
         <button className="btn" onClick={() => onSave(food.grams ? { ...food, grams: g, kcal: Math.round(food.kcal * scale), protein: +(food.protein * scale).toFixed(1), carbs: +(food.carbs * scale).toFixed(1), fat: +(food.fat * scale).toFixed(1) } : food)}>
-          Сохранить
+          {t('common.save')}
         </button>
       </div>
     </div>
   )
 }
 
-// Русские окончания для счётных подписей («1 продукт / 2 продукта / 5 продуктов»).
 
 // Короткое подтверждение действия. Нужно именно потому, что «повторить день»
 // добавляет продукты ВНИЗ списка, за пределами экрана: без ответа кажется,

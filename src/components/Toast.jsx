@@ -6,6 +6,7 @@
 // листа, исчезал вместе с ним, и у главного пути добавления отмены не было
 // вовсе. Одна разметка на оба случая, чтобы они не разъехались.
 import { useEffect, useRef } from 'react'
+import { t } from '../lib/i18n.js'
 
 export default function Toast({ toast, onDone }) {
   const timer = useRef(null)
@@ -46,7 +47,7 @@ export default function Toast({ toast, onDone }) {
             flex: '0 0 auto', minHeight: 34, padding: '7px 14px', borderRadius: 999,
             background: 'var(--on-primary)', color: 'var(--primary)', fontWeight: 700, fontSize: 13.5,
           }}
-        >Отменить</button>
+        >{t('common.undo')}</button>
       )}
     </div>
   )

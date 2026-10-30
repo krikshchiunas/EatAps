@@ -48,50 +48,48 @@ export default function ResetPasswordSheet() {
         <div className="card">
           <div className="eyebrow">EatAps</div>
           <h1 className="h2" style={{ margin: '6px 0 10px' }}>
-            {done ? 'Пароль обновлён' : 'Новый пароль'}
+            {done ? t('reset.done') : t('reset.title')}
           </h1>
 
           {done ? (
             <>
               <p className="muted" style={{ fontSize: 15, marginBottom: 18 }}>
-                Готово. Вы вошли в аккаунт{user?.email ? ` ${user.email}` : ''} на этом устройстве.
-                Другие устройства продолжают работать как раньше.
+                {user?.email ? t('reset.doneTextEmail', { email: user.email }) : t('reset.doneText')}
               </p>
-              <button className="btn" onClick={completeRecovery}>Перейти в приложение</button>
+              <button className="btn" onClick={completeRecovery}>{t('reset.openApp')}</button>
             </>
           ) : linkDead ? (
             <>
               <p style={{ fontSize: 15, color: 'var(--danger)', marginBottom: 8 }}>{err.message}</p>
               <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>
-                Ссылки для смены пароля одноразовые и живут около часа. Запросите новую
-                на экране входа.
+                {t('reset.linkDead')}
               </p>
-              <button className="btn" onClick={cancelRecovery}>Вернуться ко входу</button>
+              <button className="btn" onClick={cancelRecovery}>{t('reset.backToLogin')}</button>
             </>
           ) : (
             <form onSubmit={save}>
               <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>
-                Придумайте новый пароль{user?.email ? ` для ${user.email}` : ''}. Минимум 6 символов.
+                {user?.email ? t('reset.promptEmail', { email: user.email }) : t('reset.prompt')}
               </p>
 
               <div className="field">
-                <label htmlFor="rp-pw1">Новый пароль</label>
+                <label htmlFor="rp-pw1">{t('reset.title')}</label>
                 <input
                   id="rp-pw1" className="input" type="password" autoComplete="new-password"
                   placeholder="••••••••" value={pw1} disabled={busy}
                   onChange={(e) => setPw1(e.target.value)} autoFocus
                 />
-                {tooShort && <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 6 }}>Ещё {6 - pw1.length} символ(а)</p>}
+                {tooShort && <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 6 }}>{t('reset.moreChars', { count: 6 - pw1.length })}</p>}
               </div>
 
               <div className="field">
-                <label htmlFor="rp-pw2">Ещё раз</label>
+                <label htmlFor="rp-pw2">{t('reset.again')}</label>
                 <input
                   id="rp-pw2" className="input" type="password" autoComplete="new-password"
                   placeholder="••••••••" value={pw2} disabled={busy}
                   onChange={(e) => setPw2(e.target.value)}
                 />
-                {mismatch && <p style={{ fontSize: 13, color: 'var(--danger)', marginTop: 6 }}>Пароли не совпадают</p>}
+                {mismatch && <p style={{ fontSize: 13, color: 'var(--danger)', marginTop: 6 }}>{t('reset.mismatch')}</p>}
               </div>
 
               {err && !linkDead && (
@@ -99,10 +97,10 @@ export default function ResetPasswordSheet() {
               )}
 
               <button type="submit" className="btn" disabled={!valid || busy}>
-                {busy ? 'Сохраняем…' : 'Сохранить пароль'}
+                {busy ? t('common.saving') : t('reset.save')}
               </button>
               <button type="button" className="btn ghost" style={{ marginTop: 10 }} disabled={busy} onClick={cancelRecovery}>
-                Отмена
+                {t('common.cancel')}
               </button>
             </form>
           )}

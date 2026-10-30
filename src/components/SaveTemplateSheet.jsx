@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { makeTemplate, templateTotals, MAX_TEMPLATE_ITEMS } from '../lib/library.js'
-import { macroLabel } from '../lib/foods.js'
+import { macroLabel, amountLabel } from '../lib/foods.js'
+import { foodName } from '../lib/foodNames.js'
+import { t } from '../lib/i18n.js'
 
 // Сохранение приёма пищи как шаблона («моё блюдо»).
 //
@@ -34,19 +36,19 @@ export default function SaveTemplateSheet({ section, foods, existing = [], onSav
       <div className="sheet" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
-          <h2 className="h2">Сохранить как блюдо</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <h2 className="h2">{t('template.title')}</h2>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
 
         <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.5, margin: '0 0 16px' }}>
-          Потом добавите этот набор в любой день одним касанием — всеми строками сразу.
+          {t('template.text')}
         </p>
 
         <div className="field">
-          <label>Название</label>
+          <label>{t('template.name')}</label>
           <input
             className="input"
-            placeholder="Напр. Мой завтрак"
+            placeholder={t('template.namePlaceholder')}
             value={name}
             onChange={(e) => setName(e.target.value)}
             autoFocus
@@ -55,22 +57,22 @@ export default function SaveTemplateSheet({ section, foods, existing = [], onSav
 
         {clash && (
           <p style={{ fontSize: 13.5, color: 'var(--ink-2)', margin: '-6px 0 16px' }}>
-            Блюдо с таким названием уже есть — оно будет обновлено, а не создано второй раз.
+            {t('template.clash')}
           </p>
         )}
 
         <div className="card" style={{ padding: 14, marginBottom: 18, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
           <div className="row between" style={{ marginBottom: 8 }}>
-            <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>Состав · {kept}</span>
-            {totals && <span className="tabular" style={{ fontWeight: 680 }}>{totals.kcal} ккал</span>}
+            <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>{t('template.contents', { n: kept })}</span>
+            {totals && <span className="tabular" style={{ fontWeight: 680 }}>{t('units.kcalN', { n: totals.kcal })}</span>}
           </div>
           {preview?.items.map((m, i) => (
             <div key={m.id || i} className="row between" style={{ padding: '5px 0', gap: 10 }}>
               <span style={{ fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {m.emoji} {m.name}
+                {m.emoji} {foodName(m.name)}
               </span>
               <span className="tabular" style={{ fontSize: 13, color: 'var(--ink-3)', flex: '0 0 auto' }}>
-                {m.grams ? `${m.grams} ${m.unit || 'г'}` : `${m.kcal} ккал`}
+                {m.grams ? amountLabel(m.grams, m.unit || 'г') : t('units.kcalN', { n: m.kcal })}
               </span>
             </div>
           ))}
@@ -79,13 +81,13 @@ export default function SaveTemplateSheet({ section, foods, existing = [], onSav
           )}
           {dropped > 0 && (
             <p style={{ fontSize: 13, color: 'var(--warn)', margin: '10px 0 0' }}>
-              В блюдо войдут первые {MAX_TEMPLATE_ITEMS} продуктов, остальные {dropped} — нет.
+              {t('template.dropped', { max: MAX_TEMPLATE_ITEMS, n: dropped })}
             </p>
           )}
         </div>
 
         <button className="btn" onClick={submit} disabled={!trimmed || kept === 0}>
-          {clash ? `Обновить «${clash.name}»` : 'Сохранить блюдо'}
+          {clash ? t('template.update', { name: clash.name }) : t('template.save')}
         </button>
       </div>
     </div>

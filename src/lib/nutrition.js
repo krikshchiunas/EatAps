@@ -1,16 +1,17 @@
 import { estimateSaturatedFat, classifyComplexCarb, estimateProteinQuality, usableProteinShare } from './nutritionClassification.js'
+import { t } from './i18n.js'
 
 export const ACTIVITY = {
-  sedentary: { factor: 1.2, label: 'Мало движения' },
-  light: { factor: 1.375, label: 'Лёгкая активность' },
-  moderate: { factor: 1.55, label: 'Умеренная' },
-  high: { factor: 1.725, label: 'Высокая' },
+  sedentary: { factor: 1.2, get label() { return t('activity.sedentary') } },
+  light: { factor: 1.375, get label() { return t('activity.light') } },
+  moderate: { factor: 1.55, get label() { return t('activity.moderate') } },
+  high: { factor: 1.725, get label() { return t('activity.high') } },
 }
 
 export const GOALS = {
-  lose: { label: 'Снижение веса', kcalAdjust: -500, proteinPerKg: 2.0 },
-  maintain: { label: 'Поддержание', kcalAdjust: 0, proteinPerKg: 1.6 },
-  gain: { label: 'Набор мышц', kcalAdjust: 350, proteinPerKg: 1.8 },
+  lose: { get label() { return t('goal.lose') }, kcalAdjust: -500, proteinPerKg: 2.0 },
+  maintain: { get label() { return t('goal.maintain') }, kcalAdjust: 0, proteinPerKg: 1.6 },
+  gain: { get label() { return t('goal.gain') }, kcalAdjust: 350, proteinPerKg: 1.8 },
 }
 
 const round10 = (n) => Math.round(n / 10) * 10
@@ -201,7 +202,13 @@ export function carbBucket(name) {
   return 'other'
 }
 
-export const BUCKET_LABEL = { sweet: 'сладости и напитки', grain: 'крупы и хлеб', fruit: 'фрукты', veg: 'овощи и бобовые', other: 'другое' }
+export const BUCKET_LABEL = {
+  get sweet() { return t('bucket.sweet') },
+  get grain() { return t('bucket.grain') },
+  get fruit() { return t('bucket.fruit') },
+  get veg() { return t('bucket.veg') },
+  get other() { return t('bucket.other') },
+}
 
 export function sumQuality(meals = []) {
   const buckets = { sweet: 0, grain: 0, fruit: 0, veg: 0, other: 0 }

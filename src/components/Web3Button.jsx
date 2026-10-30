@@ -3,6 +3,7 @@ import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from '@
 // Импорт ради побочного эффекта: модуль вызывает createAppKit при загрузке,
 // а без этого вызова хуки ниже бросают исключение.
 import '../lib/appkit.js'
+import { t } from '../lib/i18n.js'
 
 // ── Кнопка входа через кошелёк ────────────────────────────────────────────────
 // Вынесена в отдельный файл, чтобы @reown/appkit со всеми адаптерами уехал в
@@ -44,7 +45,7 @@ export default function Web3Button({ busy, run, auth }) {
 
   return (
     <button className="btn ghost" disabled={busy} onClick={openWeb3}>
-      👛 Web3 кошелёк
+      👛 {t('auth.web3')}
     </button>
   )
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
+import { t } from '../lib/i18n.js'
 
 // Общий диалог подтверждения «Да / Нет».
 //
@@ -12,7 +13,7 @@ import { createPortal } from 'react-dom'
 // для position: fixed. Диалог, отрисованный внутри прокрученной панели,
 // оказывался на 600 px выше экрана — кнопка «Удалить аккаунт» выглядела просто
 // неработающей. Модальному окну место на body, а не в поддереве вызывающего.
-export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesLabel = 'Да', noLabel = 'Нет' }) {
+export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesLabel = t('common.yes'), noLabel = t('common.no') }) {
   const [step, setStep] = useState('confirm') // 'confirm' | 'captcha'
   const [code] = useState(() => String(Math.floor(1000 + Math.random() * 9000)))
   const [input, setInput] = useState('')
@@ -45,7 +46,7 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
         ) : (
           <>
             <p style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 16, textAlign: 'center', lineHeight: 1.5 }}>
-              Введите код для подтверждения
+              {t('confirm.codePrompt')}
             </p>
             <div style={{
               fontSize: 32, fontWeight: 700, letterSpacing: 10,
@@ -58,7 +59,7 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
               autoFocus
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder="Введите код"
+              placeholder={t('confirm.codePlaceholder')}
               inputMode="numeric"
               maxLength={4}
               style={{
@@ -72,8 +73,8 @@ export default function ConfirmDialog({ text, onYes, onNo, captcha = false, yesL
               onKeyDown={e => { if (e.key === 'Enter' && input === code) onYes() }}
             />
             <div className="row gap12">
-              <button className="btn ghost" style={{ flex: 1 }} onClick={onNo}>Отмена</button>
-              <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: 'var(--on-danger)' }} disabled={input !== code} onClick={onYes}>Подтвердить</button>
+              <button className="btn ghost" style={{ flex: 1 }} onClick={onNo}>{t('common.cancel')}</button>
+              <button className="btn" style={{ flex: 1, background: 'var(--danger)', borderColor: 'var(--danger)', color: 'var(--on-danger)' }} disabled={input !== code} onClick={onYes}>{t('common.confirm')}</button>
             </div>
           </>
         )}

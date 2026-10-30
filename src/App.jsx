@@ -20,8 +20,13 @@ import { amountLabel } from './lib/foods.js'
 import ResetPasswordSheet from './components/ResetPasswordSheet.jsx'
 import PushScreen from './components/PushScreen.jsx'
 import AITab from './components/AITab.jsx'
+import { t } from './lib/i18n.js'
+import { useLang } from './lib/useLang.js'
+import { foodName } from './lib/foodNames.js'
 
 export default function App() {
+  // Подписка на язык: смена языка перерисовывает App, а с ним и всё дерево.
+  useLang()
   const store = useStore()
   const { profile, days, dayOf, addFood, removeFood, recovery, booting, user, prefs } = store
   const [tab, setTab] = useState('day')
@@ -209,14 +214,14 @@ export default function App() {
               msg: a.label,
               undo: () => {
                 for (const id of a.ids) removeFood(date, id)
-                setAddUndo({ msg: 'Отменено' })
+                setAddUndo({ msg: t('common.undone') })
               },
             })
           }}
           onAdd={(food) => {
             const id = addFood(date, food)
-            const amount = food.grams > 0 ? amountLabel(food.grams, food.unit || 'г') : `${food.kcal} ккал`
-            if (id) lastAdd.current = { ids: [id], label: `${food.name} · ${amount}` }
+            const amount = food.grams > 0 ? amountLabel(food.grams, food.unit || 'г') : t('units.kcalN', { n: food.kcal })
+            if (id) lastAdd.current = { ids: [id], label: `${foodName(food.name)} · ${amount}` }
             return id
           }}
           // Добавление НЕСКОЛЬКИХ записей разом (блюдо из шаблона). Отмена

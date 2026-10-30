@@ -1,4 +1,5 @@
 import { Component } from 'react'
+import { t } from '../lib/i18n.js'
 
 // Последний рубеж: перехват ошибки рендера на уровне всего приложения.
 //
@@ -62,25 +63,24 @@ export default class RootErrorBoundary extends Component {
       <div className="crash-screen">
         <div className="card">
           <div className="eyebrow">EatAps</div>
-          <h1 className="h2" style={{ margin: '6px 0 10px' }}>Что-то сломалось</h1>
+          <h1 className="h2" style={{ margin: '6px 0 10px' }}>{t('crash.title')}</h1>
           <p className="muted" style={{ fontSize: 15, marginBottom: 20 }}>
-            Приложение не смогло отрисовать экран. Ваши записи о питании при этом целы —
-            они хранятся отдельно и никуда не делись.
+            {t('crash.text')}
           </p>
 
-          <button className="btn" onClick={this.reload}>Перезагрузить</button>
+          <button className="btn" onClick={this.reload}>{t('crash.reload')}</button>
           <button className="btn ghost" style={{ marginTop: 10 }} onClick={this.clearAppCache}>
-            Сбросить кэш приложения
+            {t('crash.clearCache')}
           </button>
           <button className="btn ghost" style={{ marginTop: 10 }} onClick={this.signOutLocal}>
-            Выйти из аккаунта на этом устройстве
+            {t('crash.signOut')}
           </button>
 
           <p style={{ marginTop: 18, fontSize: 12, color: 'var(--ink-3)', wordBreak: 'break-word' }}>
-            {detail || 'ошибка без описания'}
+            {detail || t('crash.noDetail')}
           </p>
           <p style={{ marginTop: 6, fontSize: 12, color: 'var(--ink-3)' }}>
-            Если повторяется — покажите эту строку разработчику.
+            {t('crash.showDev')}
           </p>
         </div>
       </div>

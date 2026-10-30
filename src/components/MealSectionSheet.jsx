@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
-import { QUICK_MEAL_NAMES } from '../lib/meals.js'
+import { quickMealNames } from '../lib/meals.js'
+import { t } from '../lib/i18n.js'
 
 // Sheet создания/редактирования приёма пищи.
 // mode: 'create' (новый пользовательский приём) | 'edit-standard' (только время
@@ -43,33 +44,33 @@ export default function MealSectionSheet({
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
           <h2 className="h2">{title}</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
 
         {confirmDelete ? (
           <div>
             <p style={{ fontSize: 15, lineHeight: 1.5, marginBottom: 18 }}>
-              В этом приёме есть продукты. Удалить приём вместе со всеми продуктами? Это действие нельзя отменить.
+              {t('section.deleteConfirm')}
             </p>
             <div className="row gap12">
-              <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDelete(false)}>Отмена</button>
-              <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={onDelete}>Удалить приём и продукты</button>
+              <button className="btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDelete(false)}>{t('common.cancel')}</button>
+              <button className="btn" style={{ flex: 1, background: 'var(--danger)' }} onClick={onDelete}>{t('section.deleteWithFoods')}</button>
             </div>
           </div>
         ) : (
           <div>
             {editableName && (
               <div className="field">
-                <label>Название приёма</label>
+                <label>{t('section.name')}</label>
                 <input
                   className="input"
-                  placeholder="Напр. Второй завтрак"
+                  placeholder={t('section.namePlaceholder')}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   style={{ marginBottom: 10 }}
                 />
                 <div className="row wrap gap8">
-                  {QUICK_MEAL_NAMES.map((n) => (
+                  {quickMealNames().map((n) => (
                     <button key={n} className={`chip ${name === n ? 'on' : ''}`} onClick={() => setName(n)}>
                       {n}
                     </button>
@@ -79,27 +80,27 @@ export default function MealSectionSheet({
             )}
 
             <div className="field">
-              <label>Показывать время</label>
+              <label>{t('section.showTime')}</label>
               <div className="seg">
-                <button className={showTime ? 'on' : ''} onClick={() => setShowTime(true)}>Показывать</button>
-                <button className={!showTime ? 'on' : ''} onClick={() => setShowTime(false)}>Скрыть</button>
+                <button className={showTime ? 'on' : ''} onClick={() => setShowTime(true)}>{t('section.show')}</button>
+                <button className={!showTime ? 'on' : ''} onClick={() => setShowTime(false)}>{t('section.hide')}</button>
               </div>
             </div>
 
             {showTime && (
               <div className="field">
-                <label>Время {mode === 'create' ? '(необязательно — иначе время первого продукта)' : ''}</label>
+                <label>{mode === 'create' ? t('section.timeOptional') : t('section.time')}</label>
                 <input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
               </div>
             )}
 
             <button className="btn" style={{ marginTop: 4 }} onClick={submit} disabled={!valid}>
-              {mode === 'create' ? 'Создать приём' : 'Сохранить'}
+              {mode === 'create' ? t('section.create') : t('common.save')}
             </button>
 
             {canDelete && (
               <button className="btn ghost" style={{ marginTop: 10, color: 'var(--danger)' }} onClick={handleDeleteClick}>
-                Удалить приём
+                {t('section.delete')}
               </button>
             )}
           </div>

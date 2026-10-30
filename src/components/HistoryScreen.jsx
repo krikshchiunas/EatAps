@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay } from '../lib/nutrition.js'
-import { keyOf, MONTH_NAMES } from '../lib/date.js'
-
-const DOW = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+import { keyOf, monthName, weekdaysShort } from '../lib/date.js'
+import { t } from '../lib/i18n.js'
 
 export default function HistoryScreen({ onPickDay, onClose }) {
   const { days, profile } = useStore()
@@ -43,21 +42,21 @@ export default function HistoryScreen({ onPickDay, onClose }) {
     <div className="screen">
       <div className="row between" style={{ alignItems: 'flex-start', margin: '0 0 20px' }}>
         <div>
-          <div className="eyebrow">История</div>
-          <h1 className="h1" style={{ margin: '4px 0 0' }}>Календарь</h1>
+          <div className="eyebrow">{t('history.eyebrow')}</div>
+          <h1 className="h1" style={{ margin: '4px 0 0' }}>{t('history.title')}</h1>
         </div>
-        {onClose && <button className="iconbtn" onClick={onClose} aria-label="Закрыть" style={{ flex: '0 0 auto' }}>✕</button>}
+        {onClose && <button className="iconbtn" onClick={onClose} aria-label={t('common.close')} style={{ flex: '0 0 auto' }}>✕</button>}
       </div>
 
       <div className="card">
         <div className="row between" style={{ marginBottom: 16 }}>
-          <button className="iconbtn" onClick={() => changeMonth(-1)} aria-label="Предыдущий месяц">‹</button>
-          <div style={{ fontSize: 17, fontWeight: 650 }}>{MONTH_NAMES[ym.m]} {ym.y}</div>
-          <button className="iconbtn" onClick={() => changeMonth(1)} aria-label="Следующий месяц">›</button>
+          <button className="iconbtn" onClick={() => changeMonth(-1)} aria-label={t('history.prevMonth')}>‹</button>
+          <div style={{ fontSize: 17, fontWeight: 650 }}>{monthName(ym.m)} {ym.y}</div>
+          <button className="iconbtn" onClick={() => changeMonth(1)} aria-label={t('history.nextMonth')}>›</button>
         </div>
 
         <div className="cal-grid" style={{ marginBottom: 6 }}>
-          {DOW.map((d) => <div key={d} className="cal-dow">{d}</div>)}
+          {weekdaysShort().map((d, i) => <div key={i} className="cal-dow">{d}</div>)}
         </div>
         <div className="cal-grid">
           {cells.map((d, i) => {
@@ -83,15 +82,15 @@ export default function HistoryScreen({ onPickDay, onClose }) {
       </div>
 
       <div className="row gap12" style={{ marginTop: 14 }}>
-        <SummaryCard label="Дней с записями" value={logged.length} />
-        <SummaryCard label="Средние ккал" value={avgKcal || '—'} />
+        <SummaryCard label={t('history.loggedDays')} value={logged.length} />
+        <SummaryCard label={t('history.avgKcal')} value={avgKcal || '—'} />
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
         <div className="row wrap gap16" style={{ fontSize: 13, color: 'var(--ink-2)' }}>
-          <Legend color="var(--accent)" text="ниже нормы" />
-          <Legend color="var(--good)" text="в норме" />
-          <Legend color="var(--warn)" text="перебор" />
+          <Legend color="var(--accent)" text={t('history.below')} />
+          <Legend color="var(--good)" text={t('history.inRange')} />
+          <Legend color="var(--warn)" text={t('history.over')} />
         </div>
       </div>
     </div>

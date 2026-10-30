@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useOverlayOpen } from '../lib/useScrollLock.js'
 import { useStore } from '../store.jsx'
 import { nextTip, markSeen, TOUR_PREF } from '../lib/tour.js'
+import { t } from '../lib/i18n.js'
 
 // Одна подсказка внизу экрана — не модалка поверх всего.
 //
@@ -73,7 +74,7 @@ export default function CoachMark({ facts, paused }) {
       </div>
       <button
         onClick={dismiss}
-        aria-label="Понятно, скрыть подсказку"
+        aria-label={t('tips.dismiss')}
         style={{ color: 'var(--ink-3)', fontSize: 18, flex: '0 0 auto', padding: '0 2px', lineHeight: 1 }}
       >
         ✕

@@ -15,16 +15,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { MEAL_TYPES } from './foods.js'
 import { newId } from './uuid.js'
+import { t } from './i18n.js'
 
 export const STANDARD_TYPES = ['breakfast', 'lunch', 'dinner', 'snack']
 export const OTHER_ID = 'std:other' // фолбэк для продуктов с нераспознанным/отсутствующим type
-const OTHER_LABEL = 'Без категории'
+
 const CUSTOM_EMOJI = '🍽️'
 const OTHER_EMOJI = '🗂️'
 
 const STANDARD_META = Object.fromEntries(MEAL_TYPES.map((m) => [m.key, m]))
 
-export const QUICK_MEAL_NAMES = ['Второй завтрак', 'Второй обед', 'Второй ужин', 'После тренировки', 'Поздний перекус']
+// Подсказки для названия своего приёма. Выбранное сохраняется как обычный
+// текст — на языке, на котором его выбрали.
+export function quickMealNames() {
+  return [t('meal.quick1'), t('meal.quick2'), t('meal.quick3'), t('meal.quick4'), t('meal.quick5')]
+}
 
 function isStandardType(t) {
   return STANDARD_TYPES.includes(t)
@@ -41,7 +46,7 @@ export function typeOfMealId(mealId) {
 }
 
 export function labelForMealId(day, mealId) {
-  return getMealSections(day).find((s) => s.id === mealId)?.label || 'Приём пищи'
+  return getMealSections(day).find((s) => s.id === mealId)?.label || t('meal.untitled')
 }
 
 // Продукт → id секции, к которой он относится «по факту», даже если mealId не задан.
@@ -82,9 +87,9 @@ function otherSection(day) {
   return {
     id: OTHER_ID,
     type: 'custom',
-    label: OTHER_LABEL,
+    label: t('meal.other'),
     emoji: OTHER_EMOJI,
-    customName: OTHER_LABEL,
+    customName: t('meal.other'),
     time: ov?.time ?? null,
     showTime: ov?.showTime ?? true,
     createdAt: ov?.createdAt ?? null,
@@ -130,9 +135,9 @@ export function getMealSections(day) {
     .map((s) => ({
       id: s.id,
       type: 'custom',
-      label: s.customName || 'Приём пищи',
+      label: s.customName || t('meal.untitled'),
       emoji: CUSTOM_EMOJI,
-      customName: s.customName || 'Приём пищи',
+      customName: s.customName || t('meal.untitled'),
       time: s.time ?? null,
       showTime: s.showTime ?? true,
       createdAt: s.createdAt ?? null,

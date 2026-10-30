@@ -10,6 +10,7 @@
 // из БД поднимаем в него через normalizeMealCard — переписка не ломается.
 
 import { mealMeta } from './foods.js'
+import { t } from './i18n.js'
 
 const num = (x) => Math.round(Number(x) || 0)
 
@@ -70,7 +71,7 @@ export function normalizeMealCard(ref) {
   return {
     v: 2,
     type: null,
-    label: ref.name || 'Блюдо',
+    label: ref.name || t('meal.dish'),
     emoji: ref.emoji || '🍽️',
     date: null,
     items: ref.name ? [{ name: ref.name, emoji: ref.emoji || null, grams: null, unit: 'г', kcal }] : [],

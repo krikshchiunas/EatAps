@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { amountLabel, formatAmount } from '../lib/foods.js'
+import { foodName } from '../lib/foodNames.js'
+import { t } from '../lib/i18n.js'
 import { sumAdvanced, freeSugarShare, fiberRatioOf } from '../lib/nutrition.js'
 import { estimateProteinQuality, usableProteinShare, PROTEIN_QUALITY_LOW } from '../lib/nutritionClassification.js'
 import { microsForEntry, massOf } from '../lib/foodMicros.js'
@@ -35,7 +37,7 @@ const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
 // Округляем до десятых, а не до целых: у колы клетчатки 0,53 г, и целое
 // превращало её в честную на вид «1 г». Ноль тоже показываем как ноль —
 // «клетчатки здесь нет» это ответ, а не пропуск.
-const gram = (v) => `${formatAmount(Math.round(num(v) * 10) / 10)} г`
+const gram = (v) => t('units.gN', { n: formatAmount(Math.round(num(v) * 10) / 10) })
 
 export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose }) {
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
@@ -84,91 +86,88 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
           <div className="row gap12" style={{ minWidth: 0, alignItems: 'center' }}>
             <span className="meal-emoji" style={{ width: 42, height: 42, fontSize: 20, flex: '0 0 auto' }}>{food.emoji || '🍽️'}</span>
             <div style={{ minWidth: 0 }}>
-              <div className="h2" style={{ fontSize: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{food.name}</div>
+              <div className="h2" style={{ fontSize: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{foodName(food.name)}</div>
               <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
-                {food.grams ? `${amountLabel(food.grams, food.unit || 'г')} · ` : ''}{Math.round(num(food.kcal))} ккал
+                {food.grams ? `${amountLabel(food.grams, food.unit || 'г')} · ` : ''}{t('units.kcalN', { n: Math.round(num(food.kcal)) })}
               </div>
             </div>
           </div>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть" style={{ flex: '0 0 auto' }}>✕</button>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')} style={{ flex: '0 0 auto' }}>✕</button>
         </div>
 
         {/* ── Белки ─────────────────────────────────────────────────────────── */}
-        <Section title="Белки" total={gram(protein)}>
+        <Section title={t('macro.protein')} total={gram(protein)}>
           {protein > 0 ? (
             <>
               <Row
-                label="Усвояемый белок"
+                label={t('foodInfo.usableProtein')}
                 value={share != null ? gram(adv.qualityProtein) : '—'}
                 sub={share != null
-                  ? `${Math.round(share * 100)}% пойдёт на строительство тканей`
-                  : 'по этому продукту сказать нечего'}
+                  ? t('foodInfo.usableShare', { n: Math.round(share * 100) })
+                  : t('foodInfo.nothingToSay')}
                 tone={share != null && share < PROTEIN_QUALITY_LOW ? 'var(--warn)' : undefined}
               />
               {pq.diaas === 0 && (
                 <Note>
-                  В этом белке нет триптофана — на строительство тканей он не идёт совсем.
-                  Так устроены коллаген и желатин: граммы на упаковке настоящие, пользы для мышц нет.
+                  {t('foodInfo.noTryptophan')}
                 </Note>
               )}
             </>
-          ) : <Empty>Белка в этой порции нет.</Empty>}
+          ) : <Empty>{t('foodInfo.noProtein')}</Empty>}
         </Section>
 
         {/* ── Углеводы ──────────────────────────────────────────────────────── */}
-        <Section title="Углеводы" total={gram(carbs)}>
+        <Section title={t('macro.carbs')} total={gram(carbs)}>
           {carbs > 0 ? (
             <>
               <Row
-                label="Сложные"
+                label={t('foodInfo.complex')}
                 value={`${adv.complexCarbConfidence !== 'measured' ? '≈' : ''}${gram(adv.complexCarb)}`}
                 sub={adv.complexCarbConfidence === 'unknown'
-                  ? 'состав неясен — к сложным не отнесены'
-                  : `${Math.round((adv.complexCarb / carbs) * 100)}% углеводов порции`}
+                  ? t('foodInfo.complexUnknown')
+                  : t('foodInfo.complexShare', { n: Math.round((adv.complexCarb / carbs) * 100) })}
               />
               <Row
-                label="Свободные сахара"
+                label={t('foodInfo.freeSugar')}
                 value={`≈${gram(freeSugar)}`}
-                sub={freeSugarShare(food.name) >= 0.8 ? 'почти всё — сахар' : freeSugarShare(food.name) === 0 ? 'сахара из цельного продукта, не свободные' : undefined}
+                sub={freeSugarShare(food.name) >= 0.8 ? t('foodInfo.allSugar') : freeSugarShare(food.name) === 0 ? t('foodInfo.wholeSugar') : undefined}
                 tone={freeSugar > carbs * 0.5 ? 'var(--warn)' : undefined}
               />
               <Row
-                label="Клетчатка"
+                label={t('foodInfo.fiber')}
                 value={`≈${gram(fiber)}`}
-                sub={fiberRatioOf(food.name) >= 0.3 ? 'хороший источник' : undefined}
+                sub={fiberRatioOf(food.name) >= 0.3 ? t('foodInfo.goodSource') : undefined}
               />
             </>
-          ) : <Empty>Углеводов в этой порции нет.</Empty>}
+          ) : <Empty>{t('foodInfo.noCarbs')}</Empty>}
         </Section>
 
         {/* ── Жиры ──────────────────────────────────────────────────────────── */}
-        <Section title="Жиры" total={gram(fat)}>
+        <Section title={t('macro.fat')} total={gram(fat)}>
           {fat > 0 ? (
             <Row
-              label="Насыщенные"
+              label={t('foodInfo.saturated')}
               value={adv.satFatConfidence === 'unknown' ? '—' : `${adv.satFatConfidence !== 'measured' ? '≈' : ''}${gram(adv.satFat)}`}
-              sub={adv.satFatConfidence === 'measured' ? 'с этикетки'
-                : adv.satFatConfidence === 'unknown' ? 'по этому продукту сказать нечего'
-                  : `${Math.round((adv.satFat / fat) * 100)}% жиров порции`}
+              sub={adv.satFatConfidence === 'measured' ? t('foodInfo.fromLabel')
+                : adv.satFatConfidence === 'unknown' ? t('foodInfo.nothingToSay')
+                  : t('foodInfo.satShare', { n: Math.round((adv.satFat / fat) * 100) })}
             />
-          ) : <Empty>Жиров в этой порции нет.</Empty>}
+          ) : <Empty>{t('foodInfo.noFat')}</Empty>}
         </Section>
 
         {/* ── Витамины, минералы и остальное ────────────────────────────────── */}
         {micro.confidence === 'unknown' ? (
           <div className="card" style={{ padding: 14, marginTop: 14, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Витамины и минералы</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('foodInfo.micros')}</div>
             <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, margin: 0 }}>
-              {mass == null
-                ? 'Не указан вес порции — посчитать содержание не от чего. Укажите граммы, и разбор появится.'
-                : 'Этот продукт не удалось отнести ни к одной группе, поэтому его витамины и минералы не посчитаны. Лучше промолчать, чем показать выдуманные числа.'}
+              {mass == null ? t('foodInfo.noMass') : t('foodInfo.noGroup')}
             </p>
           </div>
         ) : groups.length === 0 ? (
           <div className="card" style={{ padding: 14, marginTop: 14, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Витамины и минералы</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t('foodInfo.micros')}</div>
             <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, margin: 0 }}>
-              Заметного количества витаминов и минералов здесь нет — так бывает у сахара, масла и крепкого алкоголя.
+              {t('foodInfo.noMicros')}
             </p>
           </div>
         ) : (
@@ -179,7 +178,7 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
                   key={r.def.key}
                   label={r.def.label}
                   value={formatMicro(r.value, r.def.unit)}
-                  sub={r.target > 0 ? `${Math.round((r.value / r.target) * 100)}% дневной нормы` : undefined}
+                  sub={r.target > 0 ? t('foodInfo.ofDaily', { n: Math.round((r.value / r.target) * 100) }) : undefined}
                   tone={r.target > 0 && r.value >= r.target ? 'var(--good)' : undefined}
                 />
               ))}
@@ -189,12 +188,10 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
 
         {/* ── Откуда числа ──────────────────────────────────────────────────── */}
         <p style={{ fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.5, margin: '18px 0 0' }}>
-          Калории и Б/Ж/У — из карточки продукта.{' '}
-          {micro.confidence === 'estimated' && 'Витамины и минералы — справочные значения для этого вида продукта. '}
-          {micro.confidence === 'category' && 'Витамины и минералы — усреднённые по группе продуктов, точность ниже обычной. '}
-          Знак «≈» стоит там, где значение оценено по типу продукта, а не взято с этикетки. Всё это
-          показывает, сколько вещества было в съеденном, а не сколько усвоилось: это ориентир, а не
-          медицинский показатель.
+          {t('foodInfo.srcMacros')}{' '}
+          {micro.confidence === 'estimated' && `${t('foodInfo.srcEstimated')} `}
+          {micro.confidence === 'category' && `${t('foodInfo.srcCategory')} `}
+          {t('foodInfo.srcNote')}
         </p>
       </div>
     </div>

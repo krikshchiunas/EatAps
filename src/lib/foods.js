@@ -1,11 +1,13 @@
 import { barcodeVariants } from './barcode.js'
 import { rankedSearch } from './fuzzy.js'
+import { t, fmtNum } from './i18n.js'
 
+// Подписи — геттерами: справочник живёт весь сеанс, а язык может смениться.
 export const MEAL_TYPES = [
-  { key: 'breakfast', label: 'Завтрак', emoji: '🌅' },
-  { key: 'lunch', label: 'Обед', emoji: '🥗' },
-  { key: 'dinner', label: 'Ужин', emoji: '🌙' },
-  { key: 'snack', label: 'Перекус', emoji: '🍎' },
+  { key: 'breakfast', get label() { return t('meal.breakfast') }, emoji: '🌅' },
+  { key: 'lunch', get label() { return t('meal.lunch') }, emoji: '🥗' },
+  { key: 'dinner', get label() { return t('meal.dinner') }, emoji: '🌙' },
+  { key: 'snack', get label() { return t('meal.snack') }, emoji: '🍎' },
 ]
 
 export function mealMeta(type) {
@@ -1662,27 +1664,33 @@ export function hasMacros(f) {
 // Граммы, миллилитры и штуки не склоняются, поэтому таблица нужна только для
 // порций — но проходить через эту функцию должны все, иначе разделитель снова
 // разъедется.
-const UNIT_FORMS = { 'порция': ['порция', 'порции', 'порций'] }
+//
+// Единица в данных — по-прежнему русское слово ('г', 'мл', 'шт', 'порция'):
+// это значение, которое лежит в дневнике, а не подпись. Подпись и склонение
+// даёт словарь, разделитель дробной части — Intl на языке интерфейса.
+const UNIT_LABEL = { 'г': 'units.gN', 'мл': 'units.mlN', 'шт': 'units.piece', 'порция': 'units.serving' }
 
 export function formatAmount(value) {
   const n = Number(value)
   if (!Number.isFinite(n)) return ''
-  return (Math.round(n * 100) / 100).toString().replace('.', ',')
+  return fmtNum(Math.round(n * 100) / 100, { maximumFractionDigits: 2, useGrouping: false })
 }
 
 export function amountLabel(value, unit = 'г') {
   const n = Number(value)
   if (!Number.isFinite(n)) return ''
-  const forms = UNIT_FORMS[unit]
-  if (!forms) return `${formatAmount(n)} ${unit}`
-  // Дробное число — всегда родительный падеж единственного числа.
-  if (!Number.isInteger(n)) return `${formatAmount(n)} ${forms[1]}`
-  const mod10 = n % 10
-  const mod100 = n % 100
-  const form = mod10 === 1 && mod100 !== 11 ? forms[0]
-    : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20) ? forms[1]
-      : forms[2]
-  return `${n} ${form}`
+  const key = UNIT_LABEL[unit]
+  if (!key) return `${formatAmount(n)} ${unit}`
+  return t(key, { n: formatAmount(n), count: n })
+}
+
+// Подпись единицы без числа: «г», «ml», «Portion».
+export function unitLabel(unit) {
+  if (unit === 'г') return t('units.g')
+  if (unit === 'мл') return t('units.ml')
+  if (unit === 'шт') return t('units.pcs')
+  if (unit === 'порция') return t('units.servingWord')
+  return unit
 }
 
 // Единая подпись «Б… У… Ж…» для всего приложения.
@@ -1691,7 +1699,7 @@ export function amountLabel(value, unit = 'г') {
 // как раз то, что получалось раньше: в дневнике висела буква «Ж» без числа.
 export function macroLabel(m) {
   const v = (x) => (x == null || !Number.isFinite(+x) ? '—' : +(+x).toFixed(1))
-  return `Б${v(m?.protein)} У${v(m?.carbs)} Ж${v(m?.fat)}`
+  return t('macro.line', { p: v(m?.protein), c: v(m?.carbs), f: v(m?.fat) })
 }
 
 const posNum = (v, max) => {
