@@ -9,6 +9,7 @@ import { useStore } from '../store.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
 import { userProfile, setUsername } from '../lib/social.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import { t } from '../lib/i18n.js'
 
 export default function MyProfileSheet({ onClose }) {
   const { user, profile, setProfile } = useStore()
@@ -82,8 +83,8 @@ export default function MyProfileSheet({ onClose }) {
       <div className="sheet sheet-tall" {...sheetProps} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 18 }}>
-          <h2 className="h2">Мой профиль</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <h2 className="h2">{t('profile.edit.title')}</h2>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
 
         <div style={{ marginBottom: 20 }}>
@@ -91,8 +92,8 @@ export default function MyProfileSheet({ onClose }) {
         </div>
 
         <div className="field">
-          <label>Имя</label>
-          <input className="input" placeholder="Напр. Денис" value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
+          <label>{t('profile.edit.name')}</label>
+          <input className="input" placeholder={t('profile.edit.namePh')} value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={40} />
         </div>
 
         {/* Ник — единственный способ найти человека в поиске, поэтому он не
@@ -100,7 +101,7 @@ export default function MyProfileSheet({ onClose }) {
             нигде: ни здесь, ни в профиле, ни в поиске. */}
         {savedNick !== null && (
           <div className="field">
-            <label>Ник — по нему вас находят в поиске</label>
+            <label>{t('profile.edit.nick')}</label>
             <input
               className="input"
               value={nick}
@@ -118,7 +119,7 @@ export default function MyProfileSheet({ onClose }) {
               spellCheck={false}
             />
             <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-              От 3 до 20 символов: латиница, цифры и «_». У каждого свой — двух одинаковых не бывает.
+              {t('profile.edit.nickHint')}
             </p>
             {nickErr && <p style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 6 }}>{nickErr}</p>}
           </div>
@@ -127,10 +128,10 @@ export default function MyProfileSheet({ onClose }) {
         {/* Порядок полей — тот же, что в профиле: человек правит их сверху вниз
             ровно в том виде, в каком они потом стоят на витрине. */}
         <div className="field">
-          <label>Био</label>
+          <label>{t('profile.bio')}</label>
           <textarea
             className="input"
-            placeholder="Пара слов о себе — увидят друзья"
+            placeholder={t('profile.edit.bioPh')}
             value={draft.bio}
             onChange={(e) => set({ bio: e.target.value })}
             maxLength={200}
@@ -146,7 +147,7 @@ export default function MyProfileSheet({ onClose }) {
           <label>MY guilty pleasure</label>
           <input
             className="input"
-            placeholder="Напр. Шоколадный торт"
+            placeholder={t('profile.edit.guiltyPh')}
             value={draft.guiltyPleasure}
             onChange={(e) => set({ guiltyPleasure: e.target.value })}
             maxLength={60}
@@ -154,7 +155,7 @@ export default function MyProfileSheet({ onClose }) {
         </div>
 
         <button className="btn" style={{ marginTop: 10 }} onClick={save} disabled={busy}>
-          {busy ? 'Сохраняем…' : 'Сохранить'}
+          {busy ? t('common.saving') : t('common.save')}
         </button>
       </div>
     </div>

@@ -1,22 +1,15 @@
 import { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { planByTier } from '../lib/subscription.js'
+import { t, fmtDate } from '../lib/i18n.js'
 
 // Форма ввода промокода — общая для экрана тарифов и «Настроек».
 // Логика гашения одна (applyPromo из store), здесь только UI и текст ошибок:
 // причина отказа («уже использован», «срок истёк») это часть нормального
 // сценария, поэтому показывается человеку, а не проглатывается.
-const PROMO_ERRORS = {
-  not_found: 'Такого кода нет. Проверьте написание.',
-  expired: 'Срок действия кода истёк.',
-  exhausted: 'Код уже разобрали — все использования закончились.',
-  already_used: 'Вы уже активировали этот код.',
-  unauthorized: 'Войдите в аккаунт, чтобы активировать код.',
-  offline: 'Нет связи. Проверьте интернет.',
-  failed: 'Не получилось активировать код. Попробуйте ещё раз.',
-}
+const PROMO_ERRORS = ['not_found', 'expired', 'exhausted', 'already_used', 'unauthorized', 'offline', 'failed']
 
-export default function PromoRedeemForm({ label = 'Есть промокод?' }) {
+export default function PromoRedeemForm({ label = t('promo.question') }) {
   const { applyPromo } = useStore()
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -31,12 +24,13 @@ export default function PromoRedeemForm({ label = 'Есть промокод?' }
     const res = await applyPromo(value)
     setBusy(false)
     if (res?.ok) {
-      const until = new Date(res.until).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+      const until = fmtDate(res.until, { day: 'numeric', month: 'long' })
       const name = planByTier(res.tier)?.name || res.tier
-      setResult({ ok: true, text: `Готово: ${name} до ${until}.` })
+      setResult({ ok: true, text: t('promo.done', { plan: name, date: until }) })
       setCode('')
     } else {
-      setResult({ ok: false, text: PROMO_ERRORS[res?.error] || PROMO_ERRORS.failed })
+      const reason = PROMO_ERRORS.includes(res?.error) ? res.error : 'failed'
+      setResult({ ok: false, text: t(`promo.err.${reason}`) })
     }
   }
 
@@ -49,14 +43,14 @@ export default function PromoRedeemForm({ label = 'Есть промокод?' }
           className="promo__input"
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="Код"
+          placeholder={t('promo.code')}
           autoComplete="off"
           autoCapitalize="characters"
           spellCheck={false}
           disabled={busy}
         />
         <button className="btn ghost promo__btn" type="submit" disabled={busy || !code.trim()}>
-          {busy ? '…' : 'Активировать'}
+          {busy ? '…' : t('promo.activate')}
         </button>
       </div>
       {result && (

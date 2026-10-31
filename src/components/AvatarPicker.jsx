@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { fileToAvatar } from '../lib/avatar.js'
+import { t } from '../lib/i18n.js'
 
 // Круглый выбор фото профиля. value — data URL или null. onChange(dataUrl|null).
 export default function AvatarPicker({ value, onChange, size = 96 }) {
@@ -16,7 +17,7 @@ export default function AvatarPicker({ value, onChange, size = 96 }) {
     try {
       onChange(await fileToAvatar(file))
     } catch (ex) {
-      setErr(ex.message || 'Ошибка')
+      setErr(ex.message || t('profile.avatar.error'))
     } finally {
       setBusy(false)
     }
@@ -37,7 +38,7 @@ export default function AvatarPicker({ value, onChange, size = 96 }) {
           display: 'grid',
           placeItems: 'center',
         }}
-        aria-label="Выбрать фото"
+        aria-label={t('profile.avatar.pick')}
       >
         {value ? (
           <img src={value} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -47,11 +48,11 @@ export default function AvatarPicker({ value, onChange, size = 96 }) {
       </button>
       <div className="row gap8" style={{ justifyContent: 'center' }}>
         <button type="button" style={{ fontSize: 13, color: 'var(--primary)', fontWeight: 550 }} onClick={() => inputRef.current?.click()} disabled={busy}>
-          {busy ? 'Загрузка…' : value ? 'Изменить фото' : 'Добавить фото'}
+          {busy ? t('common.loading') : value ? t('profile.avatar.change') : t('profile.avatar.add')}
         </button>
         {value && (
           <button type="button" style={{ fontSize: 13, color: 'var(--ink-3)' }} onClick={() => onChange(null)}>
-            Убрать
+            {t('profile.avatar.remove')}
           </button>
         )}
       </div>

@@ -16,26 +16,29 @@ import { mealCardFromMeal } from '../lib/mealCard.js'
 import { Avatar } from './FriendsScreen.jsx'
 import UserProfileView from './UserProfileView.jsx'
 import { useStore } from '../store.jsx'
+import { t } from '../lib/i18n.js'
+import { foodName } from '../lib/foodNames.js'
+import { unitLabel } from '../lib/units.js'
 
 function DotsMenu({ onMute, onRemove, onClose }) {
   return (
     <div style={{
-      position: 'absolute', top: '100%', right: 0, marginTop: 6,
+      position: 'absolute', top: '100%', insetInlineEnd: 0, marginTop: 6,
       background: 'var(--surface)', border: '1px solid var(--border)',
       borderRadius: 16, boxShadow: 'var(--shadow-float)',
       minWidth: 180, zIndex: 10, overflow: 'hidden',
     }}>
       <button
-        style={{ width: '100%', textAlign: 'left', padding: '14px 18px', fontSize: 15, borderBottom: '1px solid var(--border)' }}
+        style={{ width: '100%', textAlign: 'start', padding: '14px 18px', fontSize: 15, borderBottom: '1px solid var(--border)' }}
         onClick={() => { onMute(); onClose() }}
       >
-        Заглушить
+        {t('friends.mute')}
       </button>
       <button
-        style={{ width: '100%', textAlign: 'left', padding: '14px 18px', fontSize: 15, color: 'var(--danger)' }}
+        style={{ width: '100%', textAlign: 'start', padding: '14px 18px', fontSize: 15, color: 'var(--danger)' }}
         onClick={() => { onRemove(); onClose() }}
       >
-        Удалить из друзей
+        {t('friends.remove')}
       </button>
     </div>
   )
@@ -82,8 +85,8 @@ function MealReactSheet({ meal, mealDate, friend, myId, onClose }) {
         <div style={{ background: 'var(--surface-2)', borderRadius: 14, padding: '12px 14px', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 28 }}>{meal.emoji || '🍽️'}</span>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meal.name}</div>
-            <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>{meal.kcal} ккал{meal.grams ? ` · ${meal.grams} ${meal.unit || 'г'}` : ''}</div>
+            <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{foodName(meal.name)}</div>
+            <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>{t('units.kcalN', { n: meal.kcal })}{meal.grams ? ` · ${meal.grams} ${unitLabel(meal.unit || 'г')}` : ''}</div>
           </div>
         </div>
 
@@ -110,7 +113,7 @@ function MealReactSheet({ meal, mealDate, friend, myId, onClose }) {
         <div style={{ marginBottom: 14 }}>
           <input
             className="input"
-            placeholder="Написать комментарий…"
+            placeholder={t('profile.commentPh')}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') send() }}
@@ -126,7 +129,7 @@ function MealReactSheet({ meal, mealDate, friend, myId, onClose }) {
           disabled={sending || (!picked && !text.trim())}
           onClick={send}
         >
-          {sending ? 'Отправляю…' : 'Отправить в чат'}
+          {sending ? t('common.sending') : t('profile.sendToChat')}
         </button>
       </div>
     </div>
@@ -191,11 +194,11 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
 
   const handleMute = () => {
     // TODO: mute feature (placeholder)
-    alert('Скоро появится!')
+    alert(t('profile.soon'))
   }
 
   const p = state?.profile || {}
-  const name = p.name || friend.name || 'Друг'
+  const name = p.name || friend.name || t('chat.friend')
   const avatar = p.avatar || friend.avatar
 
   return (
@@ -204,7 +207,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
     <div className="chat-overlay" {...panelProps}>
       {/* Header */}
       <header className="chat-header">
-        <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }}>‹</button>
+        <button className="iconbtn" onClick={handleClose} aria-label={t('common.back')} style={{ fontSize: 22 }}>‹</button>
 
         <div className="row gap10" style={{ alignItems: 'center', minWidth: 0, flex: 1 }}>
           <Avatar src={avatar} name={name} size={36} />
@@ -217,7 +220,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
         <div ref={menuRef} style={{ position: 'relative', flex: '0 0 auto' }}>
           <button
             className="iconbtn"
-            aria-label="Действия"
+            aria-label={t('common.actions')}
             onClick={() => setMenuOpen((v) => !v)}
           >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
@@ -239,7 +242,7 @@ export default function FriendAccount({ friend, onClose, onRemoved }) {
         {err ? (
           <p style={{ color: 'var(--danger)', fontSize: 14 }}>{err}</p>
         ) : !state ? (
-          <p className="muted" style={{ fontSize: 14 }}>Загрузка…</p>
+          <p className="muted" style={{ fontSize: 14 }}>{t('common.loading')}</p>
         ) : (
           <UserProfileView
             isOwnProfile={false}

@@ -29,6 +29,7 @@ import ProfileCounts from './ProfileCounts.jsx'
 import PeopleList from './PeopleList.jsx'
 import PublicProfile from './PublicProfile.jsx'
 import NotificationsScreen from './NotificationsScreen.jsx'
+import { t } from '../lib/i18n.js'
 
 // Ленивая загрузка: AuthSheet тянет тяжёлый Web3-стек (AppKit), MyProfileSheet
 // — редактор с обработкой фото, ChallengesScreen открывает меньшинство. Ядро
@@ -37,24 +38,16 @@ const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const MyProfileSheet = lazyWithReload(() => import('./MyProfileSheet.jsx'))
 const ChallengesScreen = lazyWithReload(() => import('./ChallengesScreen.jsx'))
 
-const LIST_TITLE = {
-  followers: 'Подписчики',
-  following: 'Подписки',
-  friends: 'Друзья',
-}
-
-const LIST_EMPTY = {
-  followers: 'На вас пока никто не подписан',
-  following: 'Вы пока ни на кого не подписаны',
-  friends: 'Друзья появляются, когда вы подписаны друг на друга',
-}
+// Заголовок списка — та же подпись, что у счётчика, по которому его открыли.
+const LIST_TITLE = { followers: 'counts.followers', following: 'counts.following', friends: 'counts.friends' }
+const LIST_EMPTY = { followers: 'profile.noFollowers', following: 'profile.noFollowing', friends: 'profile.noFriends' }
 
 // «События» — это и уведомления, и челленджи. Соревнование с друзьями — тоже
 // событие, а не постоянный раздел, и искать его человек шёл в единственное
 // место, где о событиях вообще идёт речь.
 const EVENT_TABS = [
-  { key: 'feed',       label: 'Уведомления' },
-  { key: 'challenges', label: 'Челленджи' },
+  { key: 'feed',       get label() { return t('profile.tabNotifications') } },
+  { key: 'challenges', get label() { return t('profile.tabChallenges') } },
 ]
 
 function GearIcon() {
@@ -133,9 +126,9 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
   const signInPrompt = supabaseEnabled && !user ? (
     <div className="card" style={{ marginBottom: 12 }}>
       <p className="muted" style={{ fontSize: 14, marginBottom: 12 }}>
-        Войдите — профиль станет виден друзьям, а данные будут в облаке.
+        {t('profile.signInPrompt')}
       </p>
-      <button className="btn" onClick={() => setAuthOpen(true)}>Войти или зарегистрироваться</button>
+      <button className="btn" onClick={() => setAuthOpen(true)}>{t('settings.signInOrUp')}</button>
     </div>
   ) : null
 
@@ -146,12 +139,12 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
       <ProfileCounts card={card} onPick={setList} showThoughts={false} />
       <button
         className="card"
-        style={{ width: '100%', textAlign: 'left', padding: '13px 14px', marginBottom: 16 }}
+        style={{ width: '100%', textAlign: 'start', padding: '13px 14px', marginBottom: 16 }}
         onClick={() => setEventsOpen(true)}
       >
         <div className="row between" style={{ alignItems: 'center' }}>
           <span className="row gap8" style={{ alignItems: 'center', fontSize: 15, fontWeight: 600 }}>
-            События
+            {t('profile.events')}
             {unreadEvents > 0 && (
               <span style={{
                 minWidth: 20, height: 20, borderRadius: 999,
@@ -172,10 +165,10 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
     <div className="screen">
       <div className="row between" style={{ alignItems: 'flex-start', marginBottom: 18 }}>
         <div>
-          <div className="eyebrow">Профиль</div>
-          <h1 className="h1" style={{ margin: '4px 0 0' }}>Это вы</h1>
+          <div className="eyebrow">{t('profile.eyebrow')}</div>
+          <h1 className="h1" style={{ margin: '4px 0 0' }}>{t('profile.title')}</h1>
         </div>
-        <button className="iconbtn" onClick={() => setSettingsOpen(true)} aria-label="Настройки" style={{ flex: '0 0 auto' }}>
+        <button className="iconbtn" onClick={() => setSettingsOpen(true)} aria-label={t('settings.title')} style={{ flex: '0 0 auto' }}>
           <GearIcon />
         </button>
       </div>
@@ -200,12 +193,12 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
           {(close) => (
             <div className="screen">
               <div className="row between" style={{ alignItems: 'center', marginBottom: 16 }}>
-                <h1 className="h1" style={{ margin: 0, fontSize: 22 }}>{LIST_TITLE[list]}</h1>
-                <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+                <h1 className="h1" style={{ margin: 0, fontSize: 22 }}>{t(LIST_TITLE[list])}</h1>
+                <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
               </div>
               {people === null
-                ? <p className="muted" style={{ fontSize: 14 }}>Загружаем…</p>
-                : <PeopleList people={people} myId={uid} onOpen={setOpenProfile} empty={LIST_EMPTY[list]} />}
+                ? <p className="muted" style={{ fontSize: 14 }}>{t('social.loading')}</p>
+                : <PeopleList people={people} myId={uid} onOpen={setOpenProfile} empty={t(LIST_EMPTY[list])} />}
             </div>
           )}
         </PushScreen>
@@ -216,14 +209,14 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
           {(close) => (
             <div className="screen">
               <div className="row between" style={{ alignItems: 'center', marginBottom: 16 }}>
-                <h1 className="h1" style={{ margin: 0, fontSize: 22 }}>События</h1>
-                <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+                <h1 className="h1" style={{ margin: 0, fontSize: 22 }}>{t('profile.events')}</h1>
+                <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
               </div>
 
               <div className="seg" style={{ marginBottom: 14 }}>
-                {EVENT_TABS.map((t) => (
-                  <button key={t.key} className={eventTab === t.key ? 'on' : ''} onClick={() => setEventTab(t.key)}>
-                    {t.label}
+                {EVENT_TABS.map((et) => (
+                  <button key={et.key} className={eventTab === et.key ? 'on' : ''} onClick={() => setEventTab(et.key)}>
+                    {et.label}
                   </button>
                 ))}
               </div>
@@ -231,18 +224,18 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
               {eventTab === 'feed' && (
                 <NotificationsScreen
                   onChanged={refreshEvents}
-                  onNavigate={(t) => {
-                    if (t.screen === 'profile') { close(); setOpenProfile(t.userId) }
+                  onNavigate={(target) => {
+                    if (target.screen === 'profile') { close(); setOpenProfile(target.userId) }
                     // Реакции и ответы приходят только на СВОИ мысли, поэтому
                     // пост всегда лежит в этом же профиле: закрываем события и
                     // открываем вкладку «Мысли», а не ищем его в ленте.
-                    else if (t.screen === 'post') { close(); setFocusTab('thoughts') }
+                    else if (target.screen === 'post') { close(); setFocusTab('thoughts') }
                     // Переписка живёт во вкладке «Друзья» — туда и ведём, с
                     // открытым диалогом. Второго чата в профиле не заводим.
-                    else if (t.screen === 'chat') {
+                    else if (target.screen === 'chat') {
                       close()
-                      if (onOpenChat) onOpenChat(t.userId)
-                      else setOpenProfile(t.userId)
+                      if (onOpenChat) onOpenChat(target.userId)
+                      else setOpenProfile(target.userId)
                     }
                   }}
                 />
@@ -250,7 +243,7 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
 
               {eventTab === 'challenges' && (
                 <LazyBoundary onClose={() => setEventTab('feed')}>
-                  <Suspense fallback={<p className="muted" style={{ fontSize: 14 }}>Загружаем…</p>}>
+                  <Suspense fallback={<p className="muted" style={{ fontSize: 14 }}>{t('social.loading')}</p>}>
                     <ChallengesScreen />
                   </Suspense>
                 </LazyBoundary>

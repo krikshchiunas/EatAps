@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import { t, getLang, isRtl } from '../lib/i18n.js'
 
 // ВАЖНО: это ШАБЛОНЫ. Замените все [плейсхолдеры] своими реальными данными
 // и покажите юристу перед публикацией. Это не юридическая консультация.
@@ -8,12 +9,20 @@ import { useSheetDrag } from '../lib/useSheetDrag.js'
 const P = { color: 'var(--ink-2)', fontSize: 14, lineHeight: 1.6, margin: '0 0 12px' }
 const H = { fontSize: 15, fontWeight: 650, margin: '18px 0 8px' }
 
+// Пометка для владельца приложения — на языке интерфейса, хотя сам документ
+// немецкий. Поэтому язык и направление у неё свои.
+function Warn({ k }) {
+  return (
+    <p lang={getLang()} dir={isRtl() ? 'rtl' : 'ltr'} style={{ ...P, color: 'var(--danger)' }}>
+      ⚠️ {t(k)}
+    </p>
+  )
+}
+
 function Impressum() {
   return (
     <div>
-      <p style={{ ...P, color: 'var(--danger)' }}>
-        ⚠️ Шаблон. Заполните поля [в скобках] и проверьте у юриста перед публикацией.
-      </p>
+      <Warn k="legal.templateImpressum" />
       <h3 style={H}>Angaben gemäß § 5 DDG</h3>
       <p style={P}>
         [Vor- und Nachname / Firmenname]<br />
@@ -38,9 +47,7 @@ function Impressum() {
 function Datenschutz() {
   return (
     <div>
-      <p style={{ ...P, color: 'var(--danger)' }}>
-        ⚠️ Шаблон. Проверьте у юриста и дополните своими данными.
-      </p>
+      <Warn k="legal.templatePrivacy" />
 
       <h3 style={H}>1. Verantwortlicher</h3>
       <p style={P}>[Name], [Anschrift], [E-Mail]. Siehe auch Impressum.</p>
@@ -76,7 +83,7 @@ function Datenschutz() {
       <h3 style={H}>5. Speicherdauer</h3>
       <p style={P}>
         Daten werden gespeichert, solange Ihr Konto besteht. Sie können Ihre Daten jederzeit in der
-        App exportieren und Ihr Konto samt Daten löschen (Profil → Приватность и данные).
+        App exportieren und Ihr Konto samt Daten löschen (Profil → Einstellungen → Daten bzw. Konto).
       </p>
 
       <h3 style={H}>6. Ihre Rechte</h3>
@@ -114,9 +121,7 @@ function Datenschutz() {
 function AGB() {
   return (
     <div>
-      <p style={{ ...P, color: 'var(--danger)' }}>
-        ⚠️ Шаблон условий использования. Проверьте у юриста и дополните.
-      </p>
+      <Warn k="legal.templateTerms" />
       <h3 style={H}>1. Geltungsbereich</h3>
       <p style={P}>Diese Nutzungsbedingungen gelten für die Nutzung der App/Website EatAps, bereitgestellt von [Name] (siehe Impressum).</p>
       <h3 style={H}>2. Leistung</h3>
@@ -128,7 +133,7 @@ function AGB() {
       <h3 style={H}>5. Haftung</h3>
       <p style={P}>Die Nutzung erfolgt auf eigenes Risiko. Haftung nur für Vorsatz und grobe Fahrlässigkeit sowie nach zwingenden gesetzlichen Vorschriften. Keine Gewähr für die Richtigkeit der Nährwertdaten.</p>
       <h3 style={H}>6. Kündigung</h3>
-      <p style={P}>Sie können Ihr Konto jederzeit in der App löschen (Profil → Приватность и данные).</p>
+      <p style={P}>Sie können Ihr Konto jederzeit in der App löschen (Profil → Einstellungen → Konto).</p>
       <h3 style={H}>7. Änderungen & Recht</h3>
       <p style={P}>Wir können diese Bedingungen mit Vorankündigung ändern. Es gilt deutsches Recht. Gerichtsstand [Ort], soweit zulässig.</p>
       <p style={{ ...P, color: 'var(--ink-3)', fontSize: 13, marginTop: 16 }}>Stand: [Datum].</p>
@@ -146,15 +151,20 @@ export default function LegalSheet({ onClose, initial = 'impressum' }) {
       <div className="sheet" ref={sheetProps.ref} style={sheetProps.style} onClick={(e) => e.stopPropagation()}>
         <div className="grabber" />
         <div className="row between" style={{ marginBottom: 14 }}>
-          <h2 className="h2">Правовая информация</h2>
-          <button className="iconbtn" onClick={close} aria-label="Закрыть">✕</button>
+          <h2 className="h2">{t('settings.about.legal')}</h2>
+          <button className="iconbtn" onClick={close} aria-label={t('common.close')}>✕</button>
         </div>
+        {/* Документы действуют на немецком, и переводить их без юриста нельзя:
+            перевод стал бы второй, никем не проверенной редакцией договора. */}
+        {getLang() !== 'de' && <p className="set-note" style={{ marginTop: 0 }}>{t('legal.germanOnly')}</p>}
         <div className="seg" style={{ marginBottom: 16 }}>
           <button className={tab === 'impressum' ? 'on' : ''} onClick={() => setTab('impressum')}>Impressum</button>
           <button className={tab === 'privacy' ? 'on' : ''} onClick={() => setTab('privacy')}>Datenschutz</button>
           <button className={tab === 'agb' ? 'on' : ''} onClick={() => setTab('agb')}>AGB</button>
         </div>
-        {tab === 'impressum' ? <Impressum /> : tab === 'agb' ? <AGB /> : <Datenschutz />}
+        <div lang="de" dir="ltr">
+          {tab === 'impressum' ? <Impressum /> : tab === 'agb' ? <AGB /> : <Datenschutz />}
+        </div>
       </div>
     </div>,
     document.body,

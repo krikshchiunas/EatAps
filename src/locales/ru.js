@@ -8,7 +8,8 @@ import add from './ru/add.js'
 import stats from './ru/stats.js'
 import supps from './ru/supps.js'
 import social from './ru/social.js'
+import settings from './ru/settings.js'
 import system from './ru/system.js'
 
-export const strings = merge(common, auth, day, add, stats, supps, social, system)
+export const strings = merge(common, auth, day, add, stats, supps, social, settings, system)
 export const data = {}

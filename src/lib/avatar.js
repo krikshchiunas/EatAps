@@ -1,8 +1,10 @@
 // Читает файл-картинку, кадрирует по центру в квадрат и сжимает в компактный
 // data URL (JPEG), чтобы аватар помещался в синхронизируемый JSON-профиль.
+import { t } from './i18n.js'
+
 export function fileToAvatar(file, size = 256) {
   return new Promise((resolve, reject) => {
-    if (!file || !file.type?.startsWith('image/')) return reject(new Error('Это не изображение'))
+    if (!file || !file.type?.startsWith('image/')) return reject(new Error(t('socialErr.notImage')))
     const url = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => {
@@ -24,7 +26,7 @@ export function fileToAvatar(file, size = 256) {
     }
     img.onerror = () => {
       URL.revokeObjectURL(url)
-      reject(new Error('Не удалось прочитать фото'))
+      reject(new Error(t('socialErr.photoRead')))
     }
     img.src = url
   })

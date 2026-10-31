@@ -17,13 +17,14 @@ import { lazyWithReload } from '../lib/lazyWithReload.js'
 import LazyBoundary from './LazyBoundary.jsx'
 import {
   Group, Row,
-  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, DataPanel, AboutPanel, SupportPanel, PromoPanel,
+  AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, LanguagePanel, DataPanel, AboutPanel, SupportPanel, PromoPanel,
 } from './SettingsPanels.jsx'
 import AITonePanel from './AITonePanel.jsx'
 import BodyPanel from './BodyPanel.jsx'
 import { profileTargets } from '../lib/body.js'
 import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiPrompt.js'
 import { planByTier } from '../lib/subscription.js'
+import { t, langInfo } from '../lib/i18n.js'
 
 // AuthSheet тянет тяжёлый Web3-стек — грузим только когда его открывают.
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
@@ -38,59 +39,60 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
 
   const toneLabel = (TONES[prefs?.[TONE_PREF]] || TONES[DEFAULT_TONE]).label
   const promoValue = subscription?.via === 'promo'
-    ? `${planByTier(subscription.tier)?.name || subscription.tier} активен`
+    ? t('settings.promoActive', { plan: planByTier(subscription.tier)?.name || subscription.tier })
     : null
-  const themeLabel = theme === 'light' ? 'Светлая' : theme === 'dark' ? 'Тёмная' : 'Как в системе'
+  const themeLabel = t(`settings.theme.${theme === 'light' || theme === 'dark' ? theme : 'system'}`)
   const liveTargets = profileTargets(profile)
-  const bodyValue = liveTargets?.calories ? `${liveTargets.calories} ккал` : null
+  const bodyValue = liveTargets?.calories ? t('units.kcalN', { n: liveTargets.calories }) : null
   const accountValue = supabaseEnabled
-    ? (user ? (user.email || user.phone || 'Вход выполнен') : 'Не выполнен')
-    : 'Только на устройстве'
+    ? (user ? (user.email || user.phone || t('settings.signedIn')) : t('settings.notSignedIn'))
+    : t('settings.deviceOnly')
 
   return (
     <div className="screen">
       <div className="row gap8" style={{ alignItems: 'center', marginBottom: 20 }}>
-        <button className="iconbtn" onClick={onClose} aria-label="Назад" style={{ fontSize: 22, flex: '0 0 auto' }}>‹</button>
-        <h1 className="h1" style={{ margin: 0, fontSize: 26 }}>Настройки</h1>
+        <button className="iconbtn" onClick={onClose} aria-label={t('common.back')} style={{ fontSize: 22, flex: '0 0 auto' }}>‹</button>
+        <h1 className="h1" style={{ margin: 0, fontSize: 26 }}>{t('settings.title')}</h1>
       </div>
 
-      <Group title="Аккаунт">
-        <Row label="Аккаунт" value={accountValue} onClick={() => setPanel('account')} />
+      <Group title={t('settings.grp.account')}>
+        <Row label={t('settings.row.account')} value={accountValue} onClick={() => setPanel('account')} />
       </Group>
 
-      <Group title="Норма">
-        <Row label="Мои данные и норма" value={bodyValue} onClick={() => setPanel('body')} />
+      <Group title={t('settings.grp.norm')}>
+        <Row label={t('settings.row.body')} value={bodyValue} onClick={() => setPanel('body')} />
       </Group>
 
-      <Group title="Приватность">
-        <Row label="Кто что видит" onClick={() => setPanel('privacy')} />
+      <Group title={t('settings.grp.privacy')}>
+        <Row label={t('settings.row.privacy')} onClick={() => setPanel('privacy')} />
       </Group>
 
-      <Group title="Уведомления">
-        <Row label="Уведомления" onClick={() => setPanel('notifications')} />
+      <Group title={t('settings.grp.notifications')}>
+        <Row label={t('settings.row.notifications')} onClick={() => setPanel('notifications')} />
       </Group>
 
       <Group title="Carrot 🥕">
-        <Row label="Тон ассистента" value={toneLabel} onClick={() => setPanel('aiTone')} />
-        <Row label="Промокод" value={promoValue} onClick={() => setPanel('promo')} />
+        <Row label={t('settings.row.tone')} value={toneLabel} onClick={() => setPanel('aiTone')} />
+        <Row label={t('settings.row.promo')} value={promoValue} onClick={() => setPanel('promo')} />
       </Group>
 
-      <Group title="Оформление">
-        <Row label="Тема" value={themeLabel} onClick={() => setPanel('appearance')} />
+      <Group title={t('settings.grp.appearance')}>
+        <Row label={t('settings.row.theme')} value={themeLabel} onClick={() => setPanel('appearance')} />
+        <Row label={t('lang.title')} value={langInfo().name} onClick={() => setPanel('language')} />
       </Group>
 
-      <Group title="Данные">
-        <Row label="Выгрузка и сброс" onClick={() => setPanel('data')} />
+      <Group title={t('settings.grp.data')}>
+        <Row label={t('settings.row.data')} onClick={() => setPanel('data')} />
       </Group>
 
-      <Group title="О приложении">
-        <Row label="Тренер и клиенты" onClick={() => setPanel('coach')} />
-        <Row label="Поддержка" onClick={() => setPanel('support')} />
-        <Row label="Помощь и правовая информация" onClick={() => setPanel('about')} />
+      <Group title={t('settings.grp.about')}>
+        <Row label={t('settings.row.coach')} onClick={() => setPanel('coach')} />
+        <Row label={t('settings.row.support')} onClick={() => setPanel('support')} />
+        <Row label={t('settings.row.about')} onClick={() => setPanel('about')} />
       </Group>
 
       <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', margin: '4px 0 8px' }}>
-        EatAps{supabaseEnabled && user ? ' · данные в облаке' : ' · данные на этом устройстве'}
+        EatAps · {supabaseEnabled && user ? t('settings.footerCloud') : t('settings.footerDevice')}
       </p>
 
       {panel === 'account' && <AccountPanel onClose={close} onOpenAuth={() => setAuthOpen(true)} />}
@@ -100,6 +102,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       {panel === 'aiTone' && <AITonePanel onClose={close} />}
       {panel === 'promo' && <PromoPanel onClose={close} />}
       {panel === 'appearance' && <AppearancePanel onClose={close} />}
+      {panel === 'language' && <LanguagePanel onClose={close} />}
       {panel === 'data' && <DataPanel onClose={close} />}
       {panel === 'coach' && (
         <LazyBoundary onClose={close}>

@@ -23,6 +23,7 @@ import PeopleList from './PeopleList.jsx'
 import ThoughtsFeed from './ThoughtsFeed.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import ProfileCounts from './ProfileCounts.jsx'
+import { t } from '../lib/i18n.js'
 
 export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenChat }) {
   const { user } = useStore()
@@ -67,7 +68,7 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
       setCard(p)
       setRel(r)
     } catch (e) {
-      setErr(e.message || 'Не удалось открыть профиль')
+      setErr(e.message || t('profile.openFailed'))
     }
   }, [userId, isMe])
 
@@ -99,7 +100,7 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
     load()
   }
 
-  const name = card?.display_name || card?.username || 'Без имени'
+  const name = card?.display_name || card?.username || t('common.noName')
   const label = isMe ? null : relationshipLabel(rel)
 
   // Человек нас заблокировал — профиля для нас нет. Показать пустую карточку
@@ -110,10 +111,10 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
         <div className="nav-scrim" {...scrimProps} />
         <div className="chat-overlay" {...panelProps}>
           <header className="chat-header">
-            <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }}>‹</button>
+            <button className="iconbtn" onClick={handleClose} aria-label={t('common.back')} style={{ fontSize: 22 }}>‹</button>
           </header>
           <div className="screen" style={{ textAlign: 'center', paddingTop: 60 }}>
-            <p className="muted" style={{ fontSize: 15 }}>Профиль недоступен.</p>
+            <p className="muted" style={{ fontSize: 15 }}>{t('profile.unavailable')}</p>
           </div>
         </div>
       </>
@@ -125,13 +126,13 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
     <div className="nav-scrim" {...scrimProps} />
     <div className="chat-overlay" {...panelProps}>
       <header className="chat-header">
-        <button className="iconbtn" onClick={handleClose} style={{ fontSize: 22 }}>‹</button>
+        <button className="iconbtn" onClick={handleClose} aria-label={t('common.back')} style={{ fontSize: 22 }}>‹</button>
         <span style={{ fontSize: 16, fontWeight: 640, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {card?.username || 'Профиль'}
+          {card?.username || t('profile.eyebrow')}
         </span>
         {!isMe && (
           <div style={{ position: 'relative', flex: '0 0 auto' }}>
-            <button className="iconbtn" onClick={() => setMenu((m) => !m)} aria-label="Действия">⋯</button>
+            <button className="iconbtn" onClick={() => setMenu((m) => !m)} aria-label={t('common.actions')}>⋯</button>
             {menu && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 19 }} onClick={() => setMenu(false)} />
@@ -140,7 +141,7 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
                     className="danger"
                     onClick={() => { setMenu(false); rel.blocked ? act(() => unblock(myId, userId)) : setConfirmBlock(true) }}
                   >
-                    {rel.blocked ? 'Разблокировать' : 'Заблокировать'}
+                    {rel.blocked ? t('rel.unblock') : t('profile.block')}
                   </button>
                 </div>
               </>
@@ -174,7 +175,7 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
             {canMessage(rel) && onOpenChat && (
               <button className="btn soft" style={{ width: 'auto', padding: '0 18px' }}
                 onClick={() => onOpenChat({ id: userId, name, avatar: card?.avatar_url, username: card?.username })}>
-                Написать
+                {t('profile.write')}
               </button>
             )}
           </div>
@@ -186,8 +187,8 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
         {!isMe && !canViewDiary(rel) && (
           <p className="muted" style={{ fontSize: 12.5, marginBottom: 14, lineHeight: 1.45 }}>
             {rel.followedBy
-              ? 'Этот человек подписан на вас. Подпишитесь в ответ — станете друзьями, откроются переписка и дневник питания.'
-              : 'Дневник питания и переписка — только друзьям. Друзьями становятся те, кто подписан друг на друга.'}
+              ? t('profile.followsYouHint')
+              : t('profile.friendsOnlyHint')}
           </p>
         )}
 
@@ -205,9 +206,9 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
             myId={myId}
             onOpen={onOpenProfile}
             empty={
-              tab === 'followers' ? 'Подписчиков пока нет'
-                : tab === 'following' ? 'Пока ни на кого не подписан'
-                : 'Друзей пока нет'
+              tab === 'followers' ? t('profile.theirNoFollowers')
+                : tab === 'following' ? t('profile.theirNoFollowing')
+                : t('profile.theirNoFriends')
             }
           />
         )}
@@ -215,7 +216,7 @@ export default function PublicProfile({ userId, onClose, onOpenProfile, onOpenCh
 
       {confirmBlock && (
         <ConfirmDialog
-          text={`Заблокировать ${name}? Взаимные подписки и дружба будут удалены.`}
+          text={t('profile.confirmBlock', { name })}
           onYes={() => { setConfirmBlock(false); act(() => block(myId, userId)) }}
           onNo={() => setConfirmBlock(false)}
         />

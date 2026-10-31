@@ -24,14 +24,17 @@ import { groupDayByMeal, resolvedTime } from '../lib/meals.js'
 import { foodHabits } from '../lib/stats.js'
 import { Avatar } from './FriendsScreen.jsx'
 import ThoughtsFeed from './ThoughtsFeed.jsx'
+import { t } from '../lib/i18n.js'
+import { foodName } from '../lib/foodNames.js'
+import { unitLabel } from '../lib/units.js'
 
 // Порядок вкладок: сначала то, что человек сказал сам («Мысли»), потом то, что
 // он ест, и только потом анкета. Профиль читают сверху вниз, а самое живое в
 // нём — мысли, а не поля о себе.
 const TABS = [
-  { key: 'thoughts', label: 'Мысли' },
-  { key: 'diet', label: 'Питание' },
-  { key: 'self', label: 'О себе' },
+  { key: 'thoughts', get label() { return t('counts.thoughts') } },
+  { key: 'diet', get label() { return t('profile.tabDiet') } },
+  { key: 'self', get label() { return t('profile.tabSelf') } },
 ]
 
 function Stat({ label, v }) {
@@ -76,24 +79,24 @@ function FoodRow({ food, customFoods, onReact }) {
         <div className="row gap10" style={{ alignItems: 'center', minWidth: 0, flex: 1 }}>
           <span className="meal-emoji" style={{ flex: '0 0 auto' }}>{food.emoji || '🍽️'}</span>
           <div style={{ minWidth: 0 }}>
-            <div className="meal-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{food.name}</div>
+            <div className="meal-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{foodName(food.name)}</div>
             <div className="row gap8" style={{ alignItems: 'center' }}>
-              {food.grams != null && <span className="meal-meta">{food.grams} {food.unit || 'г'}</span>}
+              {food.grams != null && <span className="meal-meta">{food.grams} {unitLabel(food.unit || 'г')}</span>}
               {composite && (
                 <button style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 550 }} onClick={() => setOpen((o) => !o)}>
-                  {open ? 'Скрыть ▲' : 'Состав ▼'}
+                  {open ? t('profile.hideContents') : t('profile.showContents')}
                 </button>
               )}
             </div>
           </div>
         </div>
         <div className="row gap10" style={{ alignItems: 'center', flex: '0 0 auto' }}>
-          <span className="tabular" style={{ fontWeight: 650 }}>{food.kcal} ккал</span>
+          <span className="tabular" style={{ fontWeight: 650 }}>{t('units.kcalN', { n: food.kcal })}</span>
           {onReact && (
             <button
               onClick={() => onReact(food)}
               style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}
-              aria-label="Отреагировать"
+              aria-label={t('profile.react')}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -103,11 +106,11 @@ function FoodRow({ food, customFoods, onReact }) {
         </div>
       </div>
       {open && composite && (
-        <div style={{ padding: '6px 8px 10px 36px', background: 'var(--surface-2)', borderRadius: 10, marginBottom: 6 }}>
-          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Состав блюда:</div>
-          <div style={{ fontSize: 13, marginBottom: 4 }}>🍞 {composite.recipe.base} × {composite.recipe.slices} шт.</div>
+        <div style={{ paddingBlock: '6px 10px', paddingInlineStart: 36, paddingInlineEnd: 8, background: 'var(--surface-2)', borderRadius: 10, marginBottom: 6 }}>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>{t('profile.dishContents')}</div>
+          <div style={{ fontSize: 13, marginBottom: 4 }}>🍞 {foodName(composite.recipe.base)} × {t('units.piece', { n: composite.recipe.slices, count: composite.recipe.slices })}</div>
           {(composite.recipe.items || []).filter((i) => i.count > 0).map((i) => (
-            <div key={i.name} style={{ fontSize: 13, marginBottom: 2 }}>· {i.name} × {i.count}</div>
+            <div key={i.name} style={{ fontSize: 13, marginBottom: 2 }}>· {foodName(i.name)} × {i.count}</div>
           ))}
         </div>
       )}
@@ -131,14 +134,14 @@ function MealSection({ group, customFoods, onReact }) {
           </div>
           {foods.length > 0 && (
             <div className="tabular" style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 1 }}>
-              {totals.kcal} ккал · Б{totals.protein} Ж{totals.fat} У{totals.carbs}
+              {t('units.kcalN', { n: totals.kcal })} · {t('macro.line', { p: totals.protein, c: totals.carbs, f: totals.fat })}
             </div>
           )}
         </div>
       </div>
 
       {foods.length === 0 ? (
-        <p className="muted" style={{ fontSize: 13.5, marginTop: 6 }}>Пока ничего</p>
+        <p className="muted" style={{ fontSize: 13.5, marginTop: 6 }}>{t('profile.nothingYet')}</p>
       ) : (
         foods.map((f) => <FoodRow key={f.id} food={f} customFoods={customFoods} onReact={onReact} />)
       )}
@@ -175,7 +178,7 @@ export default function UserProfileView({
   }, [focusTab])
 
   const p = profile || {}
-  const name = p.name || (isOwnProfile ? 'Без имени' : 'Друг')
+  const name = p.name || (isOwnProfile ? t('common.noName') : t('chat.friend'))
   const day = dayOf(date) || { meals: [] }
   const totals = sumDay(day.meals || [])
   const target = p.targets?.calories
@@ -221,8 +224,8 @@ export default function UserProfileView({
 
       {/* ── Три части профиля ─────────────────────────────────────────────── */}
       <div className="seg" style={{ marginBottom: 16 }}>
-        {TABS.map((t) => (
-          <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => setTab(t.key)}>{t.label}</button>
+        {TABS.map((tb) => (
+          <button key={tb.key} className={tab === tb.key ? 'on' : ''} onClick={() => setTab(tb.key)}>{tb.label}</button>
         ))}
       </div>
 
@@ -233,23 +236,23 @@ export default function UserProfileView({
                еде» отсюда убраны вместе со всей моделью тегов: их нельзя ни
                завести, ни отредактировать, и в профиле их больше нет. */
             <div className="card" style={{ display: 'grid', gap: 16 }}>
-              <ProfileRow label="Био" value={p.bio} multiline />
-              <ProfileRow label="Я это обожаю" value={habits.most?.name} />
-              <ProfileRow label="Ок" value={habits.rare?.name} />
+              <ProfileRow label={t('profile.bio')} value={p.bio} multiline />
+              <ProfileRow label={t('profile.love')} value={habits.most?.name && foodName(habits.most.name)} />
+              <ProfileRow label={t('profile.ok')} value={habits.rare?.name && foodName(habits.rare.name)} />
               <ProfileRow label="MY guilty pleasure" value={p.guiltyPleasure} />
             </div>
           ) : (
             <div className="card">
               <p className="muted" style={{ fontSize: 14 }}>
                 {isOwnProfile
-                  ? 'Пока пусто. Расскажите о себе — это первое, что видят друзья.'
-                  : 'Человек пока ничего о себе не рассказал.'}
+                  ? t('profile.selfEmptyOwn')
+                  : t('profile.selfEmptyOther')}
               </p>
             </div>
           )}
           {isOwnProfile && onEditProfile && (
             <button className="btn ghost" style={{ marginTop: 12 }} onClick={onEditProfile}>
-              Редактировать профиль
+              {t('profile.editBtn')}
             </button>
           )}
         </>
@@ -258,30 +261,30 @@ export default function UserProfileView({
       {tab === 'diet' && (
         <>
           <div className="row between" style={{ alignItems: 'center', marginBottom: 14 }}>
-            <button className="iconbtn" onClick={() => setDate(addDays(date, -1))} aria-label="Раньше">‹</button>
+            <button className="iconbtn" onClick={() => setDate(addDays(date, -1))} aria-label={t('profile.earlier')}>‹</button>
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontWeight: 620 }}>{humanDay(date, today)}</div>
               <div className="muted" style={{ fontSize: 12, textTransform: 'capitalize' }}>{humanDow(date)}</div>
             </div>
-            <button className="iconbtn" onClick={() => setDate(addDays(date, 1))} disabled={date >= today} style={{ opacity: date >= today ? 0.4 : 1 }} aria-label="Позже">›</button>
+            <button className="iconbtn" onClick={() => setDate(addDays(date, 1))} disabled={date >= today} style={{ opacity: date >= today ? 0.4 : 1 }} aria-label={t('profile.later')}>›</button>
           </div>
 
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="row gap8" style={{ justifyContent: 'space-around' }}>
-              <Stat label="ккал" v={totals.kcal} />
-              <Stat label="белки" v={totals.protein} />
-              <Stat label="угл." v={totals.carbs} />
-              <Stat label="жиры" v={totals.fat} />
+              <Stat label={t('units.kcal')} v={totals.kcal} />
+              <Stat label={t('profile.stat.protein')} v={totals.protein} />
+              <Stat label={t('profile.stat.carbs')} v={totals.carbs} />
+              <Stat label={t('profile.stat.fat')} v={totals.fat} />
             </div>
             {target > 0 && (
-              <p className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 8 }}>Цель: {target} ккал</p>
+              <p className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 8 }}>{t('profile.target', { n: target })}</p>
             )}
           </div>
 
           {dayEmpty ? (
             <div className="card">
               <p className="muted" style={{ fontSize: 14 }}>
-                {isOwnProfile ? 'В этот день вы ничего не записали.' : 'В этот день ничего не записано.'}
+                {isOwnProfile ? t('profile.dayEmptyOwn') : t('profile.dayEmptyOther')}
               </p>
             </div>
           ) : (

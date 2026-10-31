@@ -7,6 +7,7 @@ import add from './pt/add.js'
 import stats from './pt/stats.js'
 import supps from './pt/supps.js'
 import social from './pt/social.js'
+import settings from './pt/settings.js'
 
-export const strings = merge(common, auth, day, add, stats, supps, social)
+export const strings = merge(common, auth, day, add, stats, supps, social, settings)
 export const data = {}
