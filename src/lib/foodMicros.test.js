@@ -198,3 +198,30 @@ test('соль — это натрий, и его там очень много',
   const na = microsForEntry({ name: 'Соль', grams: 5, unit: 'г' }).values.na
   assert.ok(na > 1800 && na < 2100, `5 г соли — около 2000 мг натрия, а вышло ${na}`)
 })
+
+// ── Память сопоставления ──────────────────────────────────────────────────────
+
+test('повторный разбор того же продукта даёт тот же ответ, а не соседний', () => {
+  // Ответ запоминается по названию и категории. Ошибка в ключе памяти — самое
+  // коварное, что тут может случиться: «Гречка» вдруг получает профиль
+  // съеденного перед ней «Кофе», и никакой другой тест этого не заметит.
+  const first = microProfileFor({ name: 'Гречка варёная' })
+  assert.equal(first.id, 'гречка')
+  assert.equal(microProfileFor({ name: 'Гречка варёная' }), first, 'второй раз — из памяти')
+  assert.equal(microProfileFor({ name: 'ГРЕЧКА ВАРЁНАЯ' }).id, 'гречка', 'регистр и ё не важны')
+  assert.equal(microProfileFor({ name: 'Кофе' }).id, 'кофе')
+  // Категория — часть ключа: неопознанное название с разной категорией
+  // обязано получить разные профили.
+  assert.equal(microProfileFor({ name: 'Блюдо дня', cat: 'fish' }).id, 'cat:fish')
+  assert.equal(microProfileFor({ name: 'Блюдо дня', cat: 'meat' }).id, 'cat:meat')
+  assert.equal(microProfileFor({ name: 'Блюдо дня' }), null)
+})
+
+test('ответ из памяти нельзя испортить правкой на месте', () => {
+  const p = microProfileFor({ name: 'Морковь' })
+  assert.ok(Object.isFrozen(p), 'общий ответ должен быть заморожен')
+  // Значения порции пересчитываются в новый объект и не задевают профиль.
+  const a = microsForEntry({ name: 'Морковь', grams: 100, unit: 'г' }).values.vitA
+  microsForEntry({ name: 'Морковь', grams: 300, unit: 'г' }).values.vitA = 0
+  assert.equal(microsForEntry({ name: 'Морковь', grams: 100, unit: 'г' }).values.vitA, a)
+})

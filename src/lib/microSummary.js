@@ -54,6 +54,44 @@ export const STATUS = {
   UL: 'ul',       // выше верхнего допустимого уровня
 }
 
+// ── Как статус выглядит на экране ────────────────────────────────────────────
+// Общее для экрана дня и статистики: одна и та же строка не должна называться
+// «нормой» в одном месте и «почти» в другом.
+//
+// Цвет и подпись статуса. Смысл несёт ТЕКСТ, цвет только усиливает: иначе
+// человек с дальтонизмом не отличит «закрыто» от «перебора». Тот же принцип,
+// что у пилюли качества углеводов.
+const tone = (color, bar, wordKey) => ({ color, bar, get word() { return t(`micro.status.${wordKey}`) } })
+export const MICRO_TONE = {
+  [STATUS.NONE]: tone('var(--ink-3)', 'var(--track)', 'none'),
+  [STATUS.LOW]: tone('var(--ink-2)', 'var(--accent)', 'low'),
+  [STATUS.OK]: tone('var(--ink-2)', 'var(--primary)', 'almost'),
+  [STATUS.DONE]: tone('var(--good)', 'var(--good)', 'done'),
+  [STATUS.OVER]: tone('var(--warn)', 'var(--warn)', 'over'),
+  [STATUS.LIMIT]: tone('var(--warn)', 'var(--warn)', 'aboveGuide'),
+  [STATUS.UL]: tone('var(--danger)', 'var(--danger)', 'aboveUl'),
+}
+
+export const microTone = (status) => MICRO_TONE[status] || MICRO_TONE[STATUS.NONE]
+
+// Подпись статуса словом. Общей таблицы тут мало, и вот почему.
+//
+// «Почти» у кофеина 160 из 400 читается как «ещё чуть-чуть и добьёшь» — то есть
+// прямо противоположно смыслу: это предел, а не цель. У показателей «не
+// превышать» подпись может быть только про то, вышли мы за ориентир или нет.
+//
+// А у веществ без нормы вообще (карнитин, коэнзим Q10, ликопин) «почти»
+// сообщает «почти что?» — нормы у них не установлено, и сравнивать не с чем.
+// Там честнее промолчать, чем изобрести оценку.
+export function microStatusWord(row) {
+  if (row.def.kind === 'limit') {
+    if (row.status === STATUS.UL || row.status === STATUS.LIMIT) return t('micro.status.aboveGuide')
+    return row.total > 0 ? t('micro.status.within') : t('micro.status.none')
+  }
+  if (row.target == null) return row.status === STATUS.UL ? t('micro.status.aboveUl') : ''
+  return microTone(row.status).word
+}
+
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
 
 // Сколько ещё «можно» до верхнего предела. Для ulScope:'supp' считается от

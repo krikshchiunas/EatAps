@@ -4,9 +4,21 @@ import { keyOf, humanDay } from '../lib/date.js'
 import { computeStats, PERIODS, NUTRIENTS, TOL } from '../lib/stats.js'
 import { unitLabel } from '../lib/foods.js'
 import { foodName } from '../lib/foodNames.js'
+import { suppName } from '../lib/suppNames.js'
 import { t, fmtNum } from '../lib/i18n.js'
 import { useLang } from '../lib/useLang.js'
+import { computeMicroStats } from '../lib/microStats.js'
+import { formatMicro } from '../lib/micronutrients.js'
+import { microTone, microStatusWord } from '../lib/microSummary.js'
+import { stackMicroKeys } from '../lib/suppStack.js'
 import StatChart from './StatChart.jsx'
+
+// Разделы статистики. Период у них общий и при переключении не сбрасывается:
+// человек смотрит на одну и ту же неделю с двух сторон — КБЖУ и витамины.
+const SECTIONS = [
+  { key: 'food', get label() { return t('stats.micro.sectionFood') } },
+  { key: 'micro', get label() { return t('stats.micro.sectionMicro') } },
+]
 
 const fmt = (n, digits = 0) => {
   const num = Number(n)
@@ -16,7 +28,8 @@ const fmt = (n, digits = 0) => {
 }
 
 export default function StatsScreen({ onClose }) {
-  const { days, profile } = useStore()
+  const { days, profile, supplements, microGoals } = useStore()
+  const [section, setSection] = useState('food')
   const [period, setPeriod] = useState('7d')
   const today = keyOf()
   // Подписи графиков (месяцы, «неделя с…») считаются вместе со статистикой —
@@ -29,6 +42,20 @@ export default function StatsScreen({ onClose }) {
     [days, profile?.targets, period, today, lang] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
+  // Витамины считаются, только пока открыт их раздел: за год это разбор
+  // каждой записи дневника на микронутриенты, а «Питанию» он не нужен.
+  // Дни — те же, что у остальной статистики (stats.loggedKeys).
+  const micro = useMemo(
+    () => (section === 'micro' && stats.hasData
+      ? computeMicroStats(days, stats.loggedKeys, {
+        profile,
+        goals: microGoals,
+        stackKeys: stackMicroKeys(supplements),
+      })
+      : null),
+    [section, stats, days, profile, microGoals, supplements]
+  )
+
   return (
     <div className="screen">
       <div className="row between" style={{ alignItems: 'flex-start', marginBottom: 18 }}>
@@ -37,6 +64,15 @@ export default function StatsScreen({ onClose }) {
           <h1 className="h1" style={{ margin: '4px 0 0' }}>{t('stats.title')}</h1>
         </div>
         <button className="iconbtn" onClick={onClose} aria-label={t('common.close')} style={{ flex: '0 0 auto' }}>✕</button>
+      </div>
+
+      {/* Раздел: КБЖУ или витамины */}
+      <div className="seg" style={{ marginBottom: 10 }}>
+        {SECTIONS.map((s) => (
+          <button key={s.key} className={section === s.key ? 'on' : ''} aria-pressed={section === s.key} onClick={() => setSection(s.key)}>
+            {s.label}
+          </button>
+        ))}
       </div>
 
       {/* Период анализа */}
@@ -50,6 +86,8 @@ export default function StatsScreen({ onClose }) {
 
       {!stats.hasData ? (
         <EmptyState period={stats.period} />
+      ) : section === 'micro' ? (
+        <MicroSection stats={stats} micro={micro} />
       ) : (
         <>
           <DataScope stats={stats} />
@@ -64,16 +102,23 @@ export default function StatsScreen({ onClose }) {
           <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', margin: '4px 4px 0', lineHeight: 1.5 }}>
             {t('stats.scope', { n: stats.loggedDays, total: stats.totalDays })}
             {stats.sugarEstimated && ` ${t('stats.sugarNote')}`}
-            {/* Числа обязаны сходиться: если день с едой не попал в средние,
-                человек должен видеть почему, а не гадать над расхождением. */}
-            {stats.pendingLowDays > 0 && ` ${t('stats.pendingLow', { count: stats.pendingLowDays })}`}
-            {stats.excludedDays > 0 && ` ${t('stats.excludedDays', { count: stats.excludedDays })}`}
+            {skippedDaysNote(stats)}
             {stats.summary.calTargetVaried && ` ${t('stats.targetVaried')}`}
           </p>
         </>
       )}
     </div>
   )
+}
+
+// Почему в средние попали не все дни с едой. Числа обязаны сходиться: если
+// день с едой не вошёл в средние, человек должен видеть почему, а не гадать
+// над расхождением. Общая для обоих разделов — дни у них одни и те же.
+function skippedDaysNote(stats) {
+  let s = ''
+  if (stats.pendingLowDays > 0) s += ` ${t('stats.pendingLow', { count: stats.pendingLowDays })}`
+  if (stats.excludedDays > 0) s += ` ${t('stats.excludedDays', { count: stats.excludedDays })}`
+  return s
 }
 
 // ── Пустое состояние ──────────────────────────────────────────────────────────
@@ -371,5 +416,180 @@ function Collapsible({ open, children }) {
       <div className="collapse-inner">{children}</div>
     </div>
   )
+}
+
+// ── Витамины и минералы ───────────────────────────────────────────────────────
+// Тот же список, что внизу экрана дня (SupplementsCard), только каждое число —
+// среднее за день по выбранному периоду. Вид строки и слова статусов общие с
+// экраном дня: одна и та же норма не должна выглядеть по-разному в двух местах.
+// Вся арифметика — в lib/microStats.js.
+
+function pctText(value, of) {
+  const p = (value / of) * 100
+  if (p > 0 && p < 1) return t('stats.micro.lessThan1')
+  return `${fmtNum(Math.round(p))}%`
+}
+
+// Источник в «больше всего дали»: продукт — по исходному названию, добавка —
+// по suppId, как и везде в приложении.
+const sourceName = (s) => (s.supp ? suppName({ suppId: s.suppId, name: s.name }) || t('supp.title') : foodName(s.name))
+
+function MicroSection({ stats, micro }) {
+  if (!micro) return null
+  const { coverage } = micro
+  const missed = coverage.total - coverage.covered
+  return (
+    <>
+      <DataScope stats={stats} />
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="h2" style={{ fontSize: 17, marginBottom: 4 }}>{t('stats.micro.title')}</div>
+        <div className="muted" style={{ fontSize: 13, lineHeight: 1.45 }}>
+          {t('stats.micro.intro')}
+        </div>
+        {micro.total > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <span className="tabular" style={{ display: 'inline-block', fontSize: 13, fontWeight: 600, color: 'var(--ink-2)', background: 'var(--surface-2)', padding: '4px 12px', borderRadius: 'var(--r-pill)' }}>
+              {t('stats.micro.doneOf', { done: micro.done, total: micro.total })}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {micro.groups.map((g) => <MicroGroupCard key={g.key} group={g} days={micro.days} />)}
+
+      <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-3)', margin: '4px 4px 0', lineHeight: 1.5 }}>
+        {t('stats.micro.footAvg', { n: stats.loggedDays, total: stats.totalDays })}
+        {skippedDaysNote(stats)}
+        {/* Неразобранная запись — не «ноль витаминов», а пробел в данных, и
+            молчать о нём нельзя: иначе средние выглядят точнее, чем есть. */}
+        {missed > 0 && ` ${t('stats.micro.missed', { count: coverage.total, missed })}`}
+        {' '}{t('supp.disclaimer')}
+      </p>
+    </>
+  )
+}
+
+function MicroGroupCard({ group, days }) {
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div className="row between" style={{ marginBottom: 14, gap: 10 }}>
+        <span className="h2" style={{ fontSize: 17 }}>{group.emoji} {group.label}</span>
+        {group.total > 0 && (
+          <span className="tabular" style={{ fontSize: 12.5, color: 'var(--ink-3)', flex: '0 0 auto' }}>{group.done} / {group.total}</span>
+        )}
+      </div>
+      <div className="stack">
+        {group.rows.map((r) => <MicroStatRow key={r.key} row={r} days={days} />)}
+      </div>
+    </div>
+  )
+}
+
+function MicroStatRow({ row, days }) {
+  const [open, setOpen] = useState(false)
+  const tone = microTone(row.status)
+  const unit = row.def.unit
+  // Полоску рисуем только там, где есть с чем сравнивать — у вещества без
+  // нормы полная полоска читалась бы как «набрано полностью».
+  const hasBar = row.target > 0
+  const pct = hasBar ? Math.min(100, (row.total / row.target) * 100) : 0
+  // Доля еды внутри набранного: сначала еда, потом добавки — видно, чем
+  // именно закрыта норма.
+  const foodPct = row.total > 0 ? (row.fromFood / row.total) * 100 : 0
+  const word = microStatusWord(row)
+
+  return (
+    <div>
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', textAlign: 'start' }}>
+        <div className="row between" style={{ gap: 10, marginBottom: 5 }}>
+          <span style={{ fontSize: 14, fontWeight: 550, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {row.def.label}
+            {row.personal && <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500 }}> · {t('supp.myNorm')}</span>}
+          </span>
+          <span className="tabular" style={{ fontSize: 13, color: tone.color, flex: '0 0 auto', whiteSpace: 'nowrap' }}>
+            {formatMicro(row.total)}{row.target != null ? ` / ${formatMicro(row.target)}` : ''} {unitLabel(unit)}
+          </span>
+        </div>
+        {hasBar && (
+          <div style={{ height: 7, borderRadius: 5, background: 'var(--track)', overflow: 'hidden', display: 'flex' }}>
+            <div style={{ height: '100%', width: `${(pct * foodPct) / 100}%`, background: tone.bar, transition: 'width 0.4s ease' }} />
+            <div style={{ height: '100%', width: `${pct - (pct * foodPct) / 100}%`, background: tone.bar, opacity: 0.45, transition: 'width 0.4s ease' }} />
+          </div>
+        )}
+        <div className="row between" style={{ marginTop: 4, gap: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {row.fromFood > 0 && t('supp.fromFood', { n: formatMicro(row.fromFood) })}
+            {row.fromFood > 0 && row.fromSupp > 0 && ' · '}
+            {row.fromSupp > 0 && t('supp.fromSupps', { n: formatMicro(row.fromSupp) })}
+          </span>
+          {word && <span style={{ fontSize: 11, color: tone.color, flex: '0 0 auto' }}>{word}</span>}
+        </div>
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)' }}>
+          {row.def.about && (
+            <p style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5, margin: '0 0 10px' }}>{row.def.about}</p>
+          )}
+          <p style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5, margin: row.sources.length ? '0 0 10px' : 0 }}>
+            {microDetailsText(row, days)}
+          </p>
+          {row.sources.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>{t('supp.topSources')}</div>
+              {row.sources.map((s) => (
+                <div key={(s.supp ? 's:' : 'f:') + s.name} className="row between" style={{ fontSize: 12.5, padding: '2px 0', gap: 10 }}>
+                  <span style={{ color: 'var(--ink-2)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.emoji} {sourceName(s)}</span>
+                  <span className="tabular" style={{ color: 'var(--ink-3)', flex: '0 0 auto' }}>{pctText(s.share, 1)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Пояснение к строке словами. Среднее и «сколько дней» — вместе: среднее
+// прячет режим (печень раз в неделю даёт «норму» витамина A при шести пустых
+// днях), а счёт дней без среднего не говорит, сколько всего набралось.
+function microDetailsText(row, days) {
+  const f = (v) => formatMicro(v, row.def.unit)
+  // За один день «норма закрыта в 1 из 1» — не новость, а повтор среднего.
+  const many = days > 1
+  const avg = row.total > 0 ? t('stats.micro.avgPerDay', { v: f(row.total) }) : t('stats.micro.none')
+  const out = []
+
+  if (row.def.kind === 'limit' && row.target != null) {
+    out.push(t('stats.micro.limitGuide', { v: f(row.target) }), `${avg}.`)
+    if (many && row.daysOver > 0) out.push(t('stats.micro.daysOver', { n: row.daysOver, count: days }))
+  } else if (row.target != null) {
+    if (row.total > 0) {
+      const pct = pctText(row.total, row.target)
+      out.push(t(row.personal ? 'stats.micro.pctOfMyNorm' : 'stats.micro.pctOfNorm', { avg, pct, v: f(row.target) }))
+      if (many) {
+        out.push(row.daysDone > 0
+          ? t('stats.micro.daysDone', { n: row.daysDone, count: days })
+          : t('stats.micro.noneDone'))
+      }
+    } else {
+      out.push(t(row.personal ? 'stats.micro.myNormIs' : 'stats.micro.normIs', { avg, v: f(row.target) }))
+    }
+  } else {
+    out.push(`${avg}.`)
+    if (many && row.daysWith > 0 && row.daysWith < days) out.push(t('stats.micro.daysWith', { n: row.daysWith, count: days }))
+    out.push(t('stats.micro.noNorm'))
+  }
+
+  if (row.ul != null) {
+    out.push(row.ulScope === 'supp'
+      ? (row.fromSupp > 0
+        ? t('stats.micro.ulSuppWith', { ul: f(row.ul), v: f(row.fromSupp) })
+        : t('stats.micro.ulSupp', { ul: f(row.ul) }))
+      : t('stats.micro.ul', { ul: f(row.ul) }))
+  }
+  return out.join(' ')
 }
 

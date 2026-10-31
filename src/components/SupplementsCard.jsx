@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { buildMicroSummary, STATUS } from '../lib/microSummary.js'
+import { buildMicroSummary, microTone, microStatusWord } from '../lib/microSummary.js'
 import { formatMicro } from '../lib/micronutrients.js'
 import { topSourcesFor } from '../lib/foodMicros.js'
 import { doseLabel, scaleProvides, suppUnitWord } from '../lib/supplements.js'
@@ -26,36 +26,9 @@ import { t } from '../lib/i18n.js'
 // поводу. Свёрнутое состояние показывает ровно то, что требует внимания.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Цвет и подпись статуса. Смысл несёт ТЕКСТ, цвет только усиливает: иначе
-// человек с дальтонизмом не отличит «закрыто» от «перебора». Тот же принцип,
-// что у пилюли качества углеводов.
-const TONE = {
-  [STATUS.NONE]: { color: 'var(--ink-3)', bar: 'var(--track)', word: 'micro.status.none' },
-  [STATUS.LOW]: { color: 'var(--ink-2)', bar: 'var(--accent)', word: 'micro.status.low' },
-  [STATUS.OK]: { color: 'var(--ink-2)', bar: 'var(--primary)', word: 'micro.status.almost' },
-  [STATUS.DONE]: { color: 'var(--good)', bar: 'var(--good)', word: 'micro.status.done' },
-  [STATUS.OVER]: { color: 'var(--warn)', bar: 'var(--warn)', word: 'micro.status.over' },
-  [STATUS.LIMIT]: { color: 'var(--warn)', bar: 'var(--warn)', word: 'micro.status.aboveGuide' },
-  [STATUS.UL]: { color: 'var(--danger)', bar: 'var(--danger)', word: 'micro.status.aboveUl' },
-}
-
-// Подпись статуса словом. Общей таблицы тут мало, и вот почему.
-//
-// «Почти» у кофеина 160 из 400 читается как «ещё чуть-чуть и добьёшь» — то есть
-// прямо противоположно смыслу: это предел, а не цель. У показателей «не
-// превышать» подпись может быть только про то, вышли мы за ориентир или нет.
-//
-// А у веществ без нормы вообще (карнитин, коэнзим Q10, ликопин) «почти»
-// сообщает «почти что?» — нормы у них не установлено, и сравнивать не с чем.
-// Там честнее промолчать, чем изобрести оценку.
-function statusWord(row) {
-  if (row.def.kind === 'limit') {
-    if (row.status === STATUS.UL || row.status === STATUS.LIMIT) return t('micro.status.aboveGuide')
-    return row.total > 0 ? t('micro.status.within') : t('micro.status.none')
-  }
-  if (row.target == null) return row.status === STATUS.UL ? t('micro.status.aboveUl') : ''
-  return t((TONE[row.status] || TONE[STATUS.NONE]).word)
-}
+// Цвет и подпись статуса (microTone, microStatusWord) живут в microSummary.js:
+// ими же подписан раздел витаминов в статистике, и одна и та же строка не
+// должна называться по-разному в двух местах.
 
 export default function SupplementsCard({
   date, day, profile, supplements = [], microGoals = {},
@@ -321,7 +294,7 @@ function MicroGroup({ group, meals, onOpenGoal }) {
 
 function MicroRow({ row, meals, onOpenGoal }) {
   const [open, setOpen] = useState(false)
-  const tone = TONE[row.status] || TONE[STATUS.NONE]
+  const tone = microTone(row.status)
   const unit = row.def.unit
 
   // Полоску рисуем ТОЛЬКО там, где есть с чем сравнивать. Раньше строка без
@@ -363,7 +336,7 @@ function MicroRow({ row, meals, onOpenGoal }) {
             {row.fromFood > 0 && row.fromSupp > 0 && ' · '}
             {row.fromSupp > 0 && t('supp.fromSupps', { n: formatMicro(row.fromSupp) })}
           </span>
-          <span style={{ fontSize: 11, color: tone.color, flex: '0 0 auto' }}>{statusWord(row)}</span>
+          <span style={{ fontSize: 11, color: tone.color, flex: '0 0 auto' }}>{microStatusWord(row)}</span>
         </div>
       </button>
 

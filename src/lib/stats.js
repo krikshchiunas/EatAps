@@ -721,6 +721,10 @@ export function computeStats(days, profile, periodKey, today = keyOf()) {
   return {
     period,
     keys,
+    // Сами учтённые дни, а не только их число: по ним же считает средние
+    // раздел витаминов (microStats.js). Отдельный подсчёт там рано или поздно
+    // разошёлся бы с «заполнено X из Y» наверху экрана.
+    loggedKeys,
     loggedDays,
     totalDays: keys.length,
     totalMeals: products.totalMeals,
