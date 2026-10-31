@@ -7,7 +7,7 @@
 //   • «натрий надо не добирать, а не превышать».
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildMicroSummary, microRow, previewSupplement, STATUS } from './microSummary.js'
+import { buildMicroSummary, microRow, previewSupplement, STATUS, MICRO_TONE, microTone, microStatusWord } from './microSummary.js'
 import { microDef } from './micronutrients.js'
 
 const M = { sex: 'male', age: 30 }
@@ -252,4 +252,30 @@ test('прикидка молчит про то, чего в добавке не
   const summary = buildMicroSummary({ profile: M })
   const preview = previewSupplement(summary, { vitC: 0, выдумка: 100 })
   assert.deepEqual(preview, [])
+})
+
+// ── Подпись статуса ───────────────────────────────────────────────────────────
+// Общая для экрана дня и статистики: одна строка — одно слово в обоих местах.
+
+test('у каждого статуса есть цвет, полоска и слово', () => {
+  for (const s of Object.values(STATUS)) {
+    const t = MICRO_TONE[s]
+    assert.ok(t, `нет оформления для статуса ${s}`)
+    assert.ok(t.color.startsWith('var(--') && t.bar.startsWith('var(--'), `${s}: цвет мимо палитры`)
+    assert.ok(t.word, `${s}: нет подписи`)
+  }
+  assert.equal(microTone('выдумка'), MICRO_TONE[STATUS.NONE], 'неизвестный статус рисуется как «нет»')
+})
+
+test('подпись словом: у «не превышать» нет «почти», у вещества без нормы — молчание', () => {
+  const word = (key, food, target) => microStatusWord(microRow(microDef(key), { food, supp: 0, target }))
+  assert.equal(word('vitC', 50, 90), 'мало')
+  assert.equal(word('vitC', 80, 90), 'почти')
+  assert.equal(word('vitC', 95, 90), 'норма')
+  // Натрий ниже ориентира — это не «почти добрал», а «в пределах».
+  assert.equal(word('na', 1500, 2000), 'в пределах')
+  assert.equal(word('na', 2500, 2000), 'выше ориентира')
+  assert.equal(word('na', 0, 2000), 'нет')
+  // Нормы у карнитина нет — «почти» здесь значило бы «почти что?».
+  assert.equal(word('carnitine', 120, null), '')
 })

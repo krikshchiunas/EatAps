@@ -658,19 +658,42 @@ function stemHit(words, norm, stem) {
   return words.some((w) => w.startsWith(stem))
 }
 
-export function microProfileFor(food) {
+function matchProfile(food) {
   const norm = nrm(food?.name)
   const words = wordsOf(food?.name)
   if (words.length) {
     for (const [id, stems, per100] of PROFILES) {
       if (stems.some((s) => stemHit(words, norm, s))) {
-        return { id, per100, confidence: 'estimated' }
+        return Object.freeze({ id, per100, confidence: 'estimated' })
       }
     }
   }
   const cat = food?.cat
-  if (cat && BY_CAT[cat]) return { id: 'cat:' + cat, per100: BY_CAT[cat], confidence: 'category' }
+  if (cat && BY_CAT[cat]) return Object.freeze({ id: 'cat:' + cat, per100: BY_CAT[cat], confidence: 'category' })
   return null
+}
+
+// Сопоставление — самая дорогая часть разбора: сотни основ слов на каждую
+// запись. А дневник состоит из повторов — та же гречка, тот же кофе, — и
+// раздел витаминов в статистике разбирает его за год целиком: без памяти это
+// десятые доли секунды на телефоне при каждом переключении периода.
+//
+// Ответ зависит только от названия (после nrm) и категории, а таблицы выше
+// неизменны, поэтому его можно запомнить навсегда. Ответ заморожен: он общий
+// для всех, кто спросил, и правка «на месте» испортила бы его остальным.
+// Размер ограничен на случай тысяч разных сканированных товаров — тогда память
+// просто начинается заново, а не растёт без предела.
+const PROFILE_CACHE_LIMIT = 4000
+const profileCache = new Map()
+
+export function microProfileFor(food) {
+  const key = `${nrm(food?.name)}\u0001${food?.cat ?? ''}`
+  const hit = profileCache.get(key)
+  if (hit !== undefined) return hit
+  const found = matchProfile(food)
+  if (profileCache.size >= PROFILE_CACHE_LIMIT) profileCache.clear()
+  profileCache.set(key, found)
+  return found
 }
 
 // ── Масса порции ─────────────────────────────────────────────────────────────
