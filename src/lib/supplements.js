@@ -30,6 +30,7 @@ import { MICRO_BY_KEY } from './micronutrients.js'
 import { rankedSearch } from './fuzzy.js'
 import { normalizeQuery, formatAmount } from './foods.js'
 import { t } from './i18n.js'
+import { suppName } from './suppNames.js'
 
 // Подпись группы — из словаря (supp.group.<ключ>) в момент показа.
 const group = (key, emoji) => ({ key, emoji, get label() { return t(`supp.group.${key}`) } })
@@ -448,8 +449,12 @@ export function supplementById(id) {
 // ── Поиск ────────────────────────────────────────────────────────────────────
 // Тот же механизм, что у продуктов: нормализация, синонимы, опечатки. Человек
 // ищет «ашвагандха» и «ashwagandha», «д3» и «витамин д» — и должен находить.
-const searchText = (s) => normalizeQuery(`${s.name} ${s.alias}`)
-const searchName = (s) => normalizeQuery(s.name)
+// Перевод названия на язык интерфейса тоже в поиске: «Baldrian», «حديد».
+const searchText = (s) => {
+  const shown = suppName(s)
+  return normalizeQuery(`${s.name} ${s.alias}${shown !== s.name ? ' ' + shown : ''}`)
+}
+const searchName = (s) => normalizeQuery(suppName(s))
 
 // Что люди спрашивают чаще всего. Надбавка работает ТОЛЬКО внутри тира
 // релевантности (см. MEMORY_BOOST_MAX в fuzzy.js) и не может перетащить

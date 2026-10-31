@@ -70,3 +70,25 @@ test('нормализация запроса не теряет турецкие
   assert.equal(normalizeQuery('أَرُزّ'), 'ارز', 'огласовки и хамза над алифом уходят')
   assert.equal(normalizeQuery('سلطة ١٢٠'), 'سلطه 120', 'арабские цифры — обычные, «ة» → «ه»')
 })
+
+test('у каждой добавки и каждого микронутриента есть перевод', async () => {
+  const { SUPPLEMENTS, searchSupplements } = await import('./supplements.js')
+  const { MICRONUTRIENTS } = await import('./micronutrients.js')
+  const { suppName, suppNote, suppWarn } = await import('./suppNames.js')
+  for (const code of OTHERS) {
+    await setLang(code, { persist: false })
+    const bad = []
+    for (const s of SUPPLEMENTS) {
+      for (const [field, text] of [['name', suppName(s)], ['note', suppNote(s)], ['warn', suppWarn(s)]]) {
+        if (CYR.test(text)) bad.push(`${s.id}.${field}`)
+      }
+    }
+    for (const m of MICRONUTRIENTS) {
+      for (const field of ['label', 'short', 'about']) if (CYR.test(m[field] || '')) bad.push(`${m.key}.${field}`)
+    }
+    assert.deepEqual(bad, [], `${code}: покажется по-русски:\n${bad.join('\n')}`)
+  }
+  await setLang('de', { persist: false })
+  assert.equal(searchSupplements('baldrian')[0]?.id, 'valerian', 'поиск добавки по немецкому названию')
+  await setLang(SOURCE_LANG, { persist: false })
+})

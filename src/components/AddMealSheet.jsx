@@ -1245,7 +1245,7 @@ function AlcoholSection({ subTab, setSubTab, alcQuery, setAlcQuery, onPick }) {
   const nq = norm(alcQuery)
 
   const filteredCocktails = nq
-    ? COCKTAILS.filter((c) => norm(c.name).includes(nq) || (c.nameEn || '').toLowerCase().includes(nq))
+    ? COCKTAILS.filter((c) => norm(c.name).includes(nq) || norm(c.nameEn || '').includes(nq) || norm(foodName(c.name)).includes(nq))
     : COCKTAILS
 
   return (
@@ -1265,7 +1265,7 @@ function AlcoholSection({ subTab, setSubTab, alcQuery, setAlcQuery, onPick }) {
                 onClick={() => onPick({ ...b, category: 'beer', emoji: b.na ? '🫗' : '🍺', defaultMl: 330 })}>
                 <span className="meal-emoji">{b.na ? '🫗' : '🍺'}</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <span className="meal-name" style={{ display: 'block' }}>{b.name}{b.na ? ` ${t('add.nonAlc')}` : ''}</span>
+                  <span className="meal-name" style={{ display: 'block' }}>{foodName(b.name)}{b.na ? ` ${t('add.nonAlc')}` : ''}</span>
                   <span className="meal-meta">{b.alc}% · {t('add.kcalPer100ml', { n: b.kcal100 })}</span>
                 </span>
                 <span style={{ color: 'var(--primary)', fontSize: 20 }}>›</span>
@@ -1286,7 +1286,7 @@ function AlcoholSection({ subTab, setSubTab, alcQuery, setAlcQuery, onPick }) {
                     onClick={() => onPick({ name: brand, category: 'spirit', spiritLabel: st.label, emoji: st.emoji, defaultAlc: st.defaultAlc, defaultMl: 50 })}>
                     <span className="meal-emoji">{st.emoji}</span>
                     <span style={{ flex: 1, minWidth: 0 }}>
-                      <span className="meal-name" style={{ display: 'block' }}>{brand}</span>
+                      <span className="meal-name" style={{ display: 'block' }}>{foodName(brand)}</span>
                       <span className="meal-meta">{t('add.spiritMeta', { label: alcLabel(st.label), n: st.defaultAlc })}</span>
                     </span>
                     <span style={{ color: 'var(--primary)', fontSize: 20 }}>›</span>
@@ -1317,7 +1317,8 @@ function AlcoholSection({ subTab, setSubTab, alcQuery, setAlcQuery, onPick }) {
                 <span className="meal-emoji">{c.emoji}</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span className="meal-name" style={{ display: 'block' }}>{foodName(c.name)}</span>
-                  <span className="meal-meta">{c.nameEn} · {c.alc}% · {t('add.kcalPer100ml', { n: c.kcal100 })}</span>
+                  {/* Международное название — подсказкой, только если строкой выше стоит другое. */}
+                  <span className="meal-meta">{c.nameEn && c.nameEn !== foodName(c.name) ? `${c.nameEn} · ` : ''}{c.alc}% · {t('add.kcalPer100ml', { n: c.kcal100 })}</span>
                 </span>
                 <span style={{ color: 'var(--primary)', fontSize: 20 }}>›</span>
               </button>
