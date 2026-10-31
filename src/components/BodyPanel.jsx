@@ -232,7 +232,7 @@ function KV({ k, v }) {
   return (
     <div className="row between" style={{ fontSize: 13.5, padding: '5px 0', gap: 12 }}>
       <span style={{ color: 'var(--ink-2)' }}>{k}</span>
-      <span className="tabular" style={{ color: 'var(--ink)', fontWeight: 550, textAlign: 'right' }}>{v}</span>
+      <span className="tabular" style={{ color: 'var(--ink)', fontWeight: 550, textAlign: 'end' }}>{v}</span>
     </div>
   )
 }

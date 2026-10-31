@@ -149,7 +149,7 @@ function Check({ checked, onChange, children }) {
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       style={{
-        display: 'flex', gap: 12, alignItems: 'flex-start', width: '100%', textAlign: 'left',
+        display: 'flex', gap: 12, alignItems: 'flex-start', width: '100%', textAlign: 'start',
         background: 'none', border: 'none', padding: '10px 2px', color: 'inherit', cursor: 'pointer',
       }}
     >

@@ -34,6 +34,39 @@
         var shown = false;
         var reason = '';
 
+        // Язык экрана: выбранный в приложении, у старой установки — русский,
+        // иначе язык браузера. Словарь свой и крошечный: основной бандл с
+        // переводами как раз и не загрузился. Порядок фраз: заголовок, текст,
+        // выделенное, хвост, кнопка, подсказка, «с главного экрана», причины.
+        var TEXT = {
+          ru: ['EatAps не запустился', 'Скорее всего на устройстве осталась старая версия приложения. Кнопка ниже очистит её и загрузит свежую. ', 'Ваши записи о питании не удалятся', ' — они сохранены отдельно.', 'Обновить приложение', 'Если не помогло — покажите эту строку разработчику.', 'с главного экрана', 'не загрузился ', 'сбой при запуске: ', 'приложение не отрисовалось за 12 секунд'],
+          en: ['EatAps didn’t start', 'Most likely an old version of the app is still on your device. The button below clears it and loads a fresh one. ', 'Your food entries won’t be deleted', ' — they’re stored separately.', 'Update the app', 'If that didn’t help, show this line to the developer.', 'from the Home Screen', 'failed to load ', 'startup error: ', 'the app didn’t render within 12 seconds'],
+          de: ['EatAps ist nicht gestartet', 'Wahrscheinlich ist noch eine alte Version der App auf dem Gerät. Der Button unten löscht sie und lädt eine neue. ', 'Deine Ernährungseinträge werden nicht gelöscht', ' – sie sind separat gespeichert.', 'App aktualisieren', 'Wenn das nicht hilft, zeig diese Zeile dem Entwickler.', 'vom Home-Bildschirm', 'nicht geladen: ', 'Fehler beim Start: ', 'die App wurde in 12 Sekunden nicht angezeigt'],
+          es: ['EatAps no se ha iniciado', 'Lo más probable es que en el dispositivo haya quedado una versión antigua de la app. El botón de abajo la borra y carga una nueva. ', 'Tus registros de comida no se borrarán', ': se guardan aparte.', 'Actualizar la app', 'Si no funciona, enséñale esta línea al desarrollador.', 'desde la pantalla de inicio', 'no se cargó ', 'error al iniciar: ', 'la app no se mostró en 12 segundos'],
+          pt: ['O EatAps não iniciou', 'Provavelmente ficou uma versão antiga do app no aparelho. O botão abaixo a remove e carrega uma nova. ', 'Seus registros alimentares não serão apagados', ' — eles ficam salvos à parte.', 'Atualizar o app', 'Se não ajudar, mostre esta linha ao desenvolvedor.', 'da tela de início', 'não carregou ', 'falha ao iniciar: ', 'o app não apareceu em 12 segundos'],
+          tr: ['EatAps açılmadı', 'Büyük olasılıkla cihazda uygulamanın eski bir sürümü kaldı. Aşağıdaki düğme onu temizleyip yenisini yükler. ', 'Beslenme kayıtların silinmez', ' — onlar ayrı saklanıyor.', 'Uygulamayı güncelle', 'İşe yaramazsa bu satırı geliştiriciye göster.', 'ana ekrandan', 'yüklenemedi: ', 'başlatma hatası: ', 'uygulama 12 saniye içinde görüntülenmedi'],
+          ar: ['لم يبدأ EatAps', 'على الأرجح بقيت على الجهاز نسخة قديمة من التطبيق. سيحذفها الزر أدناه ويحمّل نسخة جديدة. ', 'لن تُحذف سجلات طعامك', ' — فهي محفوظة بشكل منفصل.', 'تحديث التطبيق', 'إن لم ينفع ذلك، فأرِ هذا السطر للمطوّر.', 'من الشاشة الرئيسية', 'لم يُحمّل ', 'خطأ عند البدء: ', 'لم يظهر التطبيق خلال 12 ثانية']
+        };
+        var lang = (function () {
+          var code = '';
+          try {
+            code = localStorage.getItem('eataps:lang') || '';
+            if (!TEXT[code]) {
+              for (var i = 0; i < localStorage.length; i++) {
+                var k = localStorage.key(i) || '';
+                if (k === 'eataps:v1' || k.indexOf('eataps:state') === 0) { code = 'ru'; break; }
+              }
+            }
+          } catch (e) {}
+          if (!TEXT[code]) code = String(navigator.language || '').slice(0, 2).toLowerCase();
+          return TEXT[code] ? code : 'en';
+        })();
+        var L = TEXT[lang];
+        // Ставим язык и направление сразу: арабский интерфейс не должен
+        // мигнуть зеркально перевёрнутым, пока грузится приложение.
+        document.documentElement.lang = lang;
+        document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+
         function mounted() {
           var r = document.getElementById('root');
           return !!(r && r.firstChild);
@@ -48,7 +81,7 @@
         function device() {
           var m = navigator.userAgent.match(/OS (\d+)[._](\d+)/);
           var std = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
-          return (m ? 'iOS ' + m[1] + '.' + m[2] : '') + (std ? ' · с главного экрана' : '');
+          return (m ? 'iOS ' + m[1] + '.' + m[2] : '') + (std ? ' · ' + L[6] : '');
         }
 
         function recover() {
@@ -80,12 +113,11 @@
           shown = true;
           root.innerHTML =
             '<div style="max-width:420px;margin:0 auto;padding:14vh 24px 24px;font:16px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;color:#1F312B">' +
-              '<div style="font-size:22px;font-weight:700;letter-spacing:-0.4px;margin-bottom:10px">EatAps не запустился</div>' +
-              '<p style="color:#566B63;margin:0 0 22px">Скорее всего на устройстве осталась старая версия приложения. ' +
-              'Кнопка ниже очистит её и загрузит свежую. <b>Ваши записи о питании не удалятся</b> — они сохранены отдельно.</p>' +
-              '<button id="eataps-recover" style="width:100%;padding:15px;border:0;border-radius:16px;background:#4F8375;color:#fff;font-size:17px;font-weight:600;font-family:inherit">Обновить приложение</button>' +
-              '<p style="margin:18px 0 0;font-size:12px;color:#8A9C94;word-break:break-word">' + esc(reason) + (device() ? ' · ' + device() : '') + '</p>' +
-              '<p style="margin:8px 0 0;font-size:12px;color:#8A9C94">Если не помогло — покажите эту строку разработчику.</p>' +
+              '<div style="font-size:22px;font-weight:700;letter-spacing:-0.4px;margin-bottom:10px">' + L[0] + '</div>' +
+              '<p style="color:#566B63;margin:0 0 22px">' + L[1] + '<b>' + L[2] + '</b>' + L[3] + '</p>' +
+              '<button id="eataps-recover" style="width:100%;padding:15px;border:0;border-radius:16px;background:#4F8375;color:#fff;font-size:17px;font-weight:600;font-family:inherit">' + L[4] + '</button>' +
+              '<p dir="ltr" style="margin:18px 0 0;font-size:12px;color:#8A9C94;word-break:break-word">' + esc(reason) + (device() ? ' · ' + device() : '') + '</p>' +
+              '<p style="margin:8px 0 0;font-size:12px;color:#8A9C94">' + L[5] + '</p>' +
             '</div>';
           var b = document.getElementById('eataps-recover');
           if (b) b.onclick = recover;
@@ -95,7 +127,7 @@
         window.addEventListener('error', function (e) {
           var t = e && e.target;
           if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
-            reason = 'не загрузился ' + (t.src || t.href || 'файл приложения');
+            reason = L[7] + (t.src || t.href || 'app file');
             show();
           } else if (e && e.message) {
             // Ошибка выполнения: запоминаем и проверяем чуть позже — приложение
@@ -107,13 +139,13 @@
 
         window.addEventListener('unhandledrejection', function (e) {
           var r = e && e.reason;
-          if (!reason) reason = 'сбой при запуске: ' + ((r && r.message) || r || '');
+          if (!reason) reason = L[8] + ((r && r.message) || r || '');
         });
 
         // Ничего не упало, но и не отрисовалось — например, браузер не понимает
         // <script type="module"> и просто его пропустил.
         setTimeout(function () {
-          if (!reason) reason = 'приложение не отрисовалось за 12 секунд';
+          if (!reason) reason = L[9];
           show();
         }, 12000);
       })();

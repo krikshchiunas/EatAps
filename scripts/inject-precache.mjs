@@ -2,8 +2,8 @@
 // (entry-скрипт + modulepreload + css из index.html), чтобы service worker
 // закэшировал их при install и приложение открывалось офлайн с первого раза.
 // Ленивые чанки (AppKit/Web3) сюда НЕ попадают — они онлайновые и кэшируются
-// по факту обращения.
-import { readFileSync, writeFileSync } from 'node:fs'
+// по факту обращения. Исключение — языковые чанки, см. ниже.
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const dist = resolve(process.cwd(), 'dist')
@@ -14,6 +14,15 @@ const assets = new Set()
 const re = /(?:src|href)="(\/assets\/[^"]+\.(?:js|css))"/g
 let m
 while ((m = re.exec(html))) assets.add(m[1])
+
+// Языковые чанки (en-*.js, de-*.js, …) тоже в предзагрузку, хоть они и ленивые:
+// словарь грузится ДО первого рендера. Без этого человек с немецким
+// интерфейсом, открывший обновлённое приложение без сети, увидел бы его
+// по-русски — нового чанка его языка ещё нет в кэше.
+const LANG_CHUNK = /^(?:en|de|es|pt|tr|ar)-[\w-]+\.js$/
+for (const f of readdirSync(resolve(dist, 'assets'))) {
+  if (LANG_CHUNK.test(f)) assets.add(`/assets/${f}`)
+}
 
 // Убираем crossorigin у same-origin модульных скриптов/preload: закэшированный
 // service worker'ом crossorigin-модуль может не исполниться офлайн (пустой экран).

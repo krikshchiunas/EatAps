@@ -1,6 +1,6 @@
 import { barcodeVariants } from './barcode.js'
 import { rankedSearch } from './fuzzy.js'
-import { t, fmtNum } from './i18n.js'
+import { t, fmtNum, getLang, SOURCE_LANG } from './i18n.js'
 import { foodName } from './foodNames.js'
 
 // Подписи — геттерами: справочник живёт весь сеанс, а язык может смениться.
@@ -1725,8 +1725,11 @@ export { unitLabel } from './units.js'
 //
 // Неизвестное показываем прочерком, а не нулём и не пустотой. Пустота — это
 // как раз то, что получалось раньше: в дневнике висела буква «Ж» без числа.
+// В русской строке БЖУ дробная часть исторически через точку («Б7.5»), и тесты
+// это закрепляют; в остальных языках — свой разделитель («P7,5» по-испански).
 export function macroLabel(m) {
-  const v = (x) => (x == null || !Number.isFinite(+x) ? '—' : +(+x).toFixed(1))
+  const num = (n) => (getLang() === SOURCE_LANG ? n : fmtNum(n, { maximumFractionDigits: 1, useGrouping: false }))
+  const v = (x) => (x == null || !Number.isFinite(+x) ? '—' : num(+(+x).toFixed(1)))
   return t('macro.line', { p: v(m?.protein), c: v(m?.carbs), f: v(m?.fat) })
 }
 

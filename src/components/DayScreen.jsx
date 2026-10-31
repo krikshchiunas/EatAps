@@ -1,6 +1,6 @@
 import { macroLabel, amountLabel } from '../lib/foods.js'
 import { foodName } from '../lib/foodNames.js'
-import { t } from '../lib/i18n.js'
+import { t, isRtl } from '../lib/i18n.js'
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
@@ -78,6 +78,10 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     mealsToday: (day.meals || []).length,
   }), [days, day.meals])
   const canNext = date <= today // вперёд не дальше завтрашнего дня
+  // В арабском время идёт справа налево: завтрашний день лежит слева, и листают
+  // к нему свайпом вправо. Трек при этом остаётся LTR (так считается сдвиг),
+  // а зеркалятся порядок страниц и знак жеста.
+  const rtl = isRtl()
 
   // ── Интерактивный пейджер: трек из 3 страниц, центр = текущий день ──────────
   const viewportRef = useRef(null)
@@ -141,7 +145,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
     if (dir === 1 && !canNext) { settle(currentX(), base(), 1); return }
     if (dir === 0) { settle(currentX(), base(), Math.max(Math.abs(vel), 1)); return }
     animating.current = true
-    const target = base() + (dir === 1 ? -vw() : vw())
+    const target = base() + ((dir === 1) !== rtl ? -vw() : vw())
     settle(currentX(), target, vel, () => {
       // Меняем дату ПОСЛЕ доводки. useLayoutEffect вернёт трек в центр
       // до перерисовки — новая страница совпадает со старой соседней → без прыжка.
@@ -194,7 +198,8 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
         g.lastX = t.clientX; g.lastT = e.timeStamp
         // Сопротивление на «запретной» границе (будущее).
         let x = g.base + dx
-        if (!canNext && x < base()) x = base() + (x - base()) * 0.28
+        const towardNext = rtl ? x > base() : x < base()
+        if (!canNext && towardNext) x = base() + (x - base()) * 0.28
         trackRef.current.style.transform = `translate3d(${x}px,0,0)`
       }
     }
@@ -209,6 +214,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
       let dir = 0
       if (v < -0.35 || moved < -w * 0.32) dir = 1       // ушли влево → следующий
       else if (v > 0.35 || moved > w * 0.32) dir = -1   // ушли вправо → предыдущий
+      if (rtl) dir = -dir
       go(dir, Math.max(Math.abs(v), 1))
     }
 
@@ -222,7 +228,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
       el.removeEventListener('touchend', onEnd)
       el.removeEventListener('touchcancel', onEnd)
     }
-  }, [canNext])
+  }, [canNext, rtl])
 
   // ── Приёмы пищи: создание/редактирование секций ─────────────────────────────
   const openCreateSection = () => setSectionSheet({ mode: 'create' })
@@ -302,7 +308,7 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
             {dayMenuOpen && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 19 }} onClick={() => setDayMenuOpen(false)} />
-                <div className="friend-menu" style={{ minWidth: 250, right: 0 }}>
+                <div className="friend-menu" style={{ minWidth: 250, insetInlineEnd: 0 }}>
                   {prevHasMeals && (
                     <button onClick={() => { const n = repeatDay(prevDate, date); setDayMenuOpen(false); setToast(n ? t('day.copied', { list: t('count.products', { count: n }) }) : t('day.nothingToCopy')) }}>
                       ♻️ {date === today ? t('day.repeatYesterday') : t('day.repeatPrevious')}
@@ -326,9 +332,9 @@ export default function DayScreen({ date, setDate, onOpenAdd, onOpenCalendar, on
       {/* Пейджер: 3 страницы, центр — текущий день */}
       <div className="day-pager" ref={viewportRef}>
         <div className="day-track" ref={trackRef}>
-          <div className="day-page" aria-hidden="true"><DayBody date={prevDate} interactive={false} {...bodyProps} /></div>
+          <div className="day-page" aria-hidden="true"><DayBody date={rtl ? nextDate : prevDate} interactive={false} {...bodyProps} /></div>
           <div className="day-page"><DayBody date={date} interactive {...bodyProps} /></div>
-          <div className="day-page" aria-hidden="true"><DayBody date={nextDate} interactive={false} {...bodyProps} /></div>
+          <div className="day-page" aria-hidden="true"><DayBody date={rtl ? prevDate : nextDate} interactive={false} {...bodyProps} /></div>
         </div>
       </div>
 
