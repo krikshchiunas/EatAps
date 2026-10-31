@@ -1007,7 +1007,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                       onClick={() => setMethod(m)}
                       style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '8px 14px', lineHeight: 1.25 }}
                     >
-                      <span style={{ fontSize: 15 }}>{methodLabel(m.label)}</span>
+                      <span style={{ fontSize: 15 }}>{methodLabel(m.label, selected.name)}</span>
                       <span style={{ fontSize: 11, opacity: 0.75 }} className="tabular">{t('units.kcalN', { n: m.kcal })}</span>
                     </button>
                   ))}

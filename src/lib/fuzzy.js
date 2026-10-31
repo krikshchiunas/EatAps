@@ -85,7 +85,8 @@ export function fuzzyWordDistance(word, term) {
   return d <= max ? d : null
 }
 
-const splitWords = (text) => text.split(/[^0-9a-zа-я%]+/i).filter(Boolean)
+// Арабские буквы — тоже части слова: normalizeQuery их оставляет.
+const splitWords = (text) => text.split(/[^0-9a-zа-я\u0621-\u064A%]+/i).filter(Boolean)
 
 // ── Редукция безударных гласных ──────────────────────────────────────────────
 // Самая частая русская опечатка — не случайный промах по клавише, а письмо

@@ -1,6 +1,7 @@
 import { barcodeVariants } from './barcode.js'
 import { rankedSearch } from './fuzzy.js'
 import { t, fmtNum } from './i18n.js'
+import { foodName } from './foodNames.js'
 
 // Подписи — геттерами: справочник живёт весь сеанс, а язык может смениться.
 export const MEAL_TYPES = [
@@ -1022,16 +1023,30 @@ export function scale(food, grams) {
 //   • снятие латинских диакритик: Müsli → musli, café → cafe;
 //   • пунктуация и дефисы → пробел, повторные пробелы схлопываются.
 // Цифры и «%» остаются: «молоко 3.2%» — осмысленный запрос.
+//
+// Буквы, которые снятие диакритик не трогает, сводятся вручную: турецкая
+// «ı» → i, немецкая «ß» → ss, «œ» → oe. В арабском убираются огласовки и
+// татвиль, а варианты алифа, «ى» и «ة» приводятся к одной форме — так пишут
+// в поиске, и так совпадёт с базой. Арабские цифры становятся обычными.
 const DIACRITICS = /[̀-ͯ]/g
+const ARABIC_MARKS = /[\u064B-\u065F\u0670\u0640]/g
+const LETTERS = [[/ı/g, 'i'], [/ß/g, 'ss'], [/œ/g, 'oe'], [/æ/g, 'ae'], [/ø/g, 'o'],
+  [/[أإآٱ]/g, 'ا'], [/ى/g, 'ي'], [/ة/g, 'ه'], [/ؤ/g, 'و'], [/ئ/g, 'ي']]
+const digit = (base) => (d) => String(d.charCodeAt(0) - base)
 
 export function normalizeQuery(s) {
-  return String(s ?? '')
+  let out = String(s ?? '')
+    .replace(/[٠-٩]/g, digit(0x0660))
+    .replace(/[۰-۹]/g, digit(0x06F0))
     .normalize('NFD')
     .replace(DIACRITICS, '')
     .normalize('NFC')
     .toLowerCase()
     .replace(/ё/g, 'е')
-    .replace(/[^0-9a-zа-я%.\s]+/g, ' ')
+    .replace(ARABIC_MARKS, '')
+  for (const [re, to] of LETTERS) out = out.replace(re, to)
+  return out
+    .replace(/[^0-9a-zа-я\u0621-\u064A%.\s]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -1217,11 +1232,23 @@ export function searchLocal(query, { boost, items = FOODS } = {}) {
   if (!q) return items
   const { terms, primaryCount } = expandQuery(q)
   return rankedSearch(items, terms, {
-    toText: (f) => norm(f.name + ' ' + (f.alias || '')),
-    toName: (f) => norm(f.name),
+    toText: (f) => searchText(f.name, f.alias),
+    toName: (f) => shownName(f.name),
     boost,
     primaryCount,
   })
+}
+
+// Поиск видит и исходное русское название, и перевод на язык интерфейса:
+// немец находит «Hähnchenbrust», а «курица» и иноязычные alias работают, как
+// и раньше. Ранжирование по названию идёт по тому, что человек видит на
+// экране, — иначе «Apfel» уступал бы продукту, у которого «apfel» лишь в alias.
+function shownName(name) {
+  return norm(foodName(name))
+}
+function searchText(name, alias) {
+  const shown = foodName(name)
+  return norm(name + ' ' + (alias || '') + (shown !== name ? ' ' + shown : ''))
 }
 
 export const BREADS = [
@@ -1620,8 +1647,8 @@ export function searchIngredients(query) {
   if (!q) return CONSTRUCTOR_ING
   const { terms, primaryCount } = expandQuery(q)
   return rankedSearch(CONSTRUCTOR_ING, terms, {
-    toText: (i) => norm(i.name),
-    toName: (i) => norm(i.name),
+    toText: (i) => searchText(i.name),
+    toName: (i) => shownName(i.name),
     primaryCount,
   })
 }

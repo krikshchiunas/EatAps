@@ -10,6 +10,9 @@ import social from './es/social.js'
 import settings from './es/settings.js'
 import ai from './es/ai.js'
 import system from './es/system.js'
+import data_foods from './es/data/foods.js'
+import data_methods from './es/data/methods.js'
+import data_portions from './es/data/portions.js'
 
 export const strings = merge(common, auth, day, add, stats, supps, social, settings, ai, system)
-export const data = {}
+export const data = { ...data_foods, ...data_methods, ...data_portions }

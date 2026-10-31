@@ -12,25 +12,46 @@
 // варёный», «Молоко 2.5%», «Сахар, 2 ч.л.». Их тоже разбираем на части, иначе
 // у человека с английским интерфейсом половина дневника осталась бы русской.
 // ─────────────────────────────────────────────────────────────────────────────
-import { t, tData, dataTable, getLang, SOURCE_LANG } from './i18n.js'
+import { t, tData, dataTable, getLang, locale, fmtNum, isRtl, SOURCE_LANG } from './i18n.js'
 
 const cap = (s) => (s ? s.charAt(0).toLocaleUpperCase() + s.slice(1) : s)
 
 // Способ приготовления в названии записан со строчной («Картофель, варёный»),
 // а в таблице ключи — как на кнопках, с заглавной. Строчная копия таблицы —
-// одна на язык.
+// одна на язык. Внутри названия перевод тоже идёт со строчной («Potato,
+// boiled»), кроме слов из methodsInline: немецкое существительное остаётся
+// с заглавной («Kartoffeln, Püree»), английское «French fries» — тоже.
 let inlineFor = null
 let inlineMap = null
-function methodInline(how) {
+const lower = (s) => s.charAt(0).toLocaleLowerCase(locale()) + s.slice(1)
+function methodInline(how, base) {
   const table = dataTable('methods')
   if (!table) return how
   if (inlineFor !== getLang()) {
+    const keep = dataTable('methodsInline') || {}
     inlineMap = {}
-    for (const [k, v] of Object.entries(table)) inlineMap[k.toLowerCase()] = v
+    for (const [k, v] of Object.entries(table)) {
+      const key = k.toLowerCase()
+      inlineMap[key] = keep[key] ?? lower(v)
+    }
     inlineFor = getLang()
   }
-  return inlineMap[how] ?? how
+  const agreed = methodFor(base, how)
+  return agreed ? lower(agreed) : inlineMap[how] ?? how
 }
+
+// Русская форма способа согласована с русским продуктом («Свинина, варёная»),
+// а перевод продукта бывает другого рода: по-испански это «Cerdo, cocido».
+// Такие пары лежат в methodsFor под ключом «Свинина|варёная».
+function methodFor(base, how) {
+  if (!base || !how) return null
+  return dataTable('methodsFor')?.[`${base}|${how.toLowerCase()}`] ?? null
+}
+
+// «Молоко 2.5%» по-немецки — «Milch 2,5 %»: десятичный разделитель свой у
+// каждого языка. Запятая между продуктом и способом в арабском — «،».
+const pct = (n) => fmtNum(Number(n.replace(',', '.')), { maximumFractionDigits: 2 })
+const comma = () => (isRtl() ? '، ' : ', ')
 
 export function foodName(name) {
   if (!name || getLang() === SOURCE_LANG) return name
@@ -39,7 +60,7 @@ export function foodName(name) {
 
   // «Молоко 2.5%», «Absolut 40%» — жирность или крепость после названия.
   let m = /^(.+) (\d+(?:[.,]\d+)?)%$/.exec(name)
-  if (m) return `${foodName(m[1])} ${m[2]}%`
+  if (m) return `${foodName(m[1])} ${pct(m[2])}%`
 
   // Сахар к горячему напитку и протеиновый шейк — их название собирает лист
   // добавления вместе с числом.
@@ -61,14 +82,15 @@ export function foodName(name) {
     const base = name.slice(0, i)
     const how = name.slice(i + 2)
     const b = foodName(base)
-    const h = methodInline(how)
-    if (b !== base || h !== how) return `${b}, ${h}`
+    const h = methodInline(how, base)
+    if (b !== base || h !== how) return `${b}${comma()}${h}`
   }
   return name
 }
 
-// Способ приготовления на кнопке выбора: «Варёный» → «Boiled».
-export const methodLabel = (label) => cap(tData('methods', label))
+// Способ приготовления на кнопке выбора: «Варёный» → «Boiled». base — продукт,
+// к которому способ относится: от него зависит род («Patata cocida»).
+export const methodLabel = (label, base) => cap(methodFor(base, label) ?? tData('methods', label))
 
 // Подпись порции или единицы ингредиента: «стакан», «1 шт», «ломтик».
 export function portionLabel(label) {
