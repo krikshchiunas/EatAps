@@ -9,7 +9,8 @@ import stats from './ru/stats.js'
 import supps from './ru/supps.js'
 import social from './ru/social.js'
 import settings from './ru/settings.js'
+import ai from './ru/ai.js'
 import system from './ru/system.js'
 
-export const strings = merge(common, auth, day, add, stats, supps, social, settings, system)
+export const strings = merge(common, auth, day, add, stats, supps, social, settings, ai, system)
 export const data = {}

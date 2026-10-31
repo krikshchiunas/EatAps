@@ -16,32 +16,20 @@
 import { addDays, keyOf } from './date.js'
 import { dayNutrients, countsInStats, TOL } from './stats.js'
 import { createTargetResolver } from './body.js'
+import { t } from './i18n.js'
+
+const kind = (key, emoji) => ({
+  key,
+  emoji,
+  get title() { return t(`challenge.kind.${key}.title`) },
+  get desc() { return t(`challenge.kind.${key}.desc`) },
+})
 
 export const CHALLENGE_KINDS = [
-  {
-    key: 'log_streak',
-    title: 'Не пропускать дни',
-    desc: 'Зачёт за каждый день, где еда записана',
-    emoji: '📗',
-  },
-  {
-    key: 'calorie_target',
-    title: 'Держать калории',
-    desc: 'Зачёт за день в пределах ±10% от цели',
-    emoji: '🎯',
-  },
-  {
-    key: 'protein_target',
-    title: 'Добирать белок',
-    desc: 'Зачёт за день, где белок не ниже нормы',
-    emoji: '🥩',
-  },
-  {
-    key: 'no_sugar',
-    title: 'Меньше сахара',
-    desc: 'Зачёт за день, где свободных сахаров не больше 10% калорий',
-    emoji: '🍬',
-  },
+  kind('log_streak', '📗'),
+  kind('calorie_target', '🎯'),
+  kind('protein_target', '🥩'),
+  kind('no_sugar', '🍬'),
 ]
 
 export const kindMeta = (key) => CHALLENGE_KINDS.find((k) => k.key === key) || CHALLENGE_KINDS[0]
@@ -137,13 +125,13 @@ export function challengeStatus(challenge, today = keyOf()) {
 
 // Проверка формы перед созданием. Возвращает { ok } или { error }.
 export function validateChallenge({ title, kind, starts_on, ends_on }) {
-  if (!title || !title.trim()) return { error: 'Придумайте название' }
-  if (title.trim().length > 80) return { error: 'Слишком длинное название' }
-  if (!CHALLENGE_KINDS.some((k) => k.key === kind)) return { error: 'Выберите правило' }
-  if (!starts_on || !ends_on) return { error: 'Укажите даты' }
-  if (ends_on < starts_on) return { error: 'Конец раньше начала' }
+  if (!title || !title.trim()) return { error: t('challenge.err.noTitle') }
+  if (title.trim().length > 80) return { error: t('challenge.err.tooLong') }
+  if (!CHALLENGE_KINDS.some((k) => k.key === kind)) return { error: t('challenge.err.noKind') }
+  if (!starts_on || !ends_on) return { error: t('challenge.err.noDates') }
+  if (ends_on < starts_on) return { error: t('challenge.err.endBeforeStart') }
   if (challengeDays(starts_on, ends_on).length > MAX_DAYS) {
-    return { error: `Челлендж не длиннее ${MAX_DAYS} дней` }
+    return { error: t('challenge.err.tooMany', { n: MAX_DAYS }) }
   }
   return { ok: true }
 }

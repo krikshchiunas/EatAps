@@ -22,19 +22,15 @@ import { usedShare, budgetForTier, periodKey } from '../lib/aiBudget.js'
 import { pullAiUsage } from '../lib/supabase.js'
 import { keyOf } from '../lib/date.js'
 import { autoStandardMealId } from '../lib/meals.js'
+import { t } from '../lib/i18n.js'
 
 const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
 
 // Приветствие — первое подтверждение, что тон переключился: человек меняет
 // голос в настройках и сразу видит разницу, не отправив ни одного сообщения.
-const GREETING = {
-  calm: 'Привет, я Carrot 🥕. Сфотографируйте тарелку или спросите что угодно про еду и ваши цели.',
-  buddy: 'Здоров, я Carrot 🥕. Кидай фото тарелки или спрашивай — разберёмся, чё там у тебя с едой.',
-  doctor: 'Здравствуйте. Я Carrot 🥕, ваш ассистент по питанию. Пришлите фото приёма пищи или задайте вопрос.',
-  coach: 'Я Carrot 🥕, на связи. Кидайте фото еды или спрашивайте — разберём, что сегодня доедаем.',
-  strict: 'Carrot на месте. Фото тарелки или вопрос — считаю по вашему дневнику, без скидок.',
-  savage: 'Carrot тут. Ну что, показывай, что там сожрал. Или спрашивай, раз ещё не поздно.',
-}
+// Текст берётся при показе, а не при создании сообщения: смена языка
+// переводит и его.
+const greeting = (tone) => t(`ai.greeting.${tone}`)
 
 export default function AIHomeScreen({ onUpgrade }) {
   const store = useStore()
@@ -46,7 +42,7 @@ export default function AIHomeScreen({ onUpgrade }) {
   const tone = resolveTone(prefs).id
 
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: GREETING[tone] || GREETING.calm, local: true },
+    { role: 'assistant', greeting: tone, local: true },
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -98,7 +94,9 @@ export default function AIHomeScreen({ onUpgrade }) {
         // и ответ молча пропадал каждый раз, когда ассистент заодно задавал
         // вопрос: на «добавь бутерброд» человек видел голое «С чем именно?»
         // вместо «Бутерброды очень разные. С чем именно?».
-        text: [data.reply, data.ask].filter(Boolean).join(' ') || data.reply || data.ask,
+        text: data.fallback
+          ? t('ai.malformed')
+          : [data.reply, data.ask].filter(Boolean).join(' ') || data.reply || data.ask,
         cards: data.cards?.length ? data.cards : undefined,
         asking: !!data.ask,
         // Ответ упёрся в потолок — показываем это, а не выдаём обрывок за
@@ -115,7 +113,7 @@ export default function AIHomeScreen({ onUpgrade }) {
 
   const handleFailure = useCallback((e) => {
     if (e instanceof AIError && e.isBudget) { setExhausted(true); return }
-    setError(e.message || 'Не получилось. Попробуйте ещё раз.')
+    setError(e.message || t('ai.genericError'))
   }, [])
 
   const send = async () => {
@@ -152,7 +150,7 @@ export default function AIHomeScreen({ onUpgrade }) {
     setBusy(true)
     try {
       const image = await fileToImage(file)
-      setMessages((m) => [...m, { role: 'user', text: 'Фото еды', photo: image.preview }])
+      setMessages((m) => [...m, { role: 'user', text: t('ai.photoMsg'), photo: image.preview }])
       const data = await sendPhoto({
         image: { media_type: image.media_type, data: image.data },
         note: input.trim() || undefined,
@@ -175,7 +173,7 @@ export default function AIHomeScreen({ onUpgrade }) {
     const day = store.days?.[date]
     haptic(18)
     addFood(date, {
-      name: String(card.name || 'Блюдо').slice(0, 80),
+      name: String(card.name || t('meal.dish')).slice(0, 80),
       emoji: '🍽️',
       unit: 'г',
       grams: Number(card.grams) || null,
@@ -204,23 +202,23 @@ export default function AIHomeScreen({ onUpgrade }) {
             на тарифы можно было, только исчерпав лимит, то есть промокод было
             некуда ввести. */}
         {premium ? (
-          <div className="ai-badge ai-badge--plus">{planByTier(tier)?.name} · умнее</div>
+          <div className="ai-badge ai-badge--plus">{planByTier(tier)?.name} · {t('ai.smarter')}</div>
         ) : plus ? (
-          <div className="ai-badge ai-badge--plus">{planByTier(tier)?.name} · без лимита</div>
+          <div className="ai-badge ai-badge--plus">{planByTier(tier)?.name} · {t('ai.unlimited')}</div>
         ) : (
-          <button className="ai-badge ai-badge--action" onClick={onUpgrade} title="Тарифы и промокод">
+          <button className="ai-badge ai-badge--action" onClick={onUpgrade} title={t('ai.plansAndPromo')}>
             {tier === 'AI' ? planByTier(tier)?.name : 'Carrot Free'}
           </button>
         )}
         {budget?.budgetMicro
           ? <BudgetBar share={share} onUpgrade={plus ? null : onUpgrade} />
-          : plus ? <span className="ai-chat__unlimited">без лимита</span> : null}
+          : plus ? <span className="ai-chat__unlimited">{t('ai.unlimited')}</span> : null}
       </div>
 
       <div className="ai-chat__feed" ref={feedRef}>
         {supabaseEnabled && !signedIn && (
           <div className="ai-notice" role="status">
-            Войдите в аккаунт — ассистенту нужен доступ к вашему дневнику и тарифу.
+            {t('ai.signInNotice')}
           </div>
         )}
         {messages.map((m, i) => (
@@ -240,7 +238,7 @@ export default function AIHomeScreen({ onUpgrade }) {
           className="iconbtn ai-chat__camera"
           onClick={() => fileRef.current?.click()}
           disabled={busy}
-          aria-label="Сфотографировать еду"
+          aria-label={t('ai.camera')}
         >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -252,14 +250,14 @@ export default function AIHomeScreen({ onUpgrade }) {
           className="ai-chat__input"
           value={input}
           rows={1}
-          placeholder="Спросите про еду…"
+          placeholder={t('ai.inputPh')}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
           }}
           disabled={busy}
         />
-        <button className="btn ai-chat__send" onClick={send} disabled={busy || !input.trim()} aria-label="Отправить">
+        <button className="btn ai-chat__send" onClick={send} disabled={busy || !input.trim()} aria-label={t('common.send')}>
           ↑
         </button>
       </div>
@@ -274,10 +272,11 @@ function Bubble({ msg, onAdd }) {
   return (
     <div className={`ai-bubble ${mine ? 'ai-bubble--me' : 'ai-bubble--ai'}`}>
       {msg.photo && <img className="ai-bubble__photo" src={msg.photo} alt="" />}
+      {msg.greeting && <p className="ai-bubble__text">{greeting(msg.greeting)}</p>}
       {msg.text && <p className="ai-bubble__text">{msg.text}</p>}
       {msg.truncated && (
         <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
-          Ответ оборвался на середине — переспросите короче.
+          {t('ai.truncated')}
         </p>
       )}
       {msg.cards?.map((card, i) => (
@@ -292,22 +291,22 @@ function Bubble({ msg, onAdd }) {
   )
 }
 
-const CONFIDENCE = { high: null, medium: 'примерно', low: 'на глаз' }
+const CONFIDENCE = { high: null, medium: 'ai.confidence.medium', low: 'ai.confidence.low' }
 
 function MealCard({ card, added, onAdd }) {
-  const hint = CONFIDENCE[card.confidence]
+  const hint = CONFIDENCE[card.confidence] && t(CONFIDENCE[card.confidence])
   return (
     <div className="ai-card">
       <div className="ai-card__head">
         <span className="ai-card__name">{card.name}</span>
-        {card.grams ? <span className="ai-card__grams">{Math.round(card.grams)} г</span> : null}
+        {card.grams ? <span className="ai-card__grams">{t('units.gN', { n: Math.round(card.grams) })}</span> : null}
       </div>
       <div className="ai-card__macros">
-        <b>{Math.round(card.kcal)}</b> ккал · Б {Math.round(card.protein)} · Ж {Math.round(card.fat)} · У {Math.round(card.carbs)}
+        <b>{Math.round(card.kcal)}</b> {t('units.kcal')} · {t('macro.p')} {Math.round(card.protein)} · {t('macro.f')} {Math.round(card.fat)} · {t('macro.c')} {Math.round(card.carbs)}
         {hint && <span className="ai-card__conf"> · {hint}</span>}
       </div>
       <button className={`btn ${added ? 'soft' : ''} ai-card__add`} onClick={onAdd} disabled={added}>
-        {added ? 'Добавлено ✓' : 'Добавить в дневник'}
+        {added ? t('ai.added') : t('ai.addToDiary')}
       </button>
     </div>
   )
@@ -323,23 +322,22 @@ function BudgetBar({ share, onUpgrade }) {
       <div className="ai-budget__track">
         <div className="ai-budget__fill" style={{ width: `${pct}%`, background: pct > 85 ? 'var(--danger)' : 'var(--primary)' }} />
       </div>
-      <span className="ai-budget__label">{low && onUpgrade ? 'ещё' : `${100 - pct}%`}</span>
+      <span className="ai-budget__label">{low && onUpgrade ? t('ai.budgetMore') : `${100 - pct}%`}</span>
     </>
   )
   if (low && onUpgrade) {
     return (
-      <button className="ai-budget ai-budget--action" onClick={onUpgrade} title={`Израсходовано ${pct}% дневного лимита`}>
+      <button className="ai-budget ai-budget--action" onClick={onUpgrade} title={t('ai.budgetUsed', { pct })}>
         {bar}
       </button>
     )
   }
-  return <div className="ai-budget" title={`Израсходовано ${pct}% дневного лимита`}>{bar}</div>
+  return <div className="ai-budget" title={t('ai.budgetUsed', { pct })}>{bar}</div>
 }
 
 // Лимит кончился. Показываем дату обнуления — без неё экран читается как
 // «всё, конец», хотя на самом деле это до первого числа.
 function Exhausted({ tier, onUpgrade }) {
-  const reset = 'завтра'
   const free = tier === 'FREE'
   return (
     <div className="screen ai-home">
@@ -349,15 +347,13 @@ function Exhausted({ tier, onUpgrade }) {
             <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
           </svg>
         </div>
-        <h1 className="h1 ai-home__title">Дневной лимит исчерпан</h1>
+        <h1 className="h1 ai-home__title">{t('ai.exhausted.title')}</h1>
         <p className="ai-home__sub">
-          {free
-            ? `Бесплатный объём на сегодня закончился. Обновится ${reset}.`
-            : `Ассистент снова заработает ${reset}.`}
+          {free ? t('ai.exhausted.free') : t('ai.exhausted.paid')}
         </p>
         {onUpgrade && (
           <button className="btn" style={{ marginTop: 18 }} onClick={onUpgrade}>
-            {free ? 'Посмотреть тарифы' : 'Перейти на Carrot Pro — без лимита'}
+            {free ? t('ai.exhausted.seePlans') : t('ai.exhausted.goPro')}
           </button>
         )}
       </div>

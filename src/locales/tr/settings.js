@@ -156,6 +156,15 @@ export default {
       coachIntro: 'Koçlar ve diyetisyenler, danışanın daveti ile onun günlüğünü görebilir ve günlere yorum yazabilir. Kendinden bahset: eğitim, deneyim, bağlantılar. Başvuruyu bir insan inceler, yanıt destek üzerinden gelir.',
       coachPh: 'Kimsin, ne yapıyorsun, deneyimin ne ve bunu nereden doğrulayabiliriz…',
       coachCta: 'Başvuruyu gönder',
+      err: {
+        signin: 'Desteğe yazmak için giriş yap',
+        too_short: 'Sorunu biraz daha ayrıntılı anlat — en azından birkaç kelime',
+        too_long: 'Mesaj çok uzun',
+        failed: 'Gönderilemedi',
+        banned: 'Artık desteğe yazamazsın',
+        banned_until: '{date} tarihine kadar desteğe yazamazsın',
+        rate_limited: 'Saatte bir kez yazabilirsin. {minutes} dk sonra yeniden dene.',
+      },
     },
     tips: {
       willReturn: 'İpuçları geri gelecek',

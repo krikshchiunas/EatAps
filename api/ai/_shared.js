@@ -254,12 +254,16 @@ export function parseReply(data) {
     }
     // Похоже на JSON, но вытащить нечего — сырую разметку человеку не показываем.
     const looksLikeJson = /^[[{]/.test(stripped) || /"reply"\s*:/.test(stripped)
+    const raw = !looksLikeJson && text
     return {
-      reply: (!looksLikeJson && text) || 'Не получилось ответить. Попробуйте ещё раз.',
+      reply: raw || 'Не получилось ответить. Попробуйте ещё раз.',
       ask: null,
       cards: [],
       memory: null,
       malformed: true,
+      // Своего текста у ответа нет — фронт покажет эту фразу на языке
+      // интерфейса, а русский reply останется для старых клиентов.
+      ...(raw ? {} : { fallback: true }),
     }
   }
 }

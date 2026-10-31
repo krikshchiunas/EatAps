@@ -1,11 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Клиент AI-эндпоинтов.
 //
+// Текст ошибки берём из своего словаря по коду, а не из ответа сервера: сервер
+// не знает языка интерфейса. Его message — запасной вариант для кода, которого
+// фронт ещё не знает.
+//
 // Ключ Anthropic живёт только на сервере, поэтому фронт ходит в /api/ai/*,
 // а не в api.anthropic.com. Токен пользователя передаём Bearer-заголовком —
 // по нему сервер сам определит тариф и остаток бюджета; ничего из этого
 // клиент не сообщает и сообщить не может.
 // ─────────────────────────────────────────────────────────────────────────────
+import { t, getLang } from './i18n.js'
 
 export class AIError extends Error {
   constructor(message, { code, status, usage } = {}) {
@@ -18,34 +23,37 @@ export class AIError extends Error {
   get isBudget() { return this.code === 'budget_exhausted' }
 }
 
-const MESSAGES = {
-  unauthorized: 'Нужно войти в аккаунт.',
-  bad_image: 'Нужен JPEG, PNG или WebP.',
-  image_too_large: 'Фото слишком большое — сожмите его.',
-  empty_request: 'Пустой запрос.',
-  upstream: 'Ассистент сейчас недоступен. Попробуйте через минуту.',
-  accounting_unavailable: 'Ассистент временно недоступен. Попробуйте позже.',
+const KNOWN = ['unauthorized', 'bad_image', 'image_too_large', 'empty_request', 'upstream', 'accounting_unavailable']
+
+function messageFor(code, path, fallback) {
+  // Сбой распознавания фото и сбой чата — разные ситуации для человека:
+  // в первом случае помогает переснять, во втором — подождать.
+  if (code === 'upstream' && path.endsWith('/vision')) return t('ai.err.upstream_photo')
+  if (KNOWN.includes(code)) return t(`ai.err.${code}`)
+  return fallback || t('ai.genericError')
 }
 
 async function post(path, body, session) {
   const token = session?.access_token
-  if (!token) throw new AIError(MESSAGES.unauthorized, { code: 'unauthorized' })
+  if (!token) throw new AIError(t('ai.err.unauthorized'), { code: 'unauthorized' })
 
   let res
   try {
     res = await fetch(path, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
+      // Язык интерфейса — чтобы ассистент ответил на нём, когда сообщение само
+      // его не подсказывает (фото без подписи).
+      body: JSON.stringify({ ...body, lang: getLang() }),
     })
   } catch {
-    throw new AIError('Нет связи. Проверьте интернет.', { code: 'offline' })
+    throw new AIError(t('ai.err.offline'), { code: 'offline' })
   }
 
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw new AIError(
-      data.message || MESSAGES[data.error] || 'Не получилось. Попробуйте ещё раз.',
+      messageFor(data.error, path, data.message),
       { code: data.error, status: res.status, usage: data },
     )
   }

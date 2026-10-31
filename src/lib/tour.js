@@ -15,55 +15,57 @@
 // жест на телефоне, человек не должен снова видеть подсказку на планшете.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { t } from './i18n.js'
+
 export const TOUR_PREF = 'tourSeen' // prefs[TOUR_PREF] = { [id]: true }
 
 export const TIPS = [
   {
     id: 'day-swipe',
     emoji: '👈',
-    title: 'Листайте дни свайпом',
-    text: 'Проведите пальцем влево или вправо по экрану дня, чтобы перейти к соседнему. Стрелки сверху делают то же самое.',
+    get title() { return t(`tips.${this.id}.title`) },
+    get text() { return t(`tips.${this.id}.text`) },
     // Показываем только когда человеку уже есть что листать.
     when: ({ loggedDays }) => loggedDays >= 2,
   },
   {
     id: 'food-swipe',
     emoji: '↔️',
-    title: 'Свайп по продукту',
-    text: 'Потяните строку продукта влево — удалить, вправо — изменить порцию.',
+    get title() { return t(`tips.${this.id}.title`) },
+    get text() { return t(`tips.${this.id}.text`) },
     when: ({ mealsToday }) => mealsToday >= 1,
   },
   {
     id: 'food-hold',
     emoji: '📋',
-    title: 'Долгое нажатие копирует',
-    text: 'Задержите палец на продукте — он скопируется, и его можно вставить в другой приём пищи одним касанием.',
+    get title() { return t(`tips.${this.id}.title`) },
+    get text() { return t(`tips.${this.id}.text`) },
     when: ({ mealsToday }) => mealsToday >= 3,
   },
   {
     id: 'day-repeat',
     emoji: '♻️',
-    title: 'Повторить вчерашний день',
-    text: 'Меню «⋯» в шапке дня копирует всё съеденное вчера — удобно, когда рацион повторяется.',
+    get title() { return t(`tips.${this.id}.title`) },
+    get text() { return t(`tips.${this.id}.text`) },
     when: ({ loggedDays }) => loggedDays >= 3,
   },
   {
     id: 'day-body',
     emoji: '⚖️',
-    title: 'Вес и активность',
-    text: 'Отметьте вес и то, каким был день. Норма калорий пересчитается: день на диване и день с тренировкой — разные нормы.',
+    get title() { return t(`tips.${this.id}.title`) },
+    get text() { return t(`tips.${this.id}.text`) },
     when: ({ loggedDays }) => loggedDays >= 2,
   },
   {
     id: 'day-skip',
     emoji: '🚫',
-    title: 'Неполный день можно не считать',
-    text: 'Если записали не всё, пометьте день через «⋯» — он не испортит средние в статистике.',
+    get title() { return t(`tips.${this.id}.title`) },
+    get text() { return t(`tips.${this.id}.text`) },
     when: ({ loggedDays }) => loggedDays >= 4,
   },
 ]
 
-export const tipById = (id) => TIPS.find((t) => t.id === id) || null
+export const tipById = (id) => TIPS.find((tip) => tip.id === id) || null
 
 function seenMap(prefs) {
   const raw = prefs?.[TOUR_PREF]

@@ -20,6 +20,7 @@ import { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Panel, Group, Row } from './SettingsPanels.jsx'
 import { TONES, DEFAULT_TONE, TONE_PREF, TONE_CONSENT_PREF, TONE_CONSENT_VERSION, hasToneConsent } from '../lib/aiPrompt.js'
+import { t } from '../lib/i18n.js'
 
 // Порядок показа: от нейтрального к жёсткому. savage последним — он за опт-ином.
 const ORDER = ['calm', 'buddy', 'doctor', 'coach', 'strict', 'savage']
@@ -46,14 +47,14 @@ export default function AITonePanel({ onClose }) {
   }
 
   return (
-    <Panel title="Тон ассистента" onClose={onClose}>
-      <Group note="Тон меняет только манеру речи. Расчёты, цифры и рекомендации во всех режимах одинаковые.">
+    <Panel title={t('settings.row.tone')} onClose={onClose}>
+      <Group note={t('ai.tone.note')}>
         {ORDER.map((id) => {
-          const t = TONES[id]
+          const tone = TONES[id]
           return (
             <Row
               key={id}
-              label={t.optIn ? `${t.label} · 18+` : t.label}
+              label={tone.optIn ? `${tone.label} · 18+` : tone.label}
               value={current === id ? '✓' : null}
               onClick={() => pick(id)}
               chevron={false}
@@ -69,9 +70,9 @@ export default function AITonePanel({ onClose }) {
       </Group>
 
       {hasToneConsent(prefs) && (
-        <Group note="Согласие на режим без цензуры останется, пока вы его не отзовёте. После отзыва режим выключится.">
+        <Group note={t('ai.tone.consentNote')}>
           <Row
-            label="Отозвать согласие 18+"
+            label={t('ai.tone.revoke')}
             danger
             chevron={false}
             onClick={() => {
@@ -92,44 +93,40 @@ function ConsentGate({ toneId, onAccept, onClose }) {
   const ready = age && terms
 
   return (
-    <Panel title="Без цензуры · 18+" onClose={onClose}>
+    <Panel title={t('ai.gate.title')} onClose={onClose}>
       <div style={{ padding: '0 2px 8px' }}>
         <p style={{ fontSize: 15, lineHeight: 1.5, margin: '0 0 14px' }}>
-          В этом режиме ассистент говорит матом и разносит вас за каждый промах в питании.
-          Без утешений, без «ничего страшного», без мягких формулировок.
+          {t('ai.gate.intro')}
         </p>
 
-        <Group title="Что он будет делать">
-          <Bullet>Материться и называть вещи своими именами — про еду, порции и решения.</Bullet>
-          <Bullet>Тыкать в цифры дневника: перебор, недобор белка, четвёртая пачка за неделю.</Bullet>
-          <Bullet>Не принимать оправданий и требовать конкретных действий на сегодня.</Bullet>
+        <Group title={t('ai.gate.will')}>
+          <Bullet>{t('ai.gate.will1')}</Bullet>
+          <Bullet>{t('ai.gate.will2')}</Bullet>
+          <Bullet>{t('ai.gate.will3')}</Bullet>
         </Group>
 
-        <Group title="Чего он не будет делать никогда">
-          <Bullet>Обсуждать ваш вес, тело, внешность и цифры на весах как повод для унижения.</Bullet>
-          <Bullet>Оскорблять вас как человека — вашу личность, ум, будущее, близких.</Bullet>
-          <Bullet>Советовать голодать, пропускать еду или «отрабатывать» съеденное тренировкой.</Bullet>
+        <Group title={t('ai.gate.never')}>
+          <Bullet>{t('ai.gate.never1')}</Bullet>
+          <Bullet>{t('ai.gate.never2')}</Bullet>
+          <Bullet>{t('ai.gate.never3')}</Bullet>
         </Group>
 
         <p className="set-note" style={{ margin: '0 0 16px' }}>
-          Если в разговоре появятся признаки срыва, тревоги или расстройства пищевого поведения,
-          ассистент сам перейдёт на спокойный тон. Выключить режим можно в любой момент — выбрать другой тон в этом же списке.
-          Это не медицинская помощь и не замена врача.
+          {t('ai.gate.safety')}
         </p>
 
         <Check checked={age} onChange={setAge}>
-          Мне есть 18 лет.
+          {t('ai.gate.age')}
         </Check>
         <Check checked={terms} onChange={setTerms}>
-          Я прочитал(а) предупреждение, включаю режим добровольно и понимаю, что ассистент будет
-          использовать нецензурную лексику и жёстко критиковать мои решения о еде.
+          {t('ai.gate.terms')}
         </Check>
 
         <button className="btn" disabled={!ready} onClick={onAccept} style={{ marginTop: 18 }}>
-          Включить режим
+          {t('ai.gate.enable')}
         </button>
         <button className="btn ghost" onClick={onClose} style={{ marginTop: 10 }}>
-          Не включать
+          {t('ai.gate.decline')}
         </button>
       </div>
     </Panel>

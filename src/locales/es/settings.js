@@ -156,6 +156,15 @@ export default {
       coachIntro: 'Los entrenadores y nutricionistas pueden, si el cliente los invita, ver su diario y comentar los días. Cuéntanos sobre ti: formación, experiencia, enlaces. Cada solicitud la revisa una persona y la respuesta llegará por el soporte.',
       coachPh: 'Quién eres, a qué te dedicas, qué experiencia tienes y dónde podemos comprobarlo…',
       coachCta: 'Enviar solicitud',
+      err: {
+        signin: 'Inicia sesión para escribir al soporte',
+        too_short: 'Describe tu pregunta con más detalle, al menos unas palabras',
+        too_long: 'El mensaje es demasiado largo',
+        failed: 'No se pudo enviar',
+        banned: 'Ya no puedes escribir al soporte',
+        banned_until: 'No puedes escribir al soporte hasta el {date}',
+        rate_limited: 'Puedes escribir una vez por hora. Inténtalo dentro de {minutes} min.',
+      },
     },
     tips: {
       willReturn: 'Los consejos volverán',

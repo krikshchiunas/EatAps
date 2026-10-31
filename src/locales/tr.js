@@ -8,6 +8,8 @@ import stats from './tr/stats.js'
 import supps from './tr/supps.js'
 import social from './tr/social.js'
 import settings from './tr/settings.js'
+import ai from './tr/ai.js'
+import system from './tr/system.js'
 
-export const strings = merge(common, auth, day, add, stats, supps, social, settings)
+export const strings = merge(common, auth, day, add, stats, supps, social, settings, ai, system)
 export const data = {}

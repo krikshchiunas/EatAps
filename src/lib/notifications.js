@@ -5,36 +5,14 @@
 
 import { keyOf } from './date.js'
 import { sumDay } from './nutrition.js'
+import { t } from './i18n.js'
 
 // Юморные напоминания про обед. Показываются в 15:00, одно случайное на день.
-export const LUNCH_MESSAGES = [
-  'Ну что, чем сегодня заправлял организм?',
-  'EatAps подозревает, что ты что-то вкусное съел. Подтверди наши подозрения.',
-  'Не делай вид, что ты ничего не ел. Мы видели эти крошки.',
-  'Твой желудок уже всё знает. Осталось рассказать EatAps.',
-  'Твоя еда не должна просто исчезать в неизвестности.',
-  'Организм получил обновление. Теперь обнови EatAps.',
-  'Не оставляй свою еду без цифрового следа. Она старалась.',
-  'Твой желудок просит занести данные. Он тоже хочет внимания.',
-  'Что сегодня загрузил в себя? Нам нужна статистика.',
-  'Пора раскрыть тайну сегодняшней тарелки.',
-  'Не заставляй EatAps строить теории заговора о твоём обеде.',
-  'Организм получил топливо. Теперь дай ему отчёт.',
-  'Еда сама себя не запишет. К сожалению, технологии ещё не настолько наглые.',
-  'Ну что, шеф, показывай меню сегодняшнего дня.',
-  'Твоя еда уже закончила свой путь. Осталось оставить автограф в EatAps.',
-  'Давай без секретов. Что сегодня отправилось в твой организм?',
-  'Твой холодильник хранит тайны. Мы предлагаем добровольное признание.',
-  'Еда была замечена. Теперь требуется официальная регистрация.',
-  'Не потеряй важные данные между первым укусом и последним кусочком.',
-  'Пора обновить историю питания. Твоя тарелка ждёт славы.',
-]
-
-const NUTRIENT_LABEL = {
-  calories: 'калорий',
-  protein: 'белка',
-  fat: 'жиров',
-  carbs: 'углеводов',
+// Список живёт в словаре (push.lunch): шутка не переводится дословно, у
+// каждого языка свои двадцать.
+const lunchMessages = () => {
+  const list = t('push.lunch')
+  return Array.isArray(list) && list.length ? list : ['EatAps']
 }
 
 const LS = {
@@ -118,7 +96,8 @@ async function show(title, body, tag, icon) {
 }
 
 function pickLunch() {
-  return LUNCH_MESSAGES[Math.floor(Math.random() * LUNCH_MESSAGES.length)]
+  const list = lunchMessages()
+  return list[Math.floor(Math.random() * list.length)]
 }
 
 // Проверить, надо ли сейчас показывать напоминание. Вызывается по таймеру.
@@ -148,7 +127,7 @@ function maybeShowDeficit(profile, day) {
 
   const meals = day?.meals || []
   const totals = sumDay(meals)
-  const t = profile.targets
+  const goals = profile.targets
 
   const eaten = {
     calories: totals.kcal,
@@ -159,15 +138,14 @@ function maybeShowDeficit(profile, day) {
 
   const deficits = []
   for (const key of ['calories', 'protein', 'fat', 'carbs']) {
-    const target = Number(t[key]) || 0
+    const target = Number(goals[key]) || 0
     if (target <= 0) continue
     const missing = (target - (eaten[key] || 0)) / target
-    if (missing > 0.35) deficits.push(NUTRIENT_LABEL[key])
+    if (missing > 0.35) deficits.push(t(`push.short.${key}`))
   }
   if (!deficits.length) return
 
-  const body = `Сегодня сильно не хватает: ${deficits.join(', ')}. Ужин ещё впереди — успеешь.`
-  show('Ты сильно недобираешь!', body, 'eataps-deficit')
+  show(t('push.deficitTitle'), t('push.deficitBody', { list: deficits.join(', ') }), 'eataps-deficit')
   writeMark(LS.deficit, today)
 }
 
@@ -231,16 +209,6 @@ export function forgetMutedFriend(userId) {
   return writeMuted(getMutedFriends().filter((x) => x !== userId))
 }
 
-// Русская плюрализация: 1 сообщение, 2 сообщения, 5 сообщений.
-function pluralize(n, one, few, many) {
-  const n100 = n % 100
-  if (n100 >= 11 && n100 <= 14) return many
-  const n10 = n % 10
-  if (n10 === 1) return one
-  if (n10 >= 2 && n10 <= 4) return few
-  return many
-}
-
 // Пуш о новых сообщениях. Один тег на отправителя — при новом сообщении
 // уведомление обновляется, счётчик растёт, а не появляется отдельная плашка.
 // Заголовок всегда «EatAps», в теле — имя и число, иконка — аватарка отправителя.
@@ -253,9 +221,8 @@ export function notifyIncomingMessage({ senderId, senderName, senderAvatar, unre
   if (senderId && senderId === activeChatUserId) return
   if (isFriendMuted(senderId)) return
   const n = Math.max(1, Number(unreadCount) || 1)
-  const name = (senderName && senderName.trim()) || 'Пользователь'
-  const word = pluralize(n, 'сообщение', 'сообщения', 'сообщений')
-  const body = `${name} отправил вам ${n} ${word}`
+  const name = (senderName && senderName.trim()) || t('common.user')
+  const body = t('push.messages', { name, count: n })
   const tag = senderId ? `eataps-chat-${senderId}` : `eataps-chat-${messageId || Date.now()}`
   show('EatAps', body, tag, senderAvatar || null)
 }

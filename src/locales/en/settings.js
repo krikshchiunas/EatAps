@@ -156,6 +156,15 @@ export default {
       coachIntro: 'Coaches and nutritionists can, when a client invites them, view the client’s diary and comment on days. Tell us about yourself: education, experience, links. A person reviews every application; the answer will come through support.',
       coachPh: 'Who you are, what you do, your experience and where we can verify it…',
       coachCta: 'Send application',
+      err: {
+        signin: 'Sign in to write to support',
+        too_short: 'Describe your question in more detail — at least a few words',
+        too_long: 'The message is too long',
+        failed: 'Couldn’t send',
+        banned: 'You can no longer write to support',
+        banned_until: 'You can’t write to support until {date}',
+        rate_limited: 'You can write once an hour. Try again in {minutes} min.',
+      },
     },
     tips: {
       willReturn: 'Tips will come back',

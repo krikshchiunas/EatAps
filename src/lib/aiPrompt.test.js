@@ -183,3 +183,18 @@ test('правило длины и запрет дублировать вопр�
   assert.ok(/ДЛИНА/.test(sys), 'блок про длину пропал — модель начнёт писать по пять предложений')
   assert.ok(/ТОЛЬКО в "ask"/.test(sys), 'пропал запрет повторять уточняющий вопрос в reply')
 })
+
+test('язык интерфейса доезжает до промпта — на случай фото без подписи', () => {
+  const de = buildSystemPrompt({ tone: 'calm', sub: { tier: 'FREE', status: 'active' }, lang: 'de' })
+  assert.match(de, /Интерфейс приложения у этого человека — немецкий/)
+  assert.match(de, /только фото/, 'без этого фото без подписи получает ответ по-русски')
+  assert.match(de, /Отвечай на языке последнего сообщения/, 'язык сообщения по-прежнему главнее')
+})
+
+test('незнакомый код языка не превращается в указание', () => {
+  for (const lang of [undefined, 'xx', '<script>']) {
+    const sys = buildSystemPrompt({ tone: 'calm', sub: { tier: 'FREE', status: 'active' }, lang })
+    assert.doesNotMatch(sys, /Интерфейс приложения/)
+    assert.match(sys, /Отвечай на языке последнего сообщения/)
+  }
+})

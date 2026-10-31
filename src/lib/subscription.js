@@ -1,6 +1,18 @@
 // Единый слой подписок для AI Assistant.
 // Фронт знает только про тиры (FREE / AI / AI_PLUS). Соответствие тир→price_id
 // живёт на бэке (api/stripe/_shared.js), поэтому Stripe-ключи в бандл не попадают.
+import { t, fmtNum } from './i18n.js'
+
+// Цена и «/мес» — на языке интерфейса: «7,99 €» по-русски и по-немецки,
+// «€7.99» по-английски. Сумма в центах — единственный источник цифры.
+const price = (tier, name, priceAmount) => ({
+  tier,
+  name,
+  priceAmount,
+  currency: 'EUR',
+  get priceLabel() { return fmtNum(priceAmount / 100, { style: 'currency', currency: 'EUR' }) },
+  get period() { return t('ai.plans.month') },
+})
 
 export const TIER = Object.freeze({
   FREE: 'FREE',
@@ -21,30 +33,9 @@ export const STATUS = Object.freeze({
 })
 
 export const PLANS = [
-  {
-    tier: TIER.AI,
-    name: 'Carrot+',
-    priceLabel: '7,99 €',
-    priceAmount: 799,
-    currency: 'EUR',
-    period: 'мес',
-  },
-  {
-    tier: TIER.AI_PLUS,
-    name: 'Carrot Pro',
-    priceLabel: '12,99 €',
-    priceAmount: 1299,
-    currency: 'EUR',
-    period: 'мес',
-  },
-  {
-    tier: TIER.AI_PREMIUM,
-    name: 'Carrot Premium',
-    priceLabel: '24,99 €',
-    priceAmount: 2499,
-    currency: 'EUR',
-    period: 'мес',
-  },
+  price(TIER.AI, 'Carrot+', 799),
+  price(TIER.AI_PLUS, 'Carrot Pro', 1299),
+  price(TIER.AI_PREMIUM, 'Carrot Premium', 2499),
 ]
 
 // ── Промокоды ────────────────────────────────────────────────────────────────
@@ -128,7 +119,7 @@ export function hasAIPremium(sub) { return isActive(sub) && sub.tier === TIER.AI
 // а фронт увидит его через Supabase Realtime и полл при возврате с ?checkout=success.
 export async function checkout(tier, { session } = {}) {
   const token = session?.access_token
-  if (!token) throw new Error('Требуется вход в аккаунт')
+  if (!token) throw new Error(t('ai.plans.needSignIn'))
 
   const res = await fetch('/api/stripe/checkout', {
     method: 'POST',
@@ -139,7 +130,9 @@ export async function checkout(tier, { session } = {}) {
     body: JSON.stringify({ tier, returnUrl: window.location.origin }),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok || !data.url) throw new Error(data.error || 'Не удалось начать оплату')
+  // Текст ошибки сервера — технический и английский («Checkout failed»),
+  // человеку он ничего не объясняет.
+  if (!res.ok || !data.url) throw new Error(t('ai.plans.payFailed'))
 
   window.location.href = data.url
   return { pending: true }
@@ -148,7 +141,7 @@ export async function checkout(tier, { session } = {}) {
 // Управление подпиской через Stripe Billing Portal (карта, апгрейд, отмена).
 export async function openBillingPortal({ session } = {}) {
   const token = session?.access_token
-  if (!token) throw new Error('Требуется вход в аккаунт')
+  if (!token) throw new Error(t('ai.plans.needSignIn'))
 
   const res = await fetch('/api/stripe/portal', {
     method: 'POST',
@@ -159,7 +152,7 @@ export async function openBillingPortal({ session } = {}) {
     body: JSON.stringify({ returnUrl: window.location.origin }),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok || !data.url) throw new Error(data.error || 'Не удалось открыть управление подпиской')
+  if (!res.ok || !data.url) throw new Error(t('ai.plans.portalFailed'))
 
   window.location.href = data.url
   return { pending: true }

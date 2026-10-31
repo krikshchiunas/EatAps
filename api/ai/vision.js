@@ -52,7 +52,7 @@ export default async function handler(req, res) {
     })
   }
 
-  const system = buildSystemPrompt({ tone: resolveTone(req.body?.prefs).id, sub: { tier, status: 'active' } })
+  const system = buildSystemPrompt({ tone: resolveTone(req.body?.prefs).id, sub: { tier, status: 'active' }, lang: req.body?.lang })
   const context = capContext(buildUserContext(req.body?.context || {}))
   const note = String(req.body?.note || '').slice(0, 500)
 

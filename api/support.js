@@ -21,21 +21,23 @@ export default async function handler(req, res) {
   if (!isAllowedOrigin(origin)) return res.status(403).json({ error: 'Forbidden' })
 
   const user = await getUserFromRequest(req)
-  if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы написать в поддержку' })
+  // error — код: текст для человека подбирает фронт на языке интерфейса.
+  // message — русский запасной вариант для клиента, который кода не знает.
+  if (!user) return res.status(401).json({ error: 'signin', message: 'Войдите в аккаунт, чтобы написать в поддержку' })
 
   const body = req.body || {}
   const kind = body.kind === 'coach_application' ? 'coach_application' : 'support'
   const text = String(body.text ?? '').trim()
 
-  if (text.length < MIN_LEN) return res.status(400).json({ error: 'Опишите вопрос подробнее — хотя бы несколько слов' })
-  if (text.length > MAX_LEN) return res.status(413).json({ error: 'Слишком длинное сообщение' })
+  if (text.length < MIN_LEN) return res.status(400).json({ error: 'too_short', message: 'Опишите вопрос подробнее — хотя бы несколько слов' })
+  if (text.length > MAX_LEN) return res.status(413).json({ error: 'too_long', message: 'Слишком длинное сообщение' })
 
   let supabase
   try {
     supabase = db()
   } catch (e) {
     console.error('[support] db not configured', e.message)
-    return res.status(500).json({ error: 'Не удалось отправить' })
+    return res.status(500).json({ error: 'failed', message: 'Не удалось отправить' })
   }
 
   // 1. Бан. Проверяем ДО записи: забаненный не должен даже засорять таблицу.
@@ -47,7 +49,8 @@ export default async function handler(req, res) {
 
   if (ban && (ban.until === null || new Date(ban.until) > new Date())) {
     return res.status(403).json({
-      error: ban.until
+      error: ban.until ? 'banned_until' : 'banned',
+      message: ban.until
         ? `Вы временно не можете писать в поддержку — до ${new Date(ban.until).toLocaleString('ru-RU')}`
         : 'Вы лишены возможности писать в поддержку',
       bannedUntil: ban.until,
@@ -70,7 +73,9 @@ export default async function handler(req, res) {
     const nextAt = new Date(new Date(recent[0].created_at).getTime() + 3600_000)
     const minutes = Math.max(1, Math.ceil((nextAt - Date.now()) / 60000))
     return res.status(429).json({
-      error: `Писать можно раз в час. Попробуйте через ${minutes} мин.`,
+      error: 'rate_limited',
+      message: `Писать можно раз в час. Попробуйте через ${minutes} мин.`,
+      minutes,
       nextAllowedAt: nextAt.toISOString(),
     })
   }
@@ -82,7 +87,7 @@ export default async function handler(req, res) {
     .insert({ user_id: user.id, kind, text })
   if (insErr) {
     console.error('[support] insert failed', insErr.message)
-    return res.status(500).json({ error: 'Не удалось отправить' })
+    return res.status(500).json({ error: 'failed', message: 'Не удалось отправить' })
   }
 
   // 4. Кто написал — ник и имя для владельца бота.

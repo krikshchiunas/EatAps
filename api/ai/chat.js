@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     })
   }
 
-  const system = buildSystemPrompt({ tone: resolveTone(body.prefs).id, sub: { tier, status: 'active' } })
+  const system = buildSystemPrompt({ tone: resolveTone(body.prefs).id, sub: { tier, status: 'active' }, lang: body.lang })
   const context = capContext(buildUserContext(body.context || {}))
 
   // Контекст — отдельная первая реплика пользователя, а не приклеенный к его

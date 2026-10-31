@@ -26,7 +26,7 @@ import PromoRedeemForm from './PromoRedeemForm.jsx'
 import LegalSheet from './LegalSheet.jsx'
 import { Avatar } from './FriendsScreen.jsx'
 import { planByTier } from '../lib/subscription.js'
-import { t, fmtDate, fmtTime } from '../lib/i18n.js'
+import { t, fmtDate, fmtTime, fmtDateTime } from '../lib/i18n.js'
 import LanguageList from './LanguageList.jsx'
 
 // Версию подставляет сборка из package.json (см. vite.config.js). Фолбэк —
@@ -606,6 +606,17 @@ export function DataPanel({ onClose }) {
   )
 }
 
+// Ответ /api/support об отказе: код → фраза на языке интерфейса. Незнакомый
+// код (сервер новее клиента) — показываем его собственный текст.
+const SUPPORT_ERRORS = ['signin', 'too_short', 'too_long', 'failed', 'banned', 'banned_until', 'rate_limited']
+function supportError(data) {
+  if (!SUPPORT_ERRORS.includes(data.error)) return data.message || data.error || t('settings.support.sendFailed')
+  return t(`settings.support.err.${data.error}`, {
+    minutes: data.minutes,
+    date: data.bannedUntil ? fmtDateTime(data.bannedUntil, { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '',
+  })
+}
+
 // ── Поддержка и заявка на роль тренера ────────────────────────────────────────
 // Отличается от анонимной «обратной связи» ниже тем, что требует входа: чтобы
 // разбирать обращение и при необходимости заблокировать нарушителя, нужно
@@ -659,7 +670,7 @@ function SupportForm({ kind, placeholder, cta }) {
       const data = await r.json().catch(() => ({}))
       if (!r.ok) {
         setStatus('idle')
-        setError(data.error || t('settings.support.sendFailed'))
+        setError(supportError(data))
         // Сервер сам сообщает, когда можно снова — не гадаем на клиенте.
         if (data.nextAllowedAt) setNextAt(data.nextAllowedAt)
         return

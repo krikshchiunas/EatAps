@@ -156,6 +156,15 @@ export default {
       coachIntro: 'Coaches und Ernährungsberater können auf Einladung von Klienten deren Tagebuch sehen und Tage kommentieren. Erzähl von dir: Ausbildung, Erfahrung, Links. Jede Bewerbung prüft ein Mensch, die Antwort kommt über den Support.',
       coachPh: 'Wer du bist, was du machst, welche Erfahrung du hast und wo wir das prüfen können…',
       coachCta: 'Bewerbung senden',
+      err: {
+        signin: 'Melde dich an, um dem Support zu schreiben',
+        too_short: 'Beschreib dein Anliegen genauer – wenigstens ein paar Worte',
+        too_long: 'Die Nachricht ist zu lang',
+        failed: 'Senden fehlgeschlagen',
+        banned: 'Du kannst dem Support nicht mehr schreiben',
+        banned_until: 'Du kannst dem Support bis {date} nicht schreiben',
+        rate_limited: 'Schreiben ist einmal pro Stunde möglich. Versuch es in {minutes} Min. erneut.',
+      },
     },
     tips: {
       willReturn: 'Die Tipps kommen zurück',

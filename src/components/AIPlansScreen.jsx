@@ -2,32 +2,13 @@ import { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { PLANS, TIER } from '../lib/subscription.js'
 import PromoRedeemForm from './PromoRedeemForm.jsx'
+import { t } from '../lib/i18n.js'
 
-const PLAN_COPY = {
-  [TIER.AI]: {
-    tagline: 'Больше запросов к ассистенту каждый месяц.',
-    bullets: [
-      'Фото еды, разбор дневника, ответы на вопросы',
-      'История за неделю — ассистент видит ваши паттерны',
-      'Разбор дневника за период',
-    ],
-  },
-  [TIER.AI_PLUS]: {
-    tagline: 'Больше запросов и умная модель.',
-    bullets: [
-      'Более умная модель — точнее распознаёт блюда по фото',
-      'История за 30 дней и долгая память о ваших привычках',
-      'Больше запросов в месяц',
-    ],
-  },
-  [TIER.AI_PREMIUM]: {
-    tagline: 'Максимум без ограничений.',
-    bullets: [
-      'Самая умная модель и максимальный контекст',
-      'История за 90 дней и глубокая память о привычках',
-      'Без месячного лимита запросов',
-    ],
-  },
+// Тексты тарифа — в словаре (ai.plans.<key>.*): три пункта на каждый.
+const COPY_KEY = { [TIER.AI]: 'ai', [TIER.AI_PLUS]: 'plus', [TIER.AI_PREMIUM]: 'premium' }
+const planCopy = (tier) => {
+  const k = `ai.plans.${COPY_KEY[tier]}`
+  return { tagline: t(`${k}.tagline`), bullets: [t(`${k}.b1`), t(`${k}.b2`), t(`${k}.b3`)] }
 }
 
 export default function AIPlansScreen({ onClose }) {
@@ -38,7 +19,7 @@ export default function AIPlansScreen({ onClose }) {
   const handleBuy = async (tier) => {
     setError(null)
     if (!user) {
-      setError('Войдите в аккаунт, чтобы оформить подписку.')
+      setError(t('ai.plans.signIn'))
       return
     }
     setBusy(tier)
@@ -48,7 +29,7 @@ export default function AIPlansScreen({ onClose }) {
       if (res?.pending) return
       setBusy(null)
     } catch (e) {
-      setError(e?.message || 'Не удалось начать оплату.')
+      setError(e?.message || t('ai.plans.payFailed'))
       setBusy(null)
     }
   }
@@ -56,7 +37,7 @@ export default function AIPlansScreen({ onClose }) {
   return (
     <div className="screen ai-plans">
       {onClose && (
-        <button className="iconbtn" onClick={onClose} aria-label="Назад" style={{ fontSize: 22, marginBottom: 8 }}>‹</button>
+        <button className="iconbtn" onClick={onClose} aria-label={t('common.back')} style={{ fontSize: 22, marginBottom: 8 }}>‹</button>
       )}
       <div className="eyebrow ai-plans__eyebrow">🥕 Carrot</div>
 
@@ -67,8 +48,8 @@ export default function AIPlansScreen({ onClose }) {
             <path d="M19 15l.9 2.4 2.4.9-2.4.9L19 21.6l-.9-2.4-2.4-.9 2.4-.9.9-2.4z" />
           </svg>
         </div>
-        <h1 className="h1 ai-hero__title">Умный помощник<br/>по питанию</h1>
-        <p className="ai-hero__sub">Выберите тариф — и получите персональные подсказки, разбор рациона и быстрый счёт БЖУ прямо в EatAps.</p>
+        <h1 className="h1 ai-hero__title">{t('ai.plans.hero1')}<br/>{t('ai.plans.hero2')}</h1>
+        <p className="ai-hero__sub">{t('ai.plans.heroSub')}</p>
       </div>
 
       <div className="ai-plans__list">
@@ -76,7 +57,7 @@ export default function AIPlansScreen({ onClose }) {
           <PlanCard
             key={plan.tier}
             plan={plan}
-            copy={PLAN_COPY[plan.tier]}
+            copy={planCopy(plan.tier)}
             index={i}
             busy={busy === plan.tier}
             disabled={Boolean(busy)}
@@ -91,7 +72,7 @@ export default function AIPlansScreen({ onClose }) {
 
       <PromoRedeemForm />
 
-      <p className="ai-plans__foot">Оплата раз в месяц. Отмена в любой момент.</p>
+      <p className="ai-plans__foot">{t('ai.plans.foot')}</p>
     </div>
   )
 }
@@ -133,7 +114,7 @@ function PlanCard({ plan, copy, index, busy, disabled, onBuy }) {
           onClick={onBuy}
           disabled={disabled}
         >
-          {busy ? 'Открываем оплату…' : 'Оформить'}
+          {busy ? t('ai.plans.opening') : t('ai.plans.subscribe')}
         </button>
       </div>
     </article>
