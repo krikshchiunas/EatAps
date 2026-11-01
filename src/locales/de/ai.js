@@ -44,6 +44,7 @@ export default {
       offline: 'Keine Verbindung. Prüf dein Internet.',
     },
     plans: {
+      popular: 'Beliebt',
       month: 'Monat',
       ai: {
         tagline: 'Mehr Anfragen an den Assistenten jeden Monat.',

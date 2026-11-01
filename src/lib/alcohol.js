@@ -1,3 +1,4 @@
+// @i18n-data-file — справочник алкоголя: русские названия — данные (переводы по id).
 // Calories from pure alcohol: ml × (pct/100) × 0.789 g/ml × 7 kcal/g
 export function alcKcal(ml, pct) {
   return Math.round(ml * (pct / 100) * 0.789 * 7)

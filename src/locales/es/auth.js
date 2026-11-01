@@ -30,6 +30,8 @@ export default {
     openApp: 'Abrir la app',
   },
   auth: {
+    emailLabel: 'Correo electrónico',
+    walletDescription: 'EatAps: diario de nutrición',
     loginTitle: 'Iniciar sesión en EatAps',
     registerTitle: 'Registrarse en EatAps',
     loginText: 'Inicia sesión para guardar tus datos en la nube y sincronizarlos entre tus dispositivos.',

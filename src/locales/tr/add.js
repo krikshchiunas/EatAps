@@ -65,6 +65,7 @@ export default {
     found: 'Bulunanlar',
     allDb: 'Tüm veritabanı',
     showMore: '{rest} sonuçtan {n} tanesini daha göster',
+    didYouMean: 'Bunu mu demek istedin: {name}?',
     globalDb: 'Genel veritabanı',
     offline: 'İnternet yok. Kendi besinlerin ve yukarıdaki sonuçlar çevrimdışı da çalışır.',
     remoteError: 'Genel veritabanı yanıt vermedi. Yukarıdaki sonuçlar senin veritabanından.',

@@ -44,6 +44,7 @@ export default {
       offline: 'No connection. Check your internet.',
     },
     plans: {
+      popular: 'Popular',
       month: 'mo',
       ai: {
         tagline: 'More assistant requests every month.',

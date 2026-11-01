@@ -30,6 +30,8 @@ export default {
     openApp: 'Uygulamayı aç',
   },
   auth: {
+    emailLabel: 'E-posta',
+    walletDescription: 'EatAps — beslenme takibi',
     loginTitle: 'EatAps’e giriş',
     registerTitle: 'EatAps’e kayıt',
     loginText: 'Verilerin bulutta saklansın ve cihazların arasında eşitlensin diye giriş yap.',

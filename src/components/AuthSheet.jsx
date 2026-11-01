@@ -131,7 +131,7 @@ export default function AuthSheet({ onClose, mode = 'login', onBeforeAuth, onReg
           }}
         >
           <div className="field">
-            <label>Email</label>
+            <label>{t('auth.emailLabel')}</label>
             <input className="input" type="email" inputMode="email" autoComplete="email" placeholder="name@mail.com" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div className="field">

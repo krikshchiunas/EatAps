@@ -8,6 +8,7 @@
 //   • персонализация НЕ ломает релевантность — главное правило поиска;
 //   • слияние недавних не теряет счётчик (терялся при каждой синхронизации).
 // ─────────────────────────────────────────────────────────────────────────────
+import KEYWORDS from './search/keywords.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { normalizeQuery, translit, searchLocal, searchByName, sanitizeAmount, FOODS, scale, hasMacros, macroLabel, amountLabel } from './foods.js'
@@ -92,13 +93,11 @@ test('поиск находит продукт по английскому и н
   }
 })
 
-test('все иноязычные псевдонимы навешены на существующие продукты', () => {
-  // Опечатка в ключе таблицы FOREIGN не сломала бы сборку, но продукт молча
-  // остался бы без английского названия. Проверяем, что alias реально доехал.
-  const banana = FOODS.find((f) => f.name === 'Банан')
-  assert.ok(banana.alias.includes('banana'))
-  const chicken = FOODS.find((f) => f.name === 'Куриная грудка')
-  assert.ok(chicken.alias.includes('chicken'))
+test('иноязычные ключевые слова привязаны к продуктам по id', () => {
+  // Опечатка в id не сломала бы сборку, но продукт молча остался бы без
+  // английского и немецкого слова. Проверяем, что слова доехали до продуктов.
+  assert.ok(KEYWORDS.food_banana.includes('banana'))
+  assert.ok(KEYWORDS.food_chicken_breast.includes('chicken'))
 })
 
 // ── Опечатки остаются рабочими ───────────────────────────────────────────────

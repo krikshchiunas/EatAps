@@ -44,6 +44,7 @@ export default {
       offline: 'Bağlantı yok. İnternetini kontrol et.',
     },
     plans: {
+      popular: 'Popüler',
       month: 'ay',
       ai: {
         tagline: 'Her ay asistana daha çok soru.',

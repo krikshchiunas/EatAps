@@ -16,6 +16,14 @@
 import { keyOf } from './date.js'
 import { dayNutrients } from './stats.js'
 import { effectiveMealId } from './meals.js'
+import { t, fmtNum } from './i18n.js'
+import { unitLabel } from './units.js'
+import { entryName } from './foodNames.js'
+import { wellbeingLabel } from './insights.js'
+import { fold } from './search/normalize.js'
+import { matchCatalogFoodSync } from './search/index.js'
+import { canonicalName } from './catalog.js'
+import { FOODS } from './foods.js'
 
 // ── CSV: экспорт ──────────────────────────────────────────────────────────────
 
@@ -32,30 +40,30 @@ export function toCsv(rows) {
   return rows.map((r) => r.map(csvCell).join(',')).join('\r\n')
 }
 
-const MEAL_LABEL = {
-  'std:breakfast': 'Завтрак',
-  'std:lunch': 'Обед',
-  'std:dinner': 'Ужин',
-  'std:snack': 'Перекус',
-  'std:other': 'Без категории',
+// Подпись приёма пищи на языке интерфейса.
+function mealLabel(id, day) {
+  if (id === 'std:other') return t('exchange.mealOther')
+  if (typeof id === 'string' && id.startsWith('std:')) return t(`meal.${id.slice(4)}`)
+  return (day?.mealSections || []).find((s) => s.id === id)?.customName || t('exchange.mealDefault')
 }
 
-// Построчный экспорт: одна строка = один съеденный продукт.
+const col = (k) => t(`exchange.col.${k}`)
+const unitCell = (u) => unitLabel(u || 'г')
+
+// Построчный экспорт: одна строка = один съеденный продукт. Всё — на языке
+// интерфейса: файл открывает врач или тренер, а не приложение. Названия
+// продуктов базы — тоже на нём (entryName); свои — как названы.
 export function buildMealsCsv(days, keys) {
-  const rows = [[
-    'Дата', 'Приём пищи', 'Продукт', 'Количество', 'Единица',
-    'Ккал', 'Белки, г', 'Углеводы, г', 'Жиры, г', 'Сахар, г', 'Насыщ. жиры, г',
-  ]]
+  const rows = [['date', 'meal', 'food', 'amount', 'unit', 'kcal', 'protein', 'carbs', 'fat', 'sugar', 'satFat'].map(col)]
   for (const k of keys) {
     const day = days?.[k]
     for (const m of day?.meals || []) {
-      const id = effectiveMealId(m)
       rows.push([
         k,
-        MEAL_LABEL[id] || (day?.mealSections || []).find((s) => s.id === id)?.customName || 'Приём пищи',
-        m.name,
+        mealLabel(effectiveMealId(m), day),
+        entryName(m),
         m.grams ?? '',
-        m.unit || 'г',
+        unitCell(m.unit),
         m.kcal ?? '',
         m.protein ?? '',
         m.carbs ?? '',
@@ -71,26 +79,23 @@ export function buildMealsCsv(days, keys) {
 
 // Посуточный экспорт: итоги дня, вес, активность, самочувствие.
 export function buildDaysCsv(days, keys, targetsFor) {
-  const rows = [[
-    'Дата', 'Ккал', 'Цель ккал', 'Белки, г', 'Углеводы, г', 'Жиры, г',
-    'Вес, кг', 'Активность', 'Самочувствие', 'Учтён в статистике',
-  ]]
+  const rows = [['date', 'kcal', 'kcalTarget', 'protein', 'carbs', 'fat', 'weight', 'activity', 'wellbeing', 'inStats'].map(col)]
   for (const k of keys) {
     const day = days?.[k]
     if (!day?.meals?.length && day?.weight == null) continue
     const n = dayNutrients(day?.meals || [])
-    const t = targetsFor ? targetsFor(k, day) : null
+    const target = targetsFor ? targetsFor(k, day) : null
     rows.push([
       k,
       Math.round(n.kcal),
-      t?.calories ?? '',
+      target?.calories ?? '',
       Math.round(n.protein * 10) / 10,
       Math.round(n.carbs * 10) / 10,
       Math.round(n.fat * 10) / 10,
       day?.weight ?? '',
       day?.activity ?? '',
-      (day?.wellbeing || []).join(' · '),
-      day?.statsExcluded ? 'нет' : 'да',
+      (day?.wellbeing || []).map(wellbeingLabel).join(' · '),
+      day?.statsExcluded ? t('common.no') : t('common.yes'),
     ])
   }
   return toCsv(rows)
@@ -139,33 +144,41 @@ export function parseCsvLine(line, delim) {
   return out.map((c) => c.trim().replace(/^'(?=[=+\-@])/, ''))
 }
 
-// Синонимы колонок. MyFitnessPal англоязычный, наш экспорт — русский;
-// поддерживаем оба, плюс частые варианты из других трекеров.
+// Синонимы колонок: наш экспорт на любом из семи языков (его заголовки
+// совпадают с exchange.col в словарях — это проверяет exchange.test.js),
+// MyFitnessPal и частые варианты других трекеров. Сравнение — после
+// нормализации (регистр, диакритика, пунктуация).
+/* @i18n-data */
 const COLUMN_SYNONYMS = {
-  date: ['дата', 'date', 'day', 'день'],
-  meal: ['приём пищи', 'прием пищи', 'meal', 'meal type', 'категория'],
-  name: ['продукт', 'название', 'name', 'food', 'food name', 'item', 'description'],
-  grams: ['количество', 'вес', 'amount', 'quantity', 'serving', 'grams', 'weight'],
-  unit: ['единица', 'unit', 'units', 'measure'],
-  kcal: ['ккал', 'калории', 'kcal', 'calories', 'energy', 'cals'],
-  protein: ['белки', 'белки, г', 'protein', 'protein (g)'],
-  carbs: ['углеводы', 'углеводы, г', 'carbs', 'carbohydrates', 'carbohydrates (g)'],
-  fat: ['жиры', 'жиры, г', 'fat', 'fat (g)'],
-  sugar: ['сахар', 'сахар, г', 'sugar', 'sugars'],
-  satFat: ['насыщ. жиры, г', 'насыщенные жиры', 'saturated fat', 'sat fat'],
+  date: ['дата', 'день', 'date', 'day', 'datum', 'fecha', 'data', 'tarih', 'التاريخ'],
+  meal: ['приём пищи', 'прием пищи', 'категория', 'meal', 'meal type', 'mahlzeit', 'comida', 'refeição', 'öğün', 'الوجبة'],
+  name: ['продукт', 'название', 'name', 'food', 'food name', 'item', 'description', 'lebensmittel', 'alimento', 'besin', 'الطعام'],
+  grams: ['количество', 'вес', 'amount', 'quantity', 'serving', 'grams', 'weight', 'menge', 'cantidad', 'quantidade', 'miktar', 'الكمية'],
+  unit: ['единица', 'unit', 'units', 'measure', 'einheit', 'unidad', 'unidade', 'birim', 'الوحدة'],
+  kcal: ['ккал', 'калории', 'kcal', 'calories', 'energy', 'cals', 'kalorien', 'calorías', 'calorias', 'kalori', 'السعرات (kcal)', 'السعرات'],
+  protein: ['белки', 'белки, г', 'protein', 'protein (g)', 'protein, g', 'eiweiß', 'eiweiß, g', 'proteínas', 'proteínas, g', 'البروتين', 'البروتين، غ'],
+  carbs: ['углеводы', 'углеводы, г', 'carbs', 'carbs, g', 'carbohydrates', 'carbohydrates (g)', 'kohlenhydrate', 'kohlenhydrate, g', 'carbohidratos', 'carbohidratos, g', 'carboidratos', 'carboidratos, g', 'karbonhidrat', 'karbonhidrat, g', 'الكربوهيدرات', 'الكربوهيدرات، غ'],
+  fat: ['жиры', 'жиры, г', 'fat', 'fat (g)', 'fat, g', 'fett', 'fett, g', 'grasas', 'grasas, g', 'gorduras', 'gorduras, g', 'yağ', 'yağ, g', 'الدهون', 'الدهون، غ'],
+  sugar: ['сахар', 'сахар, г', 'sugar', 'sugars', 'sugar, g', 'zucker', 'zucker, g', 'azúcar', 'azúcar, g', 'açúcar', 'açúcar, g', 'şeker', 'şeker, g', 'السكر', 'السكر، غ'],
+  satFat: ['насыщ. жиры, г', 'насыщенные жиры', 'saturated fat', 'saturated fat, g', 'sat fat', 'gesättigte fettsäuren, g', 'grasas saturadas, g', 'gorduras saturadas, g', 'doymuş yağ, g', 'الدهون المشبعة، غ'],
 }
+const FOLDED_SYNONYMS = Object.fromEntries(Object.entries(COLUMN_SYNONYMS).map(([k, v]) => [k, v.map(fold)]))
 
-const cleanHeader = (h) => h.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim()
+const cleanHeader = (h) => fold(h)
 
 // Сопоставление «наше поле → индекс колонки». Точное совпадение приоритетнее
-// частичного, иначе «Сахар, г» мог бы уехать в колонку «Углеводы».
+// частичного, иначе «Сахар, г» мог бы уехать в колонку «Углеводы». Порядок
+// проверки полей важен: насыщенные жиры раньше просто жиров.
 export function mapColumns(header) {
   const cleaned = header.map(cleanHeader)
   const map = {}
-  for (const [field, names] of Object.entries(COLUMN_SYNONYMS)) {
-    let idx = cleaned.findIndex((h) => names.includes(h))
-    if (idx === -1) idx = cleaned.findIndex((h) => names.some((n) => h.startsWith(n)))
-    if (idx !== -1) map[field] = idx
+  const taken = new Set()
+  const fields = ['satFat', ...Object.keys(FOLDED_SYNONYMS).filter((f) => f !== 'satFat')]
+  for (const field of fields) {
+    const names = FOLDED_SYNONYMS[field]
+    let idx = cleaned.findIndex((h, i) => !taken.has(i) && names.includes(h))
+    if (idx === -1) idx = cleaned.findIndex((h, i) => !taken.has(i) && names.some((n) => h.startsWith(n)))
+    if (idx !== -1) { map[field] = idx; taken.add(idx) }
   }
   return map
 }
@@ -184,12 +197,13 @@ export function parseDate(raw) {
   return Number.isNaN(d.getTime()) ? null : keyOf(d)
 }
 
+/* @i18n-data */
 const MEAL_ALIASES = [
-  ['std:breakfast', ['завтрак', 'breakfast']],
-  ['std:lunch', ['обед', 'lunch']],
-  ['std:dinner', ['ужин', 'dinner']],
-  ['std:snack', ['перекус', 'snack', 'snacks']],
-]
+  ['std:breakfast', ['завтрак', 'breakfast', 'frühstück', 'desayuno', 'café da manhã', 'kahvaltı', 'فطور', 'إفطار']],
+  ['std:lunch', ['обед', 'lunch', 'mittagessen', 'almuerzo', 'comida', 'almoço', 'öğle yemeği', 'غداء']],
+  ['std:dinner', ['ужин', 'dinner', 'abendessen', 'cena', 'jantar', 'akşam yemeği', 'عشاء']],
+  ['std:snack', ['перекус', 'snack', 'snacks', 'zwischenmahlzeit', 'merienda', 'tentempié', 'lanche', 'ara öğün', 'atıştırmalık', 'وجبة خفيفة']],
+].map(([id, names]) => [id, names.map(fold)])
 
 function parseMeal(raw) {
   const s = cleanHeader(String(raw || ''))
@@ -210,13 +224,16 @@ function parseNum(raw) {
 
 export const IMPORT_MAX_ROWS = 20000
 
-// Разбор CSV в структуру дней. Ничего не пишет — возвращает предпросмотр:
+// Разбор CSV в структуру дней. Ничего не пишет — возвращает предпросмотр.
+// Чтобы продукты базы узнавались на всех языках, перед разбором стоит
+// дождаться loadSearchNames() (src/lib/search/index.js); без него узнаются
+// русские названия и названия на языке интерфейса.
 // { days, stats:{rows, imported, skipped, dateRange}, warnings, columns }.
 export function parseImportCsv(text) {
   const clean = String(text || '').replace(/^﻿/, '')
   const lines = clean.split(/\r\n|\n|\r/).filter((l) => l.trim() !== '')
   if (lines.length < 2) {
-    return { ok: false, error: 'Файл пустой или в нём только заголовок.' }
+    return { ok: false, error: 'empty' }
   }
 
   const delim = detectDelimiter(lines[0])
@@ -224,16 +241,10 @@ export function parseImportCsv(text) {
   const cols = mapColumns(header)
 
   const missing = []
-  if (cols.date == null) missing.push('дата')
-  if (cols.name == null) missing.push('название продукта')
-  if (cols.kcal == null) missing.push('калории')
-  if (missing.length) {
-    return {
-      ok: false,
-      error: `Не нашли обязательные колонки: ${missing.join(', ')}.`,
-      header,
-    }
-  }
+  if (cols.date == null) missing.push('date')
+  if (cols.name == null) missing.push('food')
+  if (cols.kcal == null) missing.push('kcal')
+  if (missing.length) return { ok: false, error: 'missingColumns', missing, header }
 
   const days = {}
   const warnings = []
@@ -251,15 +262,20 @@ export function parseImportCsv(text) {
 
     if (!dateKey || !name || kcal == null) {
       skipped += 1
-      if (warnings.length < 5) warnings.push(`Строка ${i + 1}: пропущена (нет даты, названия или калорий).`)
+      if (warnings.length < 5) warnings.push({ code: 'rowSkipped', row: i + 1 })
       continue
     }
 
+    // Название продукта базы на любом языке («Haferflocken, trocken» из
+    // немецкой выгрузки) → каноническая запись с id: после импорта она
+    // показывается на языке человека. Своё — как записано.
+    const catalog = matchCatalogFoodSync(name, FOODS)
     const meal = {
-      name,
+      name: catalog ? canonicalName('foods', catalog) : name,
+      ...(catalog ? { foodId: catalog } : {}),
       emoji: '📥',
       mealId: cols.meal != null ? parseMeal(cells[cols.meal]) : 'std:other',
-      unit: (cols.unit != null && cells[cols.unit]?.trim()) || 'г',
+      unit: parseUnit(cols.unit != null ? cells[cols.unit] : ''),
       grams: cols.grams != null ? parseNum(cells[cols.grams]) : null,
       kcal: Math.round(kcal),
       protein: cols.protein != null ? parseNum(cells[cols.protein]) ?? 0 : 0,
@@ -286,11 +302,11 @@ export function parseImportCsv(text) {
   }
 
   if (lines.length - 1 > IMPORT_MAX_ROWS) {
-    warnings.push(`В файле больше ${IMPORT_MAX_ROWS} строк — импортированы первые ${IMPORT_MAX_ROWS}.`)
+    warnings.push({ code: 'tooManyRows', n: IMPORT_MAX_ROWS })
   }
 
   if (imported === 0) {
-    return { ok: false, error: 'Не удалось разобрать ни одной строки. Проверьте формат файла.', header, warnings }
+    return { ok: false, error: 'nothingParsed', header, warnings }
   }
 
   return {
@@ -308,4 +324,26 @@ export function parseImportCsv(text) {
       to: maxDate,
     },
   }
+}
+
+// Единица из файла → наш код единицы. «g», «gr», «г», «غ» — граммы.
+/* @i18n-data */
+const UNIT_ALIASES = { г: 'г', гр: 'г', g: 'г', gr: 'г', gram: 'г', grams: 'г', غ: 'г', غرام: 'г', мл: 'мл', ml: 'мл', مل: 'мл', шт: 'шт', pc: 'шт', pcs: 'шт', stk: 'шт', adet: 'шт' }
+function parseUnit(raw) {
+  const u = fold(raw)
+  return Object.prototype.hasOwnProperty.call(UNIT_ALIASES, u) ? UNIT_ALIASES[u] : u || 'г'
+}
+
+// Текст ошибки или предупреждения импорта на языке интерфейса.
+export function importErrorText(res) {
+  if (!res || res.ok) return ''
+  if (res.error === 'missingColumns') {
+    return t('exchange.err.missingColumns', { cols: (res.missing || []).map(col).join(', ') })
+  }
+  return t(`exchange.err.${res.error === 'empty' ? 'empty' : 'nothingParsed'}`)
+}
+export function importWarningText(w) {
+  if (w?.code === 'rowSkipped') return t('exchange.err.rowSkipped', { row: w.row })
+  if (w?.code === 'tooManyRows') return t('exchange.err.tooManyRows', { n: fmtNum(w.n) })
+  return ''
 }

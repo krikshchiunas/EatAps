@@ -239,7 +239,7 @@ export default function UserProfileView({
               <ProfileRow label={t('profile.bio')} value={p.bio} multiline />
               <ProfileRow label={t('profile.love')} value={habits.most?.name && foodName(habits.most.name)} />
               <ProfileRow label={t('profile.ok')} value={habits.rare?.name && foodName(habits.rare.name)} />
-              <ProfileRow label="MY guilty pleasure" value={p.guiltyPleasure} />
+              <ProfileRow label={t('profile.guiltyPleasure')} value={p.guiltyPleasure} />
             </div>
           ) : (
             <div className="card">

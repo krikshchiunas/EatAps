@@ -1,3 +1,4 @@
+// @i18n-data-file — классификация продуктов по русским основам названий.
 import { estimateSaturatedFat, classifyComplexCarb, estimateProteinQuality, usableProteinShare } from './nutritionClassification.js'
 import { t } from './i18n.js'
 

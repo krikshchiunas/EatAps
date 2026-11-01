@@ -17,25 +17,18 @@
 // Подписи в константах-справочниках оформляются геттером (get label()).
 // ─────────────────────────────────────────────────────────────────────────────
 import * as ruPack from '../locales/ru.js'
+import {
+  LANGUAGES, SOURCE_LANG, FALLBACK_LANG, LANG_KEY, LEGACY_INSTALL_KEYS, LEGACY_INSTALL_PREFIXES,
+  matchLanguage, readStoredLanguage, detectLanguage, hasLegacyInstall, deviceLanguages,
+} from '../locales/registry.js'
 
-// locale — для Intl: даты, числа, правила множественного числа. У арабского
-// цифры латинские: числа в приложении пишутся и вводятся ими, и смесь
-// «١٢٠ ккал» в одной строке с «120 г» в соседней читается хуже любой из них.
-export const LANGS = [
-  { code: 'ru', name: 'Русский', locale: 'ru-RU' },
-  { code: 'en', name: 'English', locale: 'en-GB' },
-  { code: 'de', name: 'Deutsch', locale: 'de-DE' },
-  { code: 'es', name: 'Español', locale: 'es-ES' },
-  { code: 'pt', name: 'Português', locale: 'pt-BR' },
-  { code: 'tr', name: 'Türkçe', locale: 'tr-TR' },
-  { code: 'ar', name: 'العربية', locale: 'ar-u-nu-latn', dir: 'rtl' },
-]
+// Языки — из реестра (src/locales/registry.js). locale — прежнее имя поля
+// intlLocale: его читают компоненты, переименовывать незачем.
+export const LANGS = LANGUAGES.filter((l) => l.enabled !== false).map((l) => ({ ...l, locale: l.intlLocale }))
+export { SOURCE_LANG, FALLBACK_LANG, LANG_KEY }
 
-export const SOURCE_LANG = 'ru'
-// Для браузера на языке, которого у нас нет: английский поймут чаще прочих.
-export const FALLBACK_LANG = 'en'
-export const LANG_KEY = 'eataps:lang'
-
+// Пакеты языков — отдельные чанки. Русский вшит: он подстраховка, и без него
+// нечем показать экран, пока чанк едет по сети.
 const LOADERS = {
   en: () => import('../locales/en.js'),
   de: () => import('../locales/de.js'),
@@ -74,6 +67,7 @@ let rules = null
 const listeners = new Set()
 
 export const isSupported = (code) => LANGS.some((l) => l.code === code)
+export { matchLanguage }
 export const getLang = () => current
 export const langInfo = (code = current) => LANGS.find((l) => l.code === code) || LANGS[0]
 export const locale = () => langInfo().locale
@@ -122,13 +116,18 @@ export function t(key, params) {
 // Есть ли у ключа перевод на текущем языке (без подстраховки русским).
 export const hasOwn = (key) => packs[current]?.strings.has(key) || false
 
-// Переводы данных: названия продуктов, добавок, нутриентов. Ключ — исходное
-// русское значение (оно же хранится в дневнике), поэтому смена языка не
-// трогает записанное: переводится только показ. Нет перевода — исходник.
-export function tData(table, key) {
-  if (key == null || current === SOURCE_LANG) return key
-  const v = packs[current]?.data?.[table]?.[key]
-  return v == null ? key : v
+// Переводы данных по стабильному id: названия продуктов, способов
+// приготовления, порций, добавок, нутриентов (см. src/lib/catalog.js).
+// Нет перевода на текущем языке — исходное (русское) название; нет и его —
+// fallback, а если и он не задан, сам id. Словари без прототипа не нужны:
+// поиск идёт только по собственным ключам таблицы.
+const hasKey = (obj, k) => !!obj && typeof k === 'string' && Object.prototype.hasOwnProperty.call(obj, k)
+export function tData(table, id, fallback) {
+  const own = packs[current]?.data?.[table]
+  if (hasKey(own, id)) return own[id]
+  const src = packs[SOURCE_LANG]?.data?.[table]
+  if (hasKey(src, id)) return src[id]
+  return fallback === undefined ? id : fallback
 }
 
 // Вся таблица данных текущего языка — для поиска по переведённым названиям.
@@ -149,41 +148,40 @@ export function fmtNum(n, opts) {
 }
 
 // ── Выбор языка ──────────────────────────────────────────────────────────────
+function storage() {
+  try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
+}
+
 function readSaved() {
-  try {
-    const v = localStorage.getItem(LANG_KEY)
-    return isSupported(v) ? v : null
-  } catch { return null }
+  try { return readStoredLanguage(storage()?.getItem(LANG_KEY), LANGS) } catch { return '' }
 }
 
 function save(code) {
-  try { localStorage.setItem(LANG_KEY, code) } catch {}
+  try { storage()?.setItem(LANG_KEY, code) } catch {}
 }
 
-// До появления языков EatAps был только русским. Человек, у которого на
-// устройстве уже лежат данные, читал его по-русски — переключать его на язык
-// браузера посреди привычного дневника было бы сюрпризом, а не заботой.
-function hasExistingInstall() {
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)
-      if (k && (k.startsWith('eataps:state:') || k === 'eataps:v1')) return true
-    }
-  } catch {}
-  return false
-}
-
+// Тег браузера → код языка. list — для тестов; по умолчанию navigator.languages.
 export function browserLang(list) {
-  const prefs = list || (typeof navigator === 'undefined' ? [] : (navigator.languages?.length ? navigator.languages : [navigator.language]))
+  const prefs = list || deviceLanguages(typeof navigator === 'undefined' ? null : navigator)
   for (const tag of prefs) {
-    const code = String(tag || '').toLowerCase().split(/[-_]/)[0]
-    if (isSupported(code)) return code
+    const code = matchLanguage(tag, LANGS)
+    if (code) return code
   }
   return null
 }
 
-export function detectLang() {
-  return readSaved() || (hasExistingInstall() ? SOURCE_LANG : null) || browserLang() || FALLBACK_LANG
+// Язык запуска — та же функция, что встроена в index.html (см. registry.js):
+// загрузочный экран и приложение не могут выбрать разные языки.
+export function detectLang({ stored, preferred, legacyInstall } = {}) {
+  const st = storage()
+  return detectLanguage({
+    stored: stored !== undefined ? stored : st?.getItem?.(LANG_KEY),
+    legacyInstall: legacyInstall !== undefined ? legacyInstall : (st ? hasLegacyInstall(st, LEGACY_INSTALL_KEYS, LEGACY_INSTALL_PREFIXES) : false),
+    preferred: preferred || deviceLanguages(typeof navigator === 'undefined' ? null : navigator),
+    langs: LANGS,
+    source: SOURCE_LANG,
+    fallback: FALLBACK_LANG,
+  })
 }
 
 function applyDocument() {
@@ -193,37 +191,66 @@ function applyDocument() {
   el.setAttribute('dir', langInfo().dir || 'ltr')
 }
 
-async function loadPack(code) {
-  if (packs[code]) return true
-  try {
-    packs[code] = compile(await LOADERS[code]())
-    return true
-  } catch {
-    return false
+// Загрузка пакета. Одновременные запросы одного языка делят одну загрузку.
+const inflight = new Map()
+function loadPack(code) {
+  if (packs[code]) return Promise.resolve(true)
+  const loader = LOADERS[code]
+  if (!loader) return Promise.resolve(false)
+  if (!inflight.has(code)) {
+    inflight.set(code, loader()
+      .then((mod) => { packs[code] = compile(mod); return true })
+      .catch(() => false)
+      .finally(() => inflight.delete(code)))
   }
+  return inflight.get(code)
 }
 
 // Переключает язык. Пакет не загрузился (нет сети, а чанка нет в кэше) —
-// остаёмся на прежнем языке и сообщаем об этом false: экран выбора покажет,
-// что переключиться не вышло, вместо того чтобы молча оставить всё как было.
+// остаёмся на прежнем языке и возвращаем false: экран выбора покажет, что
+// переключиться не вышло, вместо того чтобы молча оставить всё как было.
+//
+// Порядок гарантирован: если человек успел выбрать второй язык, пока грузился
+// первый, применится только последний выбор, в каком бы порядке ни пришли
+// чанки. Перекрытый запрос возвращает true — он не ошибся, его просто сменили.
+let switchSeq = 0
 export async function setLang(code, { persist = true } = {}) {
-  if (!isSupported(code)) code = SOURCE_LANG
-  if (!(await loadPack(code))) return false
-  current = code
+  const target = readStoredLanguage(code, LANGS)
+  if (!target) return false
+  const seq = ++switchSeq
+  const ok = await loadPack(target)
+  if (seq !== switchSeq) return ok
+  if (!ok) return false
+  const changed = current !== target
+  current = target
   rules = null
-  if (persist) save(code)
+  if (persist) save(target)
   applyDocument()
-  for (const fn of listeners) fn(code)
+  if (changed) for (const fn of listeners) fn(target)
   return true
 }
 
-// Один раз при запуске, до первого рендера. Выбранный автоматически язык
+// Один раз при запуске, до первого рендера. Определённый автоматически язык
 // запоминаем сразу: иначе смена языка в настройках телефона однажды молча
-// переключила бы и приложение.
+// переключила бы и приложение. Выбор человека не перезаписывается ничем.
+//
+// Если пакет нужного языка недоступен (первый запуск без сети, чанка нет в
+// кэше), показываем английский, а если нет и его — вшитый русский. Сохранённый
+// выбор при этом НЕ затираем: появится сеть — следующий запуск откроется на
+// языке человека.
 export async function initI18n() {
   const code = detectLang()
-  if (await setLang(code)) return
-  // Чанк выбранного языка недоступен — показываем исходный, но выбор человека
-  // не затираем: появится сеть, и следующий запуск откроется на его языке.
-  await setLang(SOURCE_LANG, { persist: false })
+  if (await setLang(code)) return code
+  for (const fallback of [FALLBACK_LANG, SOURCE_LANG]) {
+    if (fallback !== code && (await setLang(fallback, { persist: false }))) return fallback
+  }
+  return getLang()
+}
+
+// Для тестов: сбросить состояние модуля к исходному.
+export function __resetForTests() {
+  current = SOURCE_LANG
+  rules = null
+  switchSeq += 1
+  for (const k of Object.keys(packs)) if (k !== SOURCE_LANG) delete packs[k]
 }

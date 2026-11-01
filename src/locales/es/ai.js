@@ -44,6 +44,7 @@ export default {
       offline: 'Sin conexión. Revisa tu internet.',
     },
     plans: {
+      popular: 'Popular',
       month: 'mes',
       ai: {
         tagline: 'Más consultas al asistente cada mes.',

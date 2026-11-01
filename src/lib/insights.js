@@ -16,11 +16,25 @@
 // Никаких медицинских выводов здесь не делается и делаться не должно.
 // ─────────────────────────────────────────────────────────────────────────────
 import { normalizeName } from './text.js'
+import { t, fmtNum } from './i18n.js'
+import { unitLabel } from './units.js'
+import { foodName } from './foodNames.js'
 
 // Теги самочувствия, предлагаемые на экране дня. Полярность нужна только для
 // оформления (что считать «хорошим» исходом), на математику не влияет.
+// Значения тегов — русские: так они записаны в днях у людей (day.wellbeing),
+// это данные, а не подписи. Подпись на языке интерфейса — wellbeingLabel().
+/* @i18n-data */
 export const WELLBEING = ['Энергия', 'Сон', 'Лёгкость', 'Тяжесть', 'Вздутие', 'Голод', 'Стресс', 'Тренировка']
+/* @i18n-data */
+const WELLBEING_KEY = {
+  'Энергия': 'energy', 'Сон': 'sleep', 'Лёгкость': 'light', 'Тяжесть': 'heavy',
+  'Вздутие': 'bloating', 'Голод': 'hunger', 'Стресс': 'stress', 'Тренировка': 'workout',
+}
+// Тег → подпись на языке интерфейса. Незнакомый тег (свой) — как записан.
+export const wellbeingLabel = (tag) => (Object.prototype.hasOwnProperty.call(WELLBEING_KEY, tag) ? t(`wellbeing.${WELLBEING_KEY[tag]}`) : tag)
 
+/* @i18n-data */
 export const TAG_POLARITY = {
   'Энергия': 'good',
   'Сон': 'good',
@@ -43,13 +57,13 @@ const MIN_PRODUCT_EFFECT = 0.25 // разница частот ≥ 25 п.п.
 // Нутриенты, по которым ищем связь. Оценочные (сахар, насыщенные жиры) помечены —
 // UI обязан показывать это как приблизительное.
 const LINK_NUTRIENTS = [
-  { key: 'kcal', label: 'калорий', unit: 'ккал', digits: 0 },
-  { key: 'sugar', label: 'сахара', unit: 'г', digits: 1, estimate: true },
-  { key: 'satFat', label: 'насыщенных жиров', unit: 'г', digits: 1, estimate: true },
-  { key: 'protein', label: 'белка', unit: 'г', digits: 1 },
-  { key: 'carbs', label: 'углеводов', unit: 'г', digits: 1 },
-  { key: 'fat', label: 'жиров', unit: 'г', digits: 1 },
-  { key: 'complexCarb', label: 'сложных углеводов', unit: 'г', digits: 1, estimate: true },
+  { key: 'kcal', unit: 'ккал', digits: 0 },
+  { key: 'sugar', unit: 'г', digits: 1, estimate: true },
+  { key: 'satFat', unit: 'г', digits: 1, estimate: true },
+  { key: 'protein', unit: 'г', digits: 1 },
+  { key: 'carbs', unit: 'г', digits: 1 },
+  { key: 'fat', unit: 'г', digits: 1 },
+  { key: 'complexCarb', unit: 'г', digits: 1, estimate: true },
 ]
 
 const mean = (arr) => (arr.length ? arr.reduce((a, v) => a + v, 0) / arr.length : null)
@@ -80,7 +94,6 @@ function nutrientLinks(entries, tag) {
       kind: 'nutrient',
       tag,
       nutrient: def.key,
-      label: def.label,
       unit: def.unit,
       digits: def.digits,
       estimate: Boolean(def.estimate),
@@ -205,13 +218,18 @@ export function buildInsights(logged) {
 // «чаще совпадает», «в среднем больше» — никаких «приводит к» и «вызывает».
 export function describeLink(link) {
   const pct = Math.abs(Math.round(link.effect * 100))
+  const tag = wellbeingLabel(link.tag)
   if (link.kind === 'nutrient') {
-    const more = link.effect > 0 ? 'больше' : 'меньше'
-    const approx = link.estimate ? '≈' : ''
     const diff = Math.abs(link.diff)
     const shown = link.digits ? Math.round(diff * 10) / 10 : Math.round(diff)
-    return `В дни с тегом «${link.tag}» в среднем на ${approx}${shown} ${link.unit} ${more} ${link.label} (${pct}%)`
+    const value = `${link.estimate ? '≈' : ''}${fmtNum(shown)} ${unitLabel(link.unit)}`
+    const nutrient = t(`insight.nut.${link.nutrient}`)
+    return t(link.effect > 0 ? 'insight.nutrientMore' : 'insight.nutrientLess', { tag, value, nutrient, pct: fmtNum(pct) })
   }
-  const more = link.effect > 0 ? 'чаще' : 'реже'
-  return `Тег «${link.tag}» ${more} отмечен в дни, когда был продукт «${link.name}» (${Math.round(link.rateWith * 100)}% против ${Math.round(link.rateWithout * 100)}%)`
+  return t(link.effect > 0 ? 'insight.productMore' : 'insight.productLess', {
+    tag,
+    name: foodName(link.name),
+    with: fmtNum(Math.round(link.rateWith * 100)),
+    without: fmtNum(Math.round(link.rateWithout * 100)),
+  })
 }

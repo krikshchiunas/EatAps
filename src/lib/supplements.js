@@ -1,3 +1,4 @@
+// @i18n-data-file — каталог добавок: русские названия и жаргон — данные (переводы по id).
 // ─────────────────────────────────────────────────────────────────────────────
 // Каталог добавок: банки, которые реально стоят у людей на полке.
 //
@@ -27,7 +28,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { MICRO_BY_KEY } from './micronutrients.js'
-import { rankedSearch } from './fuzzy.js'
+import { searchItems, supplementEntity } from './search/index.js'
 import { normalizeQuery, formatAmount } from './foods.js'
 import { t } from './i18n.js'
 import { suppName } from './suppNames.js'
@@ -447,15 +448,9 @@ export function supplementById(id) {
 }
 
 // ── Поиск ────────────────────────────────────────────────────────────────────
-// Тот же механизм, что у продуктов: нормализация, синонимы, опечатки. Человек
-// ищет «ашвагандха» и «ashwagandha», «д3» и «витамин д» — и должен находить.
-// Перевод названия на язык интерфейса тоже в поиске: «Baldrian», «حديد».
-const searchText = (s) => {
-  const shown = suppName(s)
-  return normalizeQuery(`${s.name} ${s.alias}${shown !== s.name ? ' ' + shown : ''}`)
-}
-const searchName = (s) => normalizeQuery(suppName(s))
-
+// Тот же движок, что у продуктов (src/lib/search): нормализация, синонимы,
+// опечатки, все языки сразу. Человек ищет «ашвагандха» и «ashwagandha»,
+// «д3» и «витамин д», «Baldrian» и «حديد» — и должен находить.
 // Что люди спрашивают чаще всего. Надбавка работает ТОЛЬКО внутри тира
 // релевантности (см. MEMORY_BOOST_MAX в fuzzy.js) и не может перетащить
 // нерелевантное наверх: она лишь решает, кто первым среди одинаково подходящих.
@@ -468,14 +463,11 @@ const POPULAR = new Set([
 ])
 
 export function searchSupplements(query) {
-  const q = normalizeQuery(query)
-  if (!q) return SUPPLEMENTS
-  return rankedSearch(SUPPLEMENTS, q.split(' ').filter(Boolean), {
-    toText: searchText,
-    toName: searchName,
+  return searchItems(SUPPLEMENTS, query, {
     minResults: 1,
     boost: (s) => (POPULAR.has(s.id) ? 1 : 0),
-  })
+    toEntity: supplementEntity,
+  }).results
 }
 
 // Подборка для пустого поиска: с чего человек чаще всего начинает.

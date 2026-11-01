@@ -30,6 +30,8 @@ export default {
     openApp: 'افتح التطبيق',
   },
   auth: {
+    emailLabel: 'البريد الإلكتروني',
+    walletDescription: 'EatAps — متتبّع التغذية',
     loginTitle: 'تسجيل الدخول إلى EatAps',
     registerTitle: 'إنشاء حساب في EatAps',
     loginText: 'سجّل الدخول لتُحفظ بياناتك في السحابة وتتزامن بين أجهزتك.',

@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel, amountLabel, unitLabel, formatAmount } from '../lib/foods.js'
-import { foodName, methodLabel, portionLabel, alcLabel } from '../lib/foodNames.js'
+import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchLocalDetailed, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel, amountLabel, unitLabel, formatAmount } from '../lib/foods.js'
+import { foodName, catalogName, methodLabel, portionLabel, alcLabel } from '../lib/foodNames.js'
+import { canonicalName, methodId } from '../lib/catalog.js'
 import { t, getLang, locale } from '../lib/i18n.js'
 import {
   memoryBoost, frequentFoods, recentFoods, memoryPortion,
@@ -9,6 +10,7 @@ import {
 } from '../lib/library.js'
 import { BEER_BRANDS, SPIRIT_TYPES, COCKTAILS, alcKcal } from '../lib/alcohol.js'
 import { checkManualFood } from '../lib/manualFood.js'
+import { useSearchNames } from '../lib/useSearchNames.js'
 import { useStore } from '../store.jsx'
 import Toast from './Toast.jsx'
 import RecipeEditorSheet from './RecipeEditorSheet.jsx'
@@ -155,13 +157,19 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     return out
   }, [customFoods])
 
+  // Названия всех языков догружаются в фоне; когда придут — выдача обновится.
+  const namesReady = useSearchNames()
+  const found = useMemo(
+    () => (q ? searchLocalDetailed(query, { items: searchPool, boost }) : null),
+    [q, query, searchPool, boost, namesReady],
+  )
   const local = useMemo(() => {
-    if (q) return searchLocal(query, { items: searchPool, boost })
+    if (q) return found.results
     if (section === 'alcohol') return []
     if (section === 'mine') return customFoods.filter((f) => f.source === 'custom')
     if (section) return searchPool.filter((f) => f.cat === section && !f.builder)
     return searchPool
-  }, [q, query, section, searchPool, customFoods, boost])
+  }, [q, found, section, searchPool, customFoods])
 
   // ── Память: избранное / часто / недавно ────────────────────────────────────
   // Три РАЗНЫХ списка, не один «популярное». Избранное человек выбрал сам,
@@ -429,11 +437,11 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     const s = scale(effective, g)
     const name = selected.hasVariants && method ? `${selected.name}, ${method.label.toLowerCase()}` : selected.name
     emit({ type, name, emoji: selected.emoji, grams: g, unit, cat: selected.cat, ...s })
-    if (selected.name === 'Яйцо' && method?.label === 'Глазунья на сл. масле') {
+    if (selected.id === 'food_egg' && methodId(method?.label) === 'method_fried_in_butter_m') {
       const bg = g <= 55 ? 5 : 7.5
       emit({
         type,
-        name: `Сливочное масло (жарка)`,
+        name: canonicalName('foods', 'food_butter_for_frying'),
         emoji: '🧈',
         cat: 'oil',
         grams: bg,
@@ -447,7 +455,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     if (isHotDrink(selected) && sugar > 0) {
       emit({
         type,
-        name: `Сахар, ${sugar} ч.л.`,
+        // Каноническое имя записи: его разбирает foodName (foodPattern.sugarTsp).
+        name: /* @i18n-data */ `Сахар, ${sugar} ч.л.`,
         emoji: '🥄',
         cat: 'sweet',
         grams: sugar * SUGAR_TSP.grams,
@@ -814,6 +823,13 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
 
             {section !== 'alcohol' && local.length > 0 && (
               <>
+                {/* Выдача держится на исправлении опечатки — тихо говорим, что
+                    именно нашли. Без «ничего не найдено» и без навязчивости. */}
+                {found?.suggestion && (
+                  <p className="set-note" role="status" style={{ margin: '0 0 6px' }}>
+                    {t('add.didYouMean', { name: foodName(found.suggestion.item.name) })}
+                  </p>
+                )}
                 <SectionLabel
                   text={query.trim() ? t('add.found') : section ? SECTIONS.find((s) => s.key === section)?.label : t('add.allDb')}
                   count={local.length}
@@ -1293,10 +1309,10 @@ function AlcoholSection({ subTab, setSubTab, alcQuery, setAlcQuery, onPick }) {
                   </button>
                 ))}
                 <button className="meal-item" style={{ textAlign: 'start', width: '100%' }}
-                  onClick={() => onPick({ name: `Своя ${st.label.toLowerCase()}`, category: 'spirit', spiritLabel: st.label, emoji: st.emoji, defaultAlc: st.defaultAlc, defaultMl: 50, custom: true })}>
+                  onClick={() => onPick({ name: /* @i18n-data */ `Своя ${st.label.toLowerCase()}`, category: 'spirit', spiritLabel: st.label, emoji: st.emoji, defaultAlc: st.defaultAlc, defaultMl: 50, custom: true })}>
                   <span className="meal-emoji">{st.emoji}</span>
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <span className="meal-name" style={{ display: 'block' }}>{foodName(`Своя ${st.label.toLowerCase()}`)}</span>
+                    <span className="meal-name" style={{ display: 'block' }}>{foodName(/* @i18n-data */ `Своя ${st.label.toLowerCase()}`)}</span>
                     <span className="meal-meta">{t('add.enterPct')}</span>
                   </span>
                   <span style={{ color: 'var(--primary)', fontSize: 20 }}>›</span>
@@ -1449,7 +1465,8 @@ function ProteinShakeBuilder({ selected, prefs, setPref, onBack, onAdd, onClose,
     if (!valid) return
     if (pp !== prefs.proteinPer100) setPref('proteinPer100', pp)
     if (pk !== prefs.powderKcalPer100) setPref('powderKcalPer100', pk)
-    const name = base === 'milk' ? `Протеиновый шейк на молоке ${mMl} мл` : 'Протеиновый шейк на воде'
+    // Канонические имена записи: их разбирает foodName (foodPattern.shakeMilk).
+    const name = base === 'milk' ? /* @i18n-data */ `Протеиновый шейк на молоке ${mMl} мл` : canonicalName('foods', 'food_protein_shake_with_water')
     onAdd({ type, name, emoji: selected.emoji, cat: selected.cat, grams: base === 'milk' ? mMl : null, unit: 'мл', ...res })
     onClose()
   }
@@ -1459,7 +1476,7 @@ function ProteinShakeBuilder({ selected, prefs, setPref, onBack, onAdd, onClose,
       <div className="row gap12" style={{ marginBottom: 18 }}>
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
-          <div className="meal-name" style={{ fontSize: 18 }}>{foodName('Протеиновый шейк')}</div>
+          <div className="meal-name" style={{ fontSize: 18 }}>{catalogName('food_protein_shake')}</div>
           <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>{t('add.pickOther')}</button>
         </div>
       </div>
@@ -1553,7 +1570,7 @@ function CustomDrinkBuilder({ selected, onBack, onAdd, onClose, addCustomFood, t
       <div className="row gap12" style={{ marginBottom: 18 }}>
         <span className="meal-emoji" style={{ width: 52, height: 52, fontSize: 24 }}>{selected.emoji}</span>
         <div style={{ flex: 1 }}>
-          <div className="meal-name" style={{ fontSize: 18 }}>{foodName('Свой напиток')}</div>
+          <div className="meal-name" style={{ fontSize: 18 }}>{catalogName('food_custom_drink')}</div>
           <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={onBack}>{t('add.pickOther')}</button>
         </div>
       </div>

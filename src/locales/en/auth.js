@@ -30,6 +30,8 @@ export default {
     openApp: 'Open the app',
   },
   auth: {
+    emailLabel: 'Email',
+    walletDescription: 'EatAps — nutrition tracker',
     loginTitle: 'Sign in to EatAps',
     registerTitle: 'Sign up for EatAps',
     loginText: 'Sign in so your data is saved in the cloud and synced across your devices.',

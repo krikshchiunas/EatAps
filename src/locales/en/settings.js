@@ -172,6 +172,7 @@ export default {
       seenOf: '{n} of {total}',
     },
     about: {
+      impressum: 'Legal notice (Impressum)',
       title: 'About',
       help: 'Help',
       collapse: 'Hide the form',
@@ -187,6 +188,8 @@ export default {
     },
   },
   profile: {
+    guiltyPleasure: 'MY guilty pleasure',
+    usernamePlaceholder: 'alex',
     eyebrow: 'Profile',
     title: 'This is you',
     signInPrompt: 'Sign in — your profile becomes visible to friends and your data lives in the cloud.',

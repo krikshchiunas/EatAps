@@ -3,6 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { LANGS, SOURCE_LANG, setLang, dataTable } from './i18n.js'
+import { catalogId, methodId } from './catalog.js'
 import { FOODS, CONSTRUCTOR_ING, BASE_GROUPS, BREADS, getPortions, searchLocal, normalizeQuery } from './foods.js'
 import { foodName, methodLabel, portionLabel } from './foodNames.js'
 
@@ -46,7 +47,7 @@ for (const code of OTHERS) {
 
   test(`${code}: methodsFor ссылается на настоящие пары «продукт|способ»`, async () => {
     await setLang(code, { persist: false })
-    const real = new Set(FOODS.flatMap((f) => (f.methods || []).map((m) => `${f.name}|${m.label.toLowerCase()}`)))
+    const real = new Set(FOODS.flatMap((f) => (f.methods || []).map((m) => `${catalogId('foods', f.name)}|${methodId(m.label)}`)))
     const stale = Object.keys(dataTable('methodsFor') || {}).filter((k) => !real.has(k))
     assert.deepEqual(stale, [], `висячие ключи — форма никогда не применится:\n${stale.join('\n')}`)
   })

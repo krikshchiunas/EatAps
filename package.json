@@ -21,6 +21,8 @@
     "stripe": "^22.4.0"
   },
   "devDependencies": {
+    "@babel/parser": "^7.29.7",
+    "@playwright/test": "^1.63.0",
     "@vitejs/plugin-react": "^4.3.4",
     "vite": "^6.0.7"
   }

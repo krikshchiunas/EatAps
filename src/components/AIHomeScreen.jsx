@@ -23,6 +23,7 @@ import { pullAiUsage } from '../lib/supabase.js'
 import { keyOf } from '../lib/date.js'
 import { autoStandardMealId } from '../lib/meals.js'
 import { t } from '../lib/i18n.js'
+import { aiCardFood } from '../lib/aiCards.js'
 
 const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
 
@@ -168,12 +169,21 @@ export default function AIHomeScreen({ onUpgrade }) {
 
   // Карточка → запись в дневнике. Приём пищи берём из карточки, а если модель
   // его не указала — по времени суток, как при обычном добавлении руками.
-  const addCard = (card, msgIndex, cardIndex) => {
+  // Название сверяется с каталогом на всех языках (aiCards.js): совпавший
+  // продукт хранится по id и меняет язык вместе с интерфейсом.
+  const addingCards = useRef(new Set())
+  const addCard = async (card, msgIndex, cardIndex) => {
+    // Пока идёт сверка с каталогом, второе касание ту же карточку не добавит.
+    const lock = `${msgIndex}:${cardIndex}`
+    if (addingCards.current.has(lock)) return
+    addingCards.current.add(lock)
     const date = keyOf()
-    const day = store.days?.[date]
     haptic(18)
+    const food = await aiCardFood(card, t('meal.dish')).catch(() => ({ name: String(card.name || t('meal.dish')).slice(0, 80) }))
+    addingCards.current.delete(lock)
+    const day = store.days?.[date]
     addFood(date, {
-      name: String(card.name || t('meal.dish')).slice(0, 80),
+      ...food,
       emoji: '🍽️',
       unit: 'г',
       grams: Number(card.grams) || null,

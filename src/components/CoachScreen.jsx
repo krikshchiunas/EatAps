@@ -198,7 +198,7 @@ function MyCoaches({ coaches, myId, onDone }) {
           className="input"
           value={id}
           onChange={(e) => setId(e.target.value)}
-          placeholder="denis"
+          placeholder={t('profile.usernamePlaceholder')}
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}

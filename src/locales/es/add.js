@@ -65,6 +65,7 @@ export default {
     found: 'Encontrado',
     allDb: 'Toda la base',
     showMore: 'Mostrar {n} más de {rest}',
+    didYouMean: '¿Quisiste decir: {name}?',
     globalDb: 'Base global',
     offline: 'Sin internet. Lo tuyo y lo encontrado arriba funciona sin conexión.',
     remoteError: 'La base global no ha respondido. Los resultados de arriba son de tu base.',

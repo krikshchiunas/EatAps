@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from 'react'
+import { catalogRef } from './lib/catalog.js'
 import { StoreCtx, useStore } from './lib/storeContext.js'
 import {
   supabase, supabaseEnabled, pullState, saveAppState, subscribeToAppState,
@@ -30,6 +31,19 @@ import { log, shortId } from './lib/log.js'
 // useStore живёт в lib/storeContext.js, но импортируется отовсюду как
 // `from '../store.jsx'` — реэкспортируем, чтобы не трогать все компоненты.
 export { useStore }
+
+// Запись из каталога получает стабильный id продукта (и способа
+// приготовления): он связывает её с базой независимо от языка. name остаётся
+// каноническим русским — его читают старые версии приложения, синхронизация
+// и экспорт. Своё название человека каталожным не станет: catalogRef его не
+// узнает, и id снимается. Ссылка пересчитывается при КАЖДОЙ записи, в том числе
+// при правке: переименованная запись не должна тянуть за собой чужой id.
+function withCatalogRef(food) {
+  if (!food || typeof food !== 'object') return food
+  const { foodId: _f, methodId: _m, ...rest } = food
+  const ref = catalogRef(food.name)
+  return ref ? { ...rest, ...ref } : rest
+}
 
 // Пустое состояние. theme = null означает «пользователь не выбирал» — тогда
 // берём системную тему. Раньше системная фиксировалась в состояние при первом
@@ -514,7 +528,7 @@ export function StoreProvider({ children }) {
     const createdAt = new Date().toISOString()
     setState((s) => {
       const day = s.days[date] || blankDay()
-      const entry = { id, createdAt, ...food, updatedAt: ts }
+      const entry = { id, createdAt, ...withCatalogRef(food), updatedAt: ts }
       const days = { ...s.days, [date]: { ...day, meals: [...day.meals, entry] } }
       const snap = {
         name: food.name,
@@ -546,7 +560,7 @@ export function StoreProvider({ children }) {
     if (list.length === 0) return 0
     const ts = clock.tick()
     const createdAt = new Date().toISOString()
-    const entries = list.map((food) => ({ id: newId(), createdAt, ...food, updatedAt: ts }))
+    const entries = list.map((food) => ({ id: newId(), createdAt, ...withCatalogRef(food), updatedAt: ts }))
     setState((s) => {
       const day = s.days[date] || blankDay()
       const days = { ...s.days, [date]: { ...day, meals: [...day.meals, ...entries] } }
@@ -608,7 +622,7 @@ export function StoreProvider({ children }) {
   const editFood = useCallback((date, updatedFood) => {
     editDay(date, (d, ts) => ({
       ...d,
-      meals: d.meals.map((m) => (m.id === updatedFood.id ? { ...updatedFood, updatedAt: ts } : m)),
+      meals: d.meals.map((m) => (m.id === updatedFood.id ? { ...withCatalogRef(updatedFood), updatedAt: ts } : m)),
     }))
   }, [editDay])
 

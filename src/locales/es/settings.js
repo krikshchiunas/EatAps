@@ -172,6 +172,7 @@ export default {
       seenOf: '{n} de {total}',
     },
     about: {
+      impressum: 'Aviso legal (Impressum)',
       title: 'Acerca de la app',
       help: 'Ayuda',
       collapse: 'Ocultar el formulario',
@@ -187,6 +188,8 @@ export default {
     },
   },
   profile: {
+    guiltyPleasure: 'Mi placer culpable',
+    usernamePlaceholder: 'lucia',
     eyebrow: 'Perfil',
     title: 'Este eres tú',
     signInPrompt: 'Inicia sesión: tus amigos verán tu perfil y tus datos estarán en la nube.',

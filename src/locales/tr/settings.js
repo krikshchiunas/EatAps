@@ -172,6 +172,7 @@ export default {
       seenOf: '{total} ipucundan {n}',
     },
     about: {
+      impressum: 'Künye (Impressum)',
       title: 'Uygulama hakkında',
       help: 'Yardım',
       collapse: 'Formu kapat',
@@ -187,6 +188,8 @@ export default {
     },
   },
   profile: {
+    guiltyPleasure: 'Gizli zaafım',
+    usernamePlaceholder: 'elif',
     eyebrow: 'Profil',
     title: 'Bu sensin',
     signInPrompt: 'Giriş yap — profilin arkadaşlarına görünür olur, verilerin bulutta saklanır.',

@@ -1,15 +1,14 @@
-// Виды крепкого алкоголя: «Водка», «Виски». Бренды и коктейли — в foods.
+// Виды крепкого алкоголя по id. Бренды и коктейли — в foods.
 export default {
   alcohol: {
-    'Водка': 'Wodka',
-    'Виски': 'Whisky',
-    'Ром': 'Rum',
-    'Джин': 'Gin',
-    'Текила': 'Tequila',
-    'Коньяк': 'Cognac',
-    'Бренди': 'Brandy',
-    'Ликёр': 'Likör',
-    'Самогон / Другое': 'Selbstgebrannter / Anderes',
-    'Самогон / другое': 'Selbstgebrannter / Anderes',
+    alcohol_vodka: 'Wodka',
+    alcohol_whisky: 'Whisky',
+    alcohol_rum: 'Rum',
+    alcohol_gin: 'Gin',
+    alcohol_tequila: 'Tequila',
+    alcohol_cognac: 'Cognac',
+    alcohol_brandy: 'Brandy',
+    alcohol_liqueur: 'Likör',
+    alcohol_moonshine_other: 'Selbstgebrannter / Anderes',
   },
 }

@@ -395,7 +395,7 @@ function PreviewList({ preview }) {
 // невозможно сложить с едой, а ради этого всё и затевалось.
 function CustomBuilder({ onBack, onDone, onClose }) {
   const [name, setName] = useState('')
-  const [unit, setUnit] = useState('капсула')
+  const [unit, setUnit] = useState(/* @i18n-data */ 'капсула') // код единицы дозы, подпись — suppUnitWord
   const [rows, setRows] = useState({}) // key → строка ввода
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pq, setPq] = useState('')
@@ -442,7 +442,7 @@ function CustomBuilder({ onBack, onDone, onClose }) {
       <div className="field">
         <label>{t('supp.unitLabel')}</label>
         <div className="row gap8" style={{ flexWrap: 'wrap' }}>
-          {['капсула', 'таблетка', 'порция', 'г', 'мл', 'капля'].map((u) => (
+          {/* @i18n-data */ ['капсула', 'таблетка', 'порция', 'г', 'мл', 'капля'].map((u) => (
             <button key={u} className={`chip ${unit === u ? 'on' : ''}`} onClick={() => setUnit(u)}>{suppUnitWord(u)}</button>
           ))}
         </div>

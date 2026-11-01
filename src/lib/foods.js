@@ -1,7 +1,10 @@
+// @i18n-data-file — база продуктов: русские названия — канонические данные (переводы по id в src/locales/*/data).
 import { barcodeVariants } from './barcode.js'
-import { rankedSearch } from './fuzzy.js'
+import { searchItems, ownEntity } from './search/index.js'
+import { fold, latToCyr } from './search/normalize.js'
 import { t, fmtNum, getLang, SOURCE_LANG } from './i18n.js'
 import { foodName } from './foodNames.js'
+import { catalogId } from './catalog.js'
 
 // Подписи — геттерами: справочник живёт весь сеанс, а язык может смениться.
 export const MEAL_TYPES = [
@@ -685,305 +688,10 @@ const dairyFoods = DAIRY.map((d) => ({
   kcal: dairyFat(d.protein, d.carbs, d.def),
 }))
 
-// ── Иноязычные названия ──────────────────────────────────────────────────────
-// База продуктов русская. Транслитерация выше вытягивает только родственные
-// слова (banana → банан), а «chicken» и «oatmeal» так не переводятся — для них
-// нужна таблица. Она покрывает ходовые продукты на английском и немецком:
-// ровно то, что человек реально набирает, когда телефон в латинской раскладке
-// или он живёт не в русскоязычной стране.
-//
-// Это НЕ полноценный многоязычный поиск и им не притворяется: произвольный
-// иностранный запрос уходит в Open Food Facts, где база действительно
-// многоязычная. Здесь — быстрый локальный слой для частого случая.
-const FOREIGN = {
-  'Куриная грудка': 'chicken breast huhn hahnchen hühnchen haehnchen poulet',
-  'Куриное бедро': 'chicken thigh',
-  'Куриные крылья': 'chicken wings',
-  'Говядина': 'beef rind rindfleisch steak',
-  'Свинина': 'pork schwein schweinefleisch',
-  'Индейка грудка': 'turkey pute putenbrust',
-  'Баранина': 'lamb mutton lamm',
-  'Фарш говяжий': 'ground beef minced hackfleisch',
-  'Яйцо': 'egg eggs ei eier',
-  'Яичный белок': 'egg white eiweiss eiweiß',
-  'Овсянка': 'oatmeal oats porridge haferflocken hafer',
-  'Овсяные хлопья сухие': 'oats rolled oats haferflocken',
-  'Рис': 'rice reis',
-  'Гречка': 'buckwheat buchweizen',
-  'Картофель': 'potato potatoes kartoffel kartoffeln',
-  'Батат': 'sweet potato suesskartoffel süßkartoffel',
-  'Макароны варёные': 'pasta noodles nudeln spaghetti',
-  'Хлеб белый': 'white bread brot weissbrot',
-  'Хлеб ржаной': 'rye bread roggenbrot',
-  'Хлеб цельнозерновой': 'whole grain bread vollkornbrot wholemeal',
-  'Молоко': 'milk milch',
-  'Творог': 'cottage cheese quark curd',
-  'Сметана': 'sour cream schmand saure sahne',
-  'Сливки': 'cream sahne',
-  'Йогурт': 'yogurt yoghurt joghurt',
-  'Греческий йогурт': 'greek yogurt yoghurt griechischer joghurt skyr',
-  'Кефир': 'kefir',
-  'Сливочное масло': 'butter',
-  'Сыр российский': 'cheese kase käse',
-  'Моцарелла': 'mozzarella',
-  'Пармезан': 'parmesan parmigiano',
-  'Фета': 'feta',
-  'Рикотта': 'ricotta',
-  'Банан': 'banana banane',
-  'Яблоко': 'apple apfel',
-  'Груша': 'pear birne',
-  'Апельсин': 'orange',
-  'Мандарин': 'mandarin tangerine clementine',
-  'Грейпфрут': 'grapefruit',
-  'Виноград': 'grapes trauben weintrauben',
-  'Киви': 'kiwi',
-  'Ананас': 'pineapple ananas',
-  'Манго': 'mango',
-  'Персик': 'peach pfirsich',
-  'Слива': 'plum pflaume',
-  'Абрикос': 'apricot aprikose',
-  'Арбуз': 'watermelon wassermelone',
-  'Дыня': 'melon honigmelone',
-  'Гранат': 'pomegranate granatapfel',
-  'Лимон': 'lemon zitrone',
-  'Финики': 'dates datteln',
-  'Изюм': 'raisins rosinen',
-  'Клубника': 'strawberry strawberries erdbeeren',
-  'Черника': 'blueberry blueberries heidelbeeren',
-  'Малина': 'raspberry raspberries himbeeren',
-  'Ежевика': 'blackberry brombeeren',
-  'Вишня': 'cherry cherries kirschen',
-  'Смородина': 'currant johannisbeeren',
-  'Помидор': 'tomato tomatoes tomate tomaten',
-  'Огурец': 'cucumber gurke',
-  'Морковь': 'carrot carrots karotte moehren möhren',
-  'Свёкла': 'beetroot beet rote bete',
-  'Капуста белокочанная': 'cabbage weisskohl weißkohl kohl',
-  'Цветная капуста': 'cauliflower blumenkohl',
-  'Брюссельская капуста': 'brussels sprouts rosenkohl',
-  'Брокколи': 'broccoli brokkoli',
-  'Кабачок': 'zucchini courgette',
-  'Баклажан': 'eggplant aubergine',
-  'Перец болгарский': 'bell pepper paprika',
-  'Лук репчатый': 'onion zwiebel',
-  'Чеснок': 'garlic knoblauch',
-  'Шпинат': 'spinach spinat',
-  'Салат листовой': 'lettuce salat gruener salat',
-  'Руккола': 'arugula rocket rucola',
-  'Тыква': 'pumpkin kuerbis kürbis',
-  'Кукуруза': 'corn sweetcorn mais',
-  'Зелёный горошек': 'green peas erbsen',
-  'Стручковая фасоль': 'green beans bohnen',
-  'Авокадо': 'avocado',
-  'Шампиньоны': 'mushrooms champignons pilze',
-  'Редис': 'radish radieschen',
-  'Сельдерей': 'celery sellerie',
-  'Чечевица варёная': 'lentils linsen',
-  'Нут варёный': 'chickpeas kichererbsen',
-  'Фасоль красная варёная': 'kidney beans bohnen',
-  'Тофу': 'tofu',
-  'Эдамаме': 'edamame',
-  'Лосось': 'salmon lachs',
-  'Форель': 'trout forelle',
-  'Тунец свежий': 'tuna thunfisch',
-  'Тунец консерв. в соку': 'canned tuna thunfisch dose',
-  'Сельдь': 'herring hering',
-  'Скумбрия': 'mackerel makrele',
-  'Креветки': 'shrimp prawns garnelen',
-  'Кальмар': 'squid calamari tintenfisch',
-  'Мидии': 'mussels muscheln',
-  'Рыба (белая, филе)': 'fish white fish fisch filet',
-  'Миндаль': 'almonds mandeln',
-  'Грецкий орех': 'walnuts walnuesse walnüsse',
-  'Фундук': 'hazelnuts haselnuesse haselnüsse',
-  'Кешью': 'cashew cashews',
-  'Арахис': 'peanuts erdnuesse erdnüsse',
-  'Фисташки': 'pistachios pistazien',
-  'Семена чиа': 'chia seeds chiasamen',
-  'Семена льна': 'flax seeds linseed leinsamen',
-  'Кунжут': 'sesame sesam',
-  'Арахисовая паста': 'peanut butter erdnussbutter erdnussmus',
-  'Оливковое масло': 'olive oil olivenoel olivenöl',
-  'Подсолнечное масло': 'sunflower oil sonnenblumenoel',
-  'Кокосовое масло': 'coconut oil kokosoel',
-  'Майонез': 'mayonnaise mayo',
-  'Сахар': 'sugar zucker',
-  'Мёд': 'honey honig',
-  'Круассан': 'croissant',
-  'Бекон': 'bacon speck',
-  'Ветчина': 'ham schinken',
-  'Сосиски': 'sausages wuerstchen würstchen hot dog',
-  'Салями': 'salami',
-  'Киноа варёная': 'quinoa',
-  'Булгур варёный': 'bulgur',
-  'Кускус варёный': 'couscous',
-  'Пицца (своя)': 'pizza',
-  'Бургер (свой)': 'burger hamburger cheeseburger',
-  'Хот-дог (свой)': 'hot dog hotdog',
-  'Салат': 'salad salat bowl',
-  'Боул': 'bowl poke',
-  'Каша': 'porridge brei',
-  'Омлет (свой)': 'omelette omelett scrambled ruehrei',
-  'Смузи (своё)': 'smoothie',
-  'Протеиновый шейк': 'protein shake whey eiweissshake',
-  'Бутерброд': 'sandwich',
-  'Сэндвич': 'sandwich',
-  'Тост': 'toast',
-  'Паста (своя)': 'pasta noodles nudeln',
-  'Гарнир': 'side dish beilage',
-  'Растительное молоко': 'plant milk oat milk almond milk hafermilch mandelmilch',
-  // Сыры. Названия почти всегда пишут латиницей даже по-русски, поэтому здесь
-  // и оригинал, и немецкое написание: Ziegenkase ищут не реже, чем «козий».
-  'Гауда': 'gouda goudakase', 'Гауда молодая': 'junger gouda young gouda',
-  'Гауда выдержанная': 'alter gouda mature gouda aged', 'Эдам': 'edam edamer',
-  'Маасдам': 'maasdam', 'Тильзитер': 'tilsiter tilsit', 'Эмменталь': 'emmental emmentaler swiss cheese',
-  'Грюйер': 'gruyere gruyer', 'Аппенцеллер': 'appenzeller', 'Горный сыр': 'bergkase bergkaese mountain cheese',
-  'Раклет': 'raclette', 'Чеддер': 'cheddar', 'Грана Падано': 'grana padano',
-  'Пекорино': 'pecorino', 'Сыр тёртый': 'grated cheese geriebener kase reibekase',
-  'Бри': 'brie', 'Камамбер': 'camembert', 'Буррата': 'burrata',
-  'Творожный сыр': 'cream cheese frischkase frischkaese philadelphia',
-  'Маскарпоне': 'mascarpone', 'Горгонзола': 'gorgonzola', 'Рокфор': 'roquefort',
-  'Сыр с голубой плесенью': 'blue cheese blauschimmel gorgonzola',
-  'Брынза': 'brined cheese', 'Сулугуни': 'suluguni', 'Адыгейский сыр': 'adyghe cheese',
-  'Козий сыр': 'goat cheese ziegenkase ziegenkaese chevre', 'Овечий сыр': 'sheep cheese schafskase',
-  'Халуми': 'halloumi', 'Сыр лёгкий 30%': 'light cheese leichter kase reduced fat',
-  'Плавленый сыр': 'processed cheese schmelzkase cheese slices',
-  // Колбасы и мясные изделия — немецкий прилавок целиком.
-  'Салями Милано': 'salami milano', 'Салями с перцем': 'peppersalami pfeffersalami',
-  'Чоризо': 'chorizo', 'Суджук': 'sucuk sujuk', 'Пепперони': 'pepperoni',
-  'Мортаделла': 'mortadella', 'Лионер': 'lyoner', 'Флейшвурст': 'fleischwurst',
-  'Бокквурст': 'bockwurst', 'Братвурст': 'bratwurst', 'Карривурст': 'currywurst',
-  'Венские сосиски': 'wiener wurstchen wuerstchen vienna sausage',
-  'Франкфуртские сосиски': 'frankfurter frankfurt sausage',
-  'Тюрингская колбаска': 'thuringer thueringer bratwurst', 'Краковская колбаса': 'krakauer',
-  'Меттвурст': 'mettwurst', 'Тэвурст': 'teewurst', 'Ягдвурст': 'jagdwurst',
-  'Ливерная колбаса': 'leberwurst liver sausage', 'Паштет': 'pate pastete',
-  'Сырокопчёный окорок': 'schinken raw ham rohschinken', 'Ветчина копчёная': 'smoked ham geraucherter schinken',
-  'Хамон серрано': 'serrano jamon', 'Прошутто': 'prosciutto', 'Пармская ветчина': 'parma ham parmaschinken',
-  'Панчетта': 'pancetta', 'Сервелат': 'cervelat servelat',
-  'Индейка нарезка': 'turkey slices putenbrust aufschnitt', 'Куриная нарезка': 'chicken slices hahnchenbrust',
-  'Индейка копчёная': 'smoked turkey geraucherte pute',
-  // Мясо
-  'Свиная корейка': 'pork loin schweinelende', 'Свиная грудинка': 'pork belly schweinebauch',
-  'Фарш свиной': 'minced pork schweinehack', 'Фарш смешанный': 'mixed mince hackfleisch gemischt',
-  'Фарш куриный': 'chicken mince', 'Фарш индейки': 'turkey mince putenhack',
-  'Куриная ножка': 'chicken leg drumstick hahnchenschenkel', 'Гусь': 'goose gans',
-  'Куриные наггетсы': 'chicken nuggets', 'Куриный шницель': 'chicken schnitzel hahnchenschnitzel',
-  // Рыба
-  'Треска': 'cod kabeljau dorsch', 'Пикша': 'haddock schellfisch', 'Сибас': 'sea bass wolfsbarsch',
-  'Дорада': 'sea bream dorade', 'Палтус': 'halibut heilbutt', 'Камбала': 'plaice flounder scholle',
-  'Тилапия': 'tilapia', 'Карп': 'carp karpfen', 'Горбуша': 'pink salmon',
-  'Сардины': 'sardines sardinen', 'Анчоусы': 'anchovies sardellen',
-  'Лосось копчёный': 'smoked salmon raucherlachs', 'Сельдь солёная': 'salted herring matjes',
-  'Осьминог': 'octopus oktopus', 'Краб': 'crab krabbe', 'Гребешки': 'scallops jakobsmuscheln',
-  'Лангустины': 'langoustine scampi',
-  // Овощи
-  'Пекинская капуста': 'chinese cabbage pak choi chinakohl', 'Краснокочанная капуста': 'red cabbage rotkohl',
-  'Савойская капуста': 'savoy cabbage wirsing', 'Квашеная капуста': 'sauerkraut',
-  'Кейл': 'kale grunkohl gruenkohl', 'Лук-порей': 'leek lauch porree',
-  'Зелёный лук': 'spring onion fruhlingszwiebel scallion', 'Красный лук': 'red onion rote zwiebel',
-  'Спаржа': 'asparagus spargel', 'Артишок': 'artichoke artischocke', 'Фенхель': 'fennel fenchel',
-  'Репа': 'turnip rube', 'Пастернак': 'parsnip pastinake', 'Корень сельдерея': 'celeriac sellerie knollensellerie',
-  'Айсберг': 'iceberg eisbergsalat', 'Салат корн': 'lambs lettuce feldsalat corn salad',
-  'Романо': 'romaine romana', 'Мангольд': 'chard mangold',
-  'Помидоры черри': 'cherry tomatoes kirschtomaten', 'Цукини': 'zucchini courgette',
-  'Тыква баттернат': 'butternut squash butternusskurbis',
-  'Вешенки': 'oyster mushrooms austernpilze', 'Лисички': 'chanterelles pfifferlinge',
-  'Белые грибы': 'porcini steinpilze', 'Шиитаке': 'shiitake',
-  'Оливки': 'olives oliven', 'Маслины': 'black olives schwarze oliven', 'Каперсы': 'capers kapern',
-  'Батат запечённый': 'baked sweet potato', 'Свёкла варёная': 'cooked beetroot rote bete',
-  // Фрукты и ягоды
-  'Нектарин': 'nectarine', 'Клементин': 'clementine', 'Лайм': 'lime limette',
-  'Помело': 'pomelo', 'Инжир': 'fig feige', 'Папайя': 'papaya', 'Маракуйя': 'passion fruit maracuja',
-  'Личи': 'lychee litschi', 'Кокос': 'coconut kokosnuss', 'Черешня': 'sweet cherry susskirsche',
-  'Голубика': 'blueberry heidelbeere', 'Брусника': 'lingonberry preiselbeere',
-  'Клюква': 'cranberry preiselbeere', 'Крыжовник': 'gooseberry stachelbeere',
-  'Инжир сушёный': 'dried figs getrocknete feigen',
-  // Молочное
-  'Скир': 'skyr', 'Крем-фреш': 'creme fraiche', 'Сливки взбитые': 'whipped cream schlagsahne',
-  'Пахта': 'buttermilk buttermilch', 'Йогурт фруктовый': 'fruit yogurt fruchtjoghurt',
-  'Йогурт питьевой': 'drinking yogurt trinkjoghurt', 'Молоко безлактозное': 'lactose free milk laktosefrei',
-  'Овсяное молоко': 'oat milk hafermilch', 'Соевое молоко': 'soy milk sojamilch',
-  'Миндальное молоко': 'almond milk mandelmilch', 'Кокосовое молоко': 'coconut milk kokosmilch',
-  'Рисовое молоко': 'rice milk reismilch',
-  // Хлеб и выпечка
-  'Хлеб тостовый': 'toast bread toastbrot', 'Хлеб на закваске': 'sourdough sauerteigbrot',
-  'Хлеб мультизлаковый': 'multigrain mehrkornbrot', 'Хлеб без глютена': 'gluten free glutenfrei',
-  'Булочка пшеничная': 'brotchen broetchen bread roll semmel',
-  'Тортилья пшеничная': 'tortilla wrap', 'Тортилья кукурузная': 'corn tortilla maistortilla',
-  'Наан': 'naan', 'Брецель': 'pretzel brezel brezn', 'Бриошь': 'brioche', 'Крутоны': 'croutons',
-  // Крупы и паста
-  'Рис басмати варёный': 'basmati rice', 'Рис жасмин варёный': 'jasmine rice jasminreis',
-  'Рис бурый варёный': 'brown rice naturreis', 'Рис дикий варёный': 'wild rice wildreis',
-  'Полба варёная': 'spelt dinkel', 'Амарант варёный': 'amaranth',
-  'Мюсли': 'muesli musli', 'Гранола': 'granola', 'Кукурузные хлопья': 'cornflakes',
-  'Пенне варёные': 'penne', 'Фузилли варёные': 'fusilli', 'Тальятелле варёные': 'tagliatelle',
-  'Рисовая лапша варёная': 'rice noodles reisnudeln', 'Гречневая лапша соба': 'soba noodles',
-  // Бобовые и орехи
-  'Чечевица красная сухая': 'red lentils rote linsen', 'Чечевица зелёная сухая': 'green lentils grune linsen',
-  'Фасоль чёрная варёная': 'black beans schwarze bohnen', 'Темпе': 'tempeh',
-  'Фасоль консервированная': 'canned beans kidneybohnen', 'Нут консервированный': 'canned chickpeas',
-  'Пекан': 'pecan', 'Макадамия': 'macadamia', 'Бразильский орех': 'brazil nuts paranusse',
-  'Кокосовая стружка': 'coconut flakes kokosraspeln', 'Ореховая смесь': 'mixed nuts nussmischung',
-  'Миндальная паста': 'almond butter mandelmus', 'Тахини': 'tahini sesampaste',
-  'Шоколадно-ореховая паста': 'nutella chocolate spread nussnougatcreme',
-  'Арахис солёный': 'salted peanuts erdnusse gesalzen',
-  // Снеки
-  'Чипсы': 'potato chips crisps kartoffelchips картофельные', 'Чипсы с паприкой': 'paprika chips',
-  'Чипсы со сметаной и луком': 'sour cream onion chips', 'Чипсы с сыром': 'cheese chips kasechips',
-  'Чипсы барбекю': 'barbecue chips bbq', 'Чипсы чили': 'chili chips',
-  'Чипсы в тубе': 'pringles stacked chips', 'Чипсы овощные': 'vegetable chips gemusechips',
-  'Тортилья-чипсы': 'tortilla chips nachos', 'Кукурузные палочки': 'corn snacks maisstangen',
-  'Сырные шарики': 'cheese puffs kaseballchen', 'Попкорн солёный': 'salted popcorn',
-  'Попкорн карамельный': 'caramel popcorn', 'Попкорн воздушный': 'air popped popcorn',
-  'Соломка солёная': 'pretzel sticks salzstangen', 'Крекеры солёные': 'crackers tuc salzcracker',
-  'Крекеры сырные': 'cheese crackers kasecracker', 'Хлебцы рисовые': 'rice cakes reiswaffeln',
-  'Сухарики ржаные': 'rye croutons', 'Мясные снеки': 'beef jerky fleischsnack',
-  // Сладости
-  'Шоколад белый': 'white chocolate weisse schokolade', 'Шоколад горький 85%': 'dark chocolate zartbitter',
-  'Шоколад с орехами': 'nut chocolate nussschokolade', 'Шоколадный батончик': 'chocolate bar schokoriegel',
-  'Печенье песочное': 'shortbread butterkekse', 'Печенье шоколадное': 'chocolate cookies',
-  'Печенье сэндвич': 'sandwich cookies oreo', 'Мармелад': 'jelly candy gelee',
-  'Жевательный мармелад': 'gummy bears gummibarchen haribo', 'Маршмеллоу': 'marshmallow',
-  'Карамель': 'caramel bonbon', 'Ирис': 'toffee', 'Нуга': 'nougat',
-  'Мороженое ванильное': 'vanilla ice cream vanilleeis', 'Мороженое шоколадное': 'chocolate ice cream schokoeis',
-  'Мороженое фруктовый лёд': 'popsicle wassereis', 'Джелато': 'gelato',
-  'Йогуртовое мороженое': 'frozen yogurt froyo', 'Пудинг шоколадный': 'chocolate pudding schokopudding',
-  'Рисовый пудинг': 'rice pudding milchreis', 'Протеиновый пудинг': 'protein pudding',
-  // Соусы и масла
-  'Горчица дижонская': 'dijon mustard', 'Соус барбекю': 'bbq sauce barbecuesauce',
-  'Соус терияки': 'teriyaki', 'Острый соус': 'hot sauce scharfe sauce', 'Шрирача': 'sriracha',
-  'Сальса': 'salsa', 'Песто': 'pesto', 'Чесночный соус': 'garlic sauce knoblauchsauce',
-  'Соус ранч': 'ranch dressing', 'Соус цезарь': 'caesar dressing', 'Тартар': 'tartar sauce remoulade',
-  'Сырный соус': 'cheese sauce kasesauce', 'Йогуртовая заправка': 'yogurt dressing',
-  'Бальзамический уксус': 'balsamic vinegar balsamico', 'Томатный соус': 'tomato sauce tomatensauce',
-  'Рапсовое масло': 'rapeseed oil canola rapsol', 'Масло авокадо': 'avocado oil',
-  'Кунжутное масло': 'sesame oil sesamol', 'Льняное масло': 'flaxseed oil leinol',
-  'Топлёное масло': 'ghee butterschmalz', 'Маргарин': 'margarine',
-  // Напитки и готовая еда
-  'Эспрессо': 'espresso', 'Американо': 'americano', 'Флэт уайт': 'flat white',
-  'Матча латте': 'matcha latte', 'Холодный чай': 'iced tea eistee',
-  'Энергетик': 'energy drink', 'Энергетик без сахара': 'energy drink zero sugarfree',
-  'Сок грейпфрутовый': 'grapefruit juice', 'Сок вишнёвый': 'cherry juice kirschsaft',
-  'Пицца замороженная': 'frozen pizza tiefkuhlpizza', 'Рыбные палочки': 'fish sticks fischstabchen',
-  'Картофель фри замороженный': 'frozen fries pommes', 'Картофельные крокеты': 'croquettes kroketten',
-  'Рёсти': 'rosti hash browns', 'Готовый обед замороженный': 'ready meal fertiggericht',
-  'Суп из пакета': 'instant soup tutensuppe',
-  // Яйца
-  'Яйцо варёное': 'boiled egg gekochtes ei', 'Яичница-глазунья': 'fried egg spiegelei',
-  'Скрэмбл': 'scrambled eggs ruhrei', 'Омлет': 'omelette omelett', 'Яйцо пашот': 'poached egg pochiertes ei',
-}
-
-// Иноязычные названия дописываем в поле alias — механизм поиска по синонимам в
-// базе уже есть (variantFoods его используют), второго заводить незачем.
-const withForeign = (list) =>
-  list.map((f) => {
-    const extra = FOREIGN[f.name]
-    if (!extra) return f
-    return { ...f, alias: f.alias ? `${f.alias} ${extra}` : extra }
-  })
-
-export const FOODS = withForeign([...BUILDERS, ...variantFoods, ...dairyFoods, ...plainFoods])
+// Иноязычные названия и синонимы живут не здесь, а в поиске по id
+// (src/lib/search/aliases.js, keywords.js) и в словарях языков.
+export const FOODS = [...BUILDERS, ...variantFoods, ...dairyFoods, ...plainFoods]
+  .map((f) => ({ ...f, id: catalogId('foods', f.name) }))
 
 // Масштабирует БЖУ на порцию. Неизвестное остаётся неизвестным: если база не
 // знает белок, порция от этого его не приобретает. Раньше null молча
@@ -1012,44 +720,8 @@ export function scale(food, grams) {
 }
 
 // ── Нормализация запроса ─────────────────────────────────────────────────────
-// Одно и то же намерение человек набирает по-разному: с лишними пробелами,
-// в другом регистре, с дефисом вместо пробела, с умлаутом. Всё это должно
-// приводить к одному запросу, иначе « Греческий  Йогурт » и «греческий йогурт»
-// становятся разными сценариями.
-//
-// Что делаем:
-//   • NFC — чтобы «й» из двух кодовых точек равнялась обычной «й»;
-//   • ё → е (в базе названия пишутся с «ё», люди набирают без);
-//   • снятие латинских диакритик: Müsli → musli, café → cafe;
-//   • пунктуация и дефисы → пробел, повторные пробелы схлопываются.
-// Цифры и «%» остаются: «молоко 3.2%» — осмысленный запрос.
-//
-// Буквы, которые снятие диакритик не трогает, сводятся вручную: турецкая
-// «ı» → i, немецкая «ß» → ss, «œ» → oe. В арабском убираются огласовки и
-// татвиль, а варианты алифа, «ى» и «ة» приводятся к одной форме — так пишут
-// в поиске, и так совпадёт с базой. Арабские цифры становятся обычными.
-const DIACRITICS = /[̀-ͯ]/g
-const ARABIC_MARKS = /[\u064B-\u065F\u0670\u0640]/g
-const LETTERS = [[/ı/g, 'i'], [/ß/g, 'ss'], [/œ/g, 'oe'], [/æ/g, 'ae'], [/ø/g, 'o'],
-  [/[أإآٱ]/g, 'ا'], [/ى/g, 'ي'], [/ة/g, 'ه'], [/ؤ/g, 'و'], [/ئ/g, 'ي']]
-const digit = (base) => (d) => String(d.charCodeAt(0) - base)
-
-export function normalizeQuery(s) {
-  let out = String(s ?? '')
-    .replace(/[٠-٩]/g, digit(0x0660))
-    .replace(/[۰-۹]/g, digit(0x06F0))
-    .normalize('NFD')
-    .replace(DIACRITICS, '')
-    .normalize('NFC')
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .replace(ARABIC_MARKS, '')
-  for (const [re, to] of LETTERS) out = out.replace(re, to)
-  return out
-    .replace(/[^0-9a-zа-я\u0621-\u064A%.\s]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+// Конвейер нормализации — общий для всего поиска: src/lib/search/normalize.js.
+export const normalizeQuery = fold
 
 // Поле количества принимает только то, что действительно является числом.
 // Раньше «-50» оставалось в поле, а записывалось 50: минус молча выбрасывался
@@ -1063,192 +735,23 @@ export function sanitizeAmount(raw) {
   return s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '')
 }
 
-const norm = normalizeQuery
+// Латиница → кириллица для родственных слов (banana → банана).
+export const translit = latToCyr
 
-// ── Латиница → кириллица ─────────────────────────────────────────────────────
-// Мост для родственных слов: banana → банана (одна правка от «банан»),
-// tofu → тофу, salat → салат. Полноценным переводом это НЕ является и им не
-// притворяется: «chicken» так «курицей» не станет — для таких слов ниже есть
-// таблица синонимов, а произвольные иностранные запросы уходят в Open Food
-// Facts, где база действительно многоязычная.
-const TRANSLIT = [
-  ['sch', 'ш'], ['tsch', 'ч'], ['sh', 'ш'], ['ch', 'ч'], ['zh', 'ж'], ['kh', 'х'],
-  ['ts', 'ц'], ['ya', 'я'], ['yu', 'ю'], ['yo', 'йо'], ['ye', 'е'], ['ee', 'и'],
-  ['oo', 'у'], ['ck', 'к'], ['ph', 'ф'], ['th', 'т'], ['j', 'й'], ['x', 'кс'],
-  ['a', 'а'], ['b', 'б'], ['c', 'к'], ['d', 'д'], ['e', 'е'], ['f', 'ф'],
-  ['g', 'г'], ['h', 'х'], ['i', 'и'], ['k', 'к'], ['l', 'л'], ['m', 'м'],
-  ['n', 'н'], ['o', 'о'], ['p', 'п'], ['q', 'к'], ['r', 'р'], ['s', 'с'],
-  ['t', 'т'], ['u', 'у'], ['v', 'в'], ['w', 'в'], ['y', 'и'], ['z', 'з'],
-]
-
-const HAS_LATIN = /[a-z]/
-
-export function translit(word) {
-  let out = ''
-  let i = 0
-  while (i < word.length) {
-    let hit = null
-    for (const [lat, cyr] of TRANSLIT) {
-      if (word.startsWith(lat, i)) { hit = [lat, cyr]; break }
-    }
-    if (hit) { out += hit[1]; i += hit[0].length }
-    else { out += word[i]; i += 1 }
-  }
-  return out.replace(/ё/g, 'е')
-}
-
-const SYNONYMS = [
-  ['курин', 'курица', 'кура', 'курочка', 'цыпленок', 'цып', 'куриц'],
-  ['свин', 'свинина', 'порк'],
-  ['говя', 'говядина', 'биф'],
-  ['телятин', 'теленок'],
-  ['индейк', 'индюшк', 'индюшат', 'индюш'],
-  ['баран', 'баранин', 'ягнен'],
-  ['фарш', 'рубленое'],
-  ['рыб', 'рыбн', 'филе'],
-  ['лосос', 'семга', 'форел', 'красная рыба'],
-  ['креветк', 'креветочк'],
-  ['картоф', 'картош', 'картоха', 'бульба', 'пюрешк', 'картофан', 'пюре'],
-  ['помидор', 'томат', 'помидорк', 'помидорчик'],
-  ['огур', 'огурчик'],
-  ['лук', 'лучок', 'луков'],
-  ['морков', 'морковк'],
-  ['капуст', 'капустк'],
-  ['перец', 'перчик', 'болгарск'],
-  ['грибы', 'гриб', 'шампиньон', 'грибн'],
-  ['свекл', 'свеклов'],
-  ['баклажан', 'синеньк'],
-  ['кабач', 'кабачок', 'цукини', 'цуккини'],
-  ['чеснок', 'чесночок'],
-  ['зелен', 'укроп', 'петрушк'],
-  ['банан', 'бананчик'],
-  ['яблок', 'яблочк'],
-  ['апельсин', 'цитрус'],
-  ['мандарин', 'мандаринк'],
-  ['виноград', 'виноградин'],
-  ['клубник', 'клубничк', 'земляник'],
-  ['груш', 'грушк'],
-  ['греч', 'гречк', 'гречнев'],
-  ['рис', 'рисов'],
-  ['макарон', 'вермишель', 'рожки', 'паст', 'спагетти', 'лапш', 'вермишелька'],
-  ['овсян', 'геркулес', 'овсянк'],
-  ['хлеб', 'хлебушек', 'буханк'],
-  ['булк', 'булочк'],
-  ['перловк', 'перлов'],
-  ['пшен', 'пшенн', 'пшенк'],
-  ['молок', 'молочк'],
-  ['творог', 'творож', 'творожок'],
-  ['сыр', 'сырок', 'сырн'],
-  ['кефир', 'кефирчик'],
-  ['сметан', 'сметанк'],
-  ['йогурт', 'йогуртик'],
-  ['масл', 'сливочн'],
-  ['яйц', 'яичк', 'яишн', 'яичниц', 'яйч', 'глазунь', 'омлет'],
-  ['колбас', 'колбаск'],
-  ['сосиск', 'сардель', 'сарделк'],
-  ['салям'],
-  ['ветчин', 'ветчинк'],
-  ['бекон', 'грудинк'],
-  ['coca', 'кола', 'кока', 'кокакола'],
-  ['pepsi', 'пепси'],
-  ['fanta', 'фанта'],
-  ['sprite', 'спрайт'],
-  ['газиров', 'содов', 'лимонад', 'шипучк', 'coca', 'pepsi', 'fanta', 'sprite', 'burn', 'monster', 'dew', 'mirinda'],
-  ['энергет', 'energy', 'red bull', 'monster', 'burn', 'adrenaline', 'gorilla'],
-  ['сок', 'сочок', 'нектар'],
-  ['кофе', 'кофеек', 'капучино', 'латте', 'эспрессо', 'американо', 'раф'],
-  ['чай', 'чаек'],
-  ['пиво', 'пивко', 'пивас', 'beer'],
-  ['вино', 'винишк'],
-  ['водк', 'водочк'],
-  ['вода', 'водичк', 'водиц'],
-  ['смузи', 'смуззи'],
-  ['борщ', 'борщик'],
-  ['суп', 'супчик', 'супец'],
-  ['пельмен', 'пельмешк'],
-  ['вареник', 'варенички'],
-  ['котлет', 'котлетк'],
-  ['тефтел', 'тефтельк', 'фрикадельк', 'ежик'],
-  ['отбивн'],
-  ['шашлык', 'шашлычок', 'кебаб', 'люля'],
-  ['плов', 'пловчик'],
-  ['пицц', 'пиццк'],
-  ['бургер', 'гамбургер', 'чизбургер'],
-  ['шаурм', 'шаверм', 'донер', 'денер', 'дюрюм'],
-  ['блин', 'блинчик', 'панкейк', 'оладь', 'дерун', 'драник'],
-  ['сырник', 'творожник'],
-  ['салат', 'салатик'],
-  ['каша', 'кашк'],
-  ['гарнир'],
-  ['бутерброд', 'бутер', 'бутерик', 'сэндвич', 'сендвич', 'сандвич'],
-  ['хот-дог', 'хотдог', 'хот дог'],
-  ['суши', 'сушик', 'ролл'],
-  ['болоньезе', 'карбонара', 'альфредо'],
-  ['наггетс', 'нагетс'],
-  ['чебурек', 'чебуречек'],
-  ['шоколад', 'шоколадк', 'шоколадн'],
-  ['конфет', 'конфетк'],
-  ['печенье', 'печеньк', 'печенюшк'],
-  ['мороженое', 'мороженк', 'пломбир', 'эскимо'],
-  ['торт', 'тортик', 'пирожн'],
-  ['мед', 'медок'],
-  ['кетчуп', 'кетчупчик'],
-  ['майонез', 'майонезик', 'майо'],
-  ['горчиц'],
-  ['соус', 'подлив'],
-  ['протеин', 'протеинов', 'белков', 'whey', 'вей', 'изолят', 'гейнер'],
-].map((g) => g.map(norm))
-
-// Возвращает { terms, primaryCount }. Первые primaryCount терминов — это сам
-// запрос (и его кириллическая запись), остальные — синонимы: они ищут шире, но
-// и весят меньше, иначе совпадение с частью запроса обгоняло бы совпадение
-// со всем запросом (см. SYNONYM_FACTOR в fuzzy.js).
-function expandQuery(q) {
-  const terms = new Set([q])
-  // Латинский ввод: ищем и по самому запросу (по нему бьют иноязычные alias'ы),
-  // и по его кириллической записи — «banana» находит «Банан» без таблицы.
-  if (HAS_LATIN.test(q)) {
-    const t = norm(translit(q))
-    if (t && t !== q) terms.add(t)
-  }
-  const primaryCount = terms.size
-  const words = q.split(/\s+/).filter((w) => w.length >= 3)
-  for (const g of SYNONYMS) {
-    const hit = g.some((w) => words.some((x) => x === w || x.startsWith(w) || w.startsWith(x)))
-    if (hit) g.forEach((w) => terms.add(w))
-  }
-  return { terms: [...terms], primaryCount }
-}
-
-// Поиск по локальной базе: синонимы + опечатки + ранжирование по релевантности
-// (см. lib/fuzzy.js). Раньше поиск был бинарным: «гречнвая» или «малако» не
-// находили ничего, а найденное шло в порядке базы — длинное составное блюдо
-// могло стоять выше самого продукта. Пустой запрос — вся база, как и раньше.
-// boost(food) → 0..1 — личная надбавка (см. MEMORY_BOOST_MAX в fuzzy.js).
-// Она поднимает продукт внутри тира релевантности и не может перевести его
-// через границу тира: релевантность остаётся фундаментом.
+// ── Поиск ────────────────────────────────────────────────────────────────────
+// Поиск по локальной базе — на всех языках, с синонимами, опечатками,
+// транслитерацией и ранжированием (src/lib/search). Пустой запрос — весь
+// список, как и раньше. boost(food) → 0..1 — личная надбавка: она поднимает
+// продукт внутри тира релевантности и не может перевести его через границу
+// тира (MEMORY_BOOST_MAX в search/engine.js).
 export function searchLocal(query, { boost, items = FOODS } = {}) {
-  const q = norm(query)
-  if (!q) return items
-  const { terms, primaryCount } = expandQuery(q)
-  return rankedSearch(items, terms, {
-    toText: (f) => searchText(f.name, f.alias),
-    toName: (f) => shownName(f.name),
-    boost,
-    primaryCount,
-  })
+  return searchItems(items, query, { boost }).results
 }
 
-// Поиск видит и исходное русское название, и перевод на язык интерфейса:
-// немец находит «Hähnchenbrust», а «курица» и иноязычные alias работают, как
-// и раньше. Ранжирование по названию идёт по тому, что человек видит на
-// экране, — иначе «Apfel» уступал бы продукту, у которого «apfel» лишь в alias.
-function shownName(name) {
-  return norm(foodName(name))
-}
-function searchText(name, alias) {
-  const shown = foodName(name)
-  return norm(name + ' ' + (alias || '') + (shown !== name ? ' ' + shown : ''))
+// То же с подсказкой: { results, suggestion } — suggestion есть, когда выдача
+// держится на исправлении опечатки («haferfloken» → Haferflocken).
+export function searchLocalDetailed(query, { boost, items = FOODS } = {}) {
+  return searchItems(items, query, { boost })
 }
 
 export const BREADS = [
@@ -1437,6 +940,7 @@ export const CONSTRUCTOR_ING = Object.entries(ING).flatMap(([cat, items]) =>
     unitName,
     def: def || 1,
     emoji: emoji || CAT_EMOJI[cat] || '🍽️',
+    id: catalogId('foods', name),
   }))
 )
 
@@ -1586,7 +1090,7 @@ const CAT_HINTS = [
 ]
 
 export function inferCat(name) {
-  const n = norm(name || '')
+  const n = fold(name || '')
   if (!n) return null
   const words = n.split(/[^0-9a-zа-я%]+/).filter(Boolean)
   if (!words.length) return null
@@ -1623,34 +1127,17 @@ export function getPortions(food) {
 
 // Поиск по названиям в произвольном списке (свои блюда, рецепты).
 //
-// Те же правила, что и для продуктов: нормализация запроса, синонимы, опечатки.
-// Своё человек ищет по имени ровно так же, как всё остальное, и заставлять его
-// помнить, что рецепты живут в отдельной вкладке, — значит не найти их вовсе.
+// Те же правила, что и для продуктов: нормализация, синонимы, опечатки. Своё
+// человек ищет по имени ровно так же, как всё остальное. Название своё —
+// поэтому без каталога: «Борщ» человека не превращается в борщ из базы.
+// minResults: 1 — опечатки в своих названиях человек делает так же, как в
+// чужих, и нечёткий проход нужен, даже если строгий что-то нашёл.
 export function searchByName(list, query) {
-  const q = norm(query)
-  if (!q) return list || []
-  const { terms, primaryCount } = expandQuery(q)
-  // minResults: 1, а не 0. Ноль означал бы «строгого прохода всегда достаточно»,
-  // и нечёткий поиск не запускался бы НИКОГДА — свой «Борщ» не находился по
-  // запросу «борш». Опечатки в собственных названиях человек делает ровно так
-  // же, как в чужих.
-  return rankedSearch(list || [], terms, {
-    toText: (x) => norm(x.name),
-    toName: (x) => norm(x.name),
-    minResults: 1,
-    primaryCount,
-  })
+  return searchItems(list || [], query, { minResults: 1, toEntity: ownEntity }).results
 }
 
 export function searchIngredients(query) {
-  const q = norm(query)
-  if (!q) return CONSTRUCTOR_ING
-  const { terms, primaryCount } = expandQuery(q)
-  return rankedSearch(CONSTRUCTOR_ING, terms, {
-    toText: (i) => searchText(i.name),
-    toName: (i) => shownName(i.name),
-    primaryCount,
-  })
+  return searchItems(CONSTRUCTOR_ING, query).results
 }
 
 // ── Товар по штрихкоду ───────────────────────────────────────────────────────

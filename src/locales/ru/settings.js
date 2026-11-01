@@ -172,6 +172,7 @@ export default {
       seenOf: '{n} из {total}',
     },
     about: {
+      impressum: 'Impressum (выходные данные)',
       title: 'О приложении',
       help: 'Помощь',
       collapse: 'Свернуть форму',
@@ -187,6 +188,8 @@ export default {
     },
   },
   profile: {
+    guiltyPleasure: 'Моя слабость',
+    usernamePlaceholder: 'denis',
     eyebrow: 'Профиль',
     title: 'Это вы',
     signInPrompt: 'Войдите — профиль станет виден друзьям, а данные будут в облаке.',

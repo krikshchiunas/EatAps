@@ -32,7 +32,7 @@ function safe(data) {
   if (data == null || typeof data !== 'object') return data
   const out = {}
   for (const k of Object.keys(data)) {
-    if (SECRET_KEY.test(k)) { out[k] = '[скрыто]'; continue }
+    if (SECRET_KEY.test(k)) { out[k] = '[redacted]'; continue }
     const v = data[k]
     if (v == null || typeof v === 'number' || typeof v === 'boolean') out[k] = v
     else if (typeof v === 'string') out[k] = v.length > 80 ? `${v.slice(0, 80)}…` : v

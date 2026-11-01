@@ -65,6 +65,7 @@ export default {
     found: 'Found',
     allDb: 'Whole database',
     showMore: 'Show {n} more of {rest}',
+    didYouMean: 'Did you mean: {name}?',
     globalDb: 'Global database',
     offline: 'No internet. Your own foods and the results above work offline.',
     remoteError: 'The global database didn’t respond. The results above are from your database.',

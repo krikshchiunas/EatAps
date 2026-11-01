@@ -65,6 +65,7 @@ export default {
     found: 'Gefunden',
     allDb: 'Gesamte Datenbank',
     showMore: '{n} weitere von {rest} anzeigen',
+    didYouMean: 'Meintest du: {name}?',
     globalDb: 'Globale Datenbank',
     offline: 'Kein Internet. Eigenes und die Treffer oben funktionieren offline.',
     remoteError: 'Die globale Datenbank hat nicht geantwortet. Die Treffer oben stammen aus deiner Datenbank.',

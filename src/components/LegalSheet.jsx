@@ -1,3 +1,4 @@
+// @i18n-fixed-language — Impressum, Datenschutz и AGB действуют на немецком; пояснение к ним — через t().
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSheetDrag } from '../lib/useSheetDrag.js'

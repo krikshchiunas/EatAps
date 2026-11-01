@@ -832,7 +832,7 @@ export function AboutPanel({ onClose }) {
       <Group title={t('settings.about.legal')}>
         <Row label={t('settings.about.privacy')} onClick={() => setLegal('privacy')} />
         <Row label={t('settings.about.terms')} onClick={() => setLegal('agb')} />
-        <Row label="Impressum" onClick={() => setLegal('impressum')} />
+        <Row label={t('settings.about.impressum')} onClick={() => setLegal('impressum')} />
       </Group>
 
       <Group title={t('settings.about.app')}>

@@ -31,6 +31,8 @@ export default {
     openApp: 'Открыть приложение',
   },
   auth: {
+    emailLabel: 'Email',
+    walletDescription: 'EatAps — трекер питания',
     loginTitle: 'Вход в EatAps',
     registerTitle: 'Регистрация в EatAps',
     loginText: 'Войдите, чтобы данные сохранялись в облаке и синхронизировались между устройствами.',

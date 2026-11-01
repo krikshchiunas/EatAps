@@ -89,7 +89,7 @@ function PlanCard({ plan, copy, index, busy, disabled, onBuy }) {
       <div className="ai-card__body">
         <div className="ai-card__head">
           <div className="ai-card__name">{plan.name}</div>
-          {isHighlighted && <span className="ai-card__badge">Popular</span>}
+          {isHighlighted && <span className="ai-card__badge">{t('ai.plans.popular')}</span>}
           {isPremium && <span className="ai-card__badge">Max</span>}
         </div>
 

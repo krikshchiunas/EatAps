@@ -3,6 +3,8 @@
 // килокалорий. Поэтому каждый продукт проверяется арифметикой: калорийность
 // обязана сходиться с белками, углеводами и жирами.
 import { test } from 'node:test'
+import KEYWORDS from './search/keywords.js'
+import { isCatalogId } from './catalog.js'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { FOODS, BREADS, CONSTRUCTOR_ING, scale, getPortions, inferCat, searchLocal, searchIngredients } from './foods.js'
@@ -172,16 +174,13 @@ test('продукт находится по немецкому и англий�
   }
 })
 
-test('иноязычные названия дописаны в alias, а не потеряны', () => {
-  // Ключ FOREIGN, не совпавший с именем продукта, не падает и не виден:
-  // алиас просто молча не применяется, и поиск по-немецки перестаёт работать.
-  const src = readFileSync(new URL('./foods.js', import.meta.url), 'utf8')
-  const block = src.slice(src.indexOf('const FOREIGN = {'), src.indexOf('const withForeign'))
-  const keys = [...block.matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1])
-  const names = new Set(FOODS.map((f) => f.name))
-  const dangling = keys.filter((k) => !names.has(k))
-  assert.deepEqual(dangling, [], 'ключи FOREIGN без продукта в базе')
-  assert.ok(keys.length > 200, `иноязычных названий всего ${keys.length}`)
+test('иноязычные ключевые слова привязаны к существующим продуктам', () => {
+  // Ключ, не совпавший ни с одним id, не падает и не виден: слова просто
+  // молча не применяются, и поиск по-немецки перестаёт работать.
+  const ids = new Set(FOODS.map((f) => f.id))
+  const dangling = Object.keys(KEYWORDS).filter((k) => !isCatalogId('foods', k))
+  assert.deepEqual(dangling, [], 'ключевые слова без продукта в каталоге')
+  assert.ok(Object.keys(KEYWORDS).filter((k) => ids.has(k)).length > 200)
 })
 
 test('в алиасах нет слов со смешанным алфавитом', () => {
@@ -189,7 +188,7 @@ test('в алиасах нет слов со смешанным алфавито
   // ничем: ни латинским запросом, ни русским. Отловить можно только так.
   const mixed = []
   for (const f of FOODS) {
-    for (const w of String(f.alias || '').split(/\s+/)) {
+    for (const w of `${f.alias || ''} ${KEYWORDS[f.id] || ''}`.split(/\s+/)) {
       if (/[а-яё]/i.test(w) && /[a-z]/i.test(w)) mixed.push(`${f.name}: ${w}`)
     }
   }

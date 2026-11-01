@@ -172,6 +172,7 @@ export default {
       seenOf: '{n} von {total}',
     },
     about: {
+      impressum: 'Impressum',
       title: 'Über die App',
       help: 'Hilfe',
       collapse: 'Formular einklappen',
@@ -187,6 +188,8 @@ export default {
     },
   },
   profile: {
+    guiltyPleasure: 'Mein Guilty Pleasure',
+    usernamePlaceholder: 'lena',
     eyebrow: 'Profil',
     title: 'Das bist du',
     signInPrompt: 'Melde dich an – dann sehen Freunde dein Profil und deine Daten liegen in der Cloud.',

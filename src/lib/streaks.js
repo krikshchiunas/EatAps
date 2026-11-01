@@ -14,6 +14,7 @@
 // Сегодняшний день особый: он ещё не закончился. Отсутствие записей за сегодня
 // серию не рвёт — она просто «под угрозой» (atRisk), и UI это показывает.
 // ─────────────────────────────────────────────────────────────────────────────
+import { t } from './i18n.js'
 import { keyOf, addDays } from './date.js'
 
 export const FREEZE_ALLOWANCE = 2 // одиночных пропусков внутри текущей серии
@@ -87,28 +88,36 @@ export function longestStreak(days) {
 // ── Достижения ────────────────────────────────────────────────────────────────
 // Данные-первыми: каждое достижение — это порог по одному числу из facts.
 // Так их легко добавлять и невозможно рассинхронизировать с UI.
-export const ACHIEVEMENTS = [
-  { id: 'first-log', emoji: '🌱', title: 'Первый шаг', desc: 'Записать первый приём пищи', target: 1, of: (f) => f.totalLoggedDays, group: 'Начало' },
-  { id: 'days-7', emoji: '📗', title: 'Неделя наблюдений', desc: 'Записать 7 дней', target: 7, of: (f) => f.totalLoggedDays, group: 'Начало' },
-  { id: 'days-30', emoji: '📘', title: 'Месяц данных', desc: 'Записать 30 дней', target: 30, of: (f) => f.totalLoggedDays, group: 'Начало' },
-  { id: 'days-100', emoji: '📚', title: 'Сотня', desc: 'Записать 100 дней', target: 100, of: (f) => f.totalLoggedDays, group: 'Начало' },
+// Подписи — из словаря по id (progress.js → ach): геттеры, потому что
+// справочник живёт весь сеанс, а язык может смениться.
+const ACH = [
+  { id: 'first-log', emoji: '🌱', target: 1, of: (f) => f.totalLoggedDays, groupKey: 'start' },
+  { id: 'days-7', emoji: '📗', target: 7, of: (f) => f.totalLoggedDays, groupKey: 'start' },
+  { id: 'days-30', emoji: '📘', target: 30, of: (f) => f.totalLoggedDays, groupKey: 'start' },
+  { id: 'days-100', emoji: '📚', target: 100, of: (f) => f.totalLoggedDays, groupKey: 'start' },
 
-  { id: 'streak-3', emoji: '✨', title: 'Три подряд', desc: '3 дня подряд без пропусков', target: 3, of: (f) => f.longestStreak, group: 'Постоянство' },
-  { id: 'streak-7', emoji: '🔥', title: 'Неделя огня', desc: '7 дней подряд', target: 7, of: (f) => f.longestStreak, group: 'Постоянство' },
-  { id: 'streak-30', emoji: '🏆', title: 'Месяц подряд', desc: '30 дней подряд', target: 30, of: (f) => f.longestStreak, group: 'Постоянство' },
-  { id: 'streak-100', emoji: '💎', title: 'Сто дней подряд', desc: '100 дней подряд', target: 100, of: (f) => f.longestStreak, group: 'Постоянство' },
+  { id: 'streak-3', emoji: '✨', target: 3, of: (f) => f.longestStreak, groupKey: 'consistency' },
+  { id: 'streak-7', emoji: '🔥', target: 7, of: (f) => f.longestStreak, groupKey: 'consistency' },
+  { id: 'streak-30', emoji: '🏆', target: 30, of: (f) => f.longestStreak, groupKey: 'consistency' },
+  { id: 'streak-100', emoji: '💎', target: 100, of: (f) => f.longestStreak, groupKey: 'consistency' },
 
-  { id: 'goal-7', emoji: '🎯', title: 'Точно в цель', desc: '7 дней в пределах цели по калориям', target: 7, of: (f) => f.daysInCalorieTarget, group: 'Цели' },
-  { id: 'goal-30', emoji: '🎖️', title: 'Тридцать в цель', desc: '30 дней в пределах цели', target: 30, of: (f) => f.daysInCalorieTarget, group: 'Цели' },
-  { id: 'protein-14', emoji: '🥩', title: 'Белок под контролем', desc: '14 дней с нормой белка', target: 14, of: (f) => f.daysProteinOk, group: 'Цели' },
+  { id: 'goal-7', emoji: '🎯', target: 7, of: (f) => f.daysInCalorieTarget, groupKey: 'goals' },
+  { id: 'goal-30', emoji: '🎖️', target: 30, of: (f) => f.daysInCalorieTarget, groupKey: 'goals' },
+  { id: 'protein-14', emoji: '🥩', target: 14, of: (f) => f.daysProteinOk, groupKey: 'goals' },
 
-  { id: 'weigh-10', emoji: '⚖️', title: 'Держу вес на виду', desc: '10 взвешиваний', target: 10, of: (f) => f.weighIns, group: 'Тело' },
-  { id: 'activity-14', emoji: '🏃', title: 'Честный режим', desc: 'Отметить активность в 14 днях', target: 14, of: (f) => f.activityMarked, group: 'Тело' },
-  { id: 'weight-goal', emoji: '🥇', title: 'Цель по весу взята', desc: 'Достичь целевого веса', target: 1, of: (f) => (f.weightGoalReached ? 1 : 0), group: 'Тело' },
+  { id: 'weigh-10', emoji: '⚖️', target: 10, of: (f) => f.weighIns, groupKey: 'body' },
+  { id: 'activity-14', emoji: '🏃', target: 14, of: (f) => f.activityMarked, groupKey: 'body' },
+  { id: 'weight-goal', emoji: '🥇', target: 1, of: (f) => (f.weightGoalReached ? 1 : 0), groupKey: 'body' },
 
-  { id: 'recipes-3', emoji: '🍲', title: 'Свой повар', desc: 'Сохранить 3 рецепта', target: 3, of: (f) => f.recipes, group: 'Библиотека' },
-  { id: 'templates-3', emoji: '🥪', title: 'Свои блюда', desc: 'Сохранить 3 своих блюда', target: 3, of: (f) => f.templates, group: 'Библиотека' },
+  { id: 'recipes-3', emoji: '🍲', target: 3, of: (f) => f.recipes, groupKey: 'library' },
+  { id: 'templates-3', emoji: '🥪', target: 3, of: (f) => f.templates, groupKey: 'library' },
 ]
+
+export const ACHIEVEMENTS = ACH.map((a) => Object.defineProperties({ ...a }, {
+  title: { get: () => t(`ach.${a.id}.title`), enumerable: true },
+  desc: { get: () => t(`ach.${a.id}.desc`), enumerable: true },
+  group: { get: () => t(`ach.group.${a.groupKey}`), enumerable: true },
+}))
 
 // Собрать факты для проверки достижений из уже посчитанных данных.
 // Ничего не считает заново — только раскладывает по именам.

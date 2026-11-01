@@ -172,6 +172,7 @@ export default {
       seenOf: '{n} من {total}',
     },
     about: {
+      impressum: 'البيانات القانونية (Impressum)',
       title: 'عن التطبيق',
       help: 'المساعدة',
       collapse: 'طيّ النموذج',
@@ -187,6 +188,8 @@ export default {
     },
   },
   profile: {
+    guiltyPleasure: 'نقطة ضعفي',
+    usernamePlaceholder: 'omar',
     eyebrow: 'الملف الشخصي',
     title: 'هذا أنت',
     signInPrompt: 'سجّل الدخول — سيصبح ملفك مرئيًا للأصدقاء وستُحفظ بياناتك في السحابة.',

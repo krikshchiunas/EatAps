@@ -112,7 +112,7 @@ export default function MyProfileSheet({ onClose }) {
                 setNick(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))
                 setNickErr(null)
               }}
-              placeholder="denis"
+              placeholder={t('profile.usernamePlaceholder')}
               maxLength={20}
               autoCapitalize="none"
               autoCorrect="off"
@@ -144,7 +144,7 @@ export default function MyProfileSheet({ onClose }) {
             «Я это обожаю» и «Ок» рядом с ним в профиле считаются по дневнику —
             их здесь нет и быть не должно. */}
         <div className="field">
-          <label>MY guilty pleasure</label>
+          <label>{t('profile.guiltyPleasure')}</label>
           <input
             className="input"
             placeholder={t('profile.edit.guiltyPh')}

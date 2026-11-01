@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -34,38 +34,30 @@
         var shown = false;
         var reason = '';
 
-        // Язык экрана: выбранный в приложении, у старой установки — русский,
-        // иначе язык браузера. Словарь свой и крошечный: основной бандл с
-        // переводами как раз и не загрузился. Порядок фраз: заголовок, текст,
-        // выделенное, хвост, кнопка, подсказка, «с главного экрана», причины.
-        var TEXT = {
-          ru: ['EatAps не запустился', 'Скорее всего на устройстве осталась старая версия приложения. Кнопка ниже очистит её и загрузит свежую. ', 'Ваши записи о питании не удалятся', ' — они сохранены отдельно.', 'Обновить приложение', 'Если не помогло — покажите эту строку разработчику.', 'с главного экрана', 'не загрузился ', 'сбой при запуске: ', 'приложение не отрисовалось за 12 секунд'],
-          en: ['EatAps didn’t start', 'Most likely an old version of the app is still on your device. The button below clears it and loads a fresh one. ', 'Your food entries won’t be deleted', ' — they’re stored separately.', 'Update the app', 'If that didn’t help, show this line to the developer.', 'from the Home Screen', 'failed to load ', 'startup error: ', 'the app didn’t render within 12 seconds'],
-          de: ['EatAps ist nicht gestartet', 'Wahrscheinlich ist noch eine alte Version der App auf dem Gerät. Der Button unten löscht sie und lädt eine neue. ', 'Deine Ernährungseinträge werden nicht gelöscht', ' – sie sind separat gespeichert.', 'App aktualisieren', 'Wenn das nicht hilft, zeig diese Zeile dem Entwickler.', 'vom Home-Bildschirm', 'nicht geladen: ', 'Fehler beim Start: ', 'die App wurde in 12 Sekunden nicht angezeigt'],
-          es: ['EatAps no se ha iniciado', 'Lo más probable es que en el dispositivo haya quedado una versión antigua de la app. El botón de abajo la borra y carga una nueva. ', 'Tus registros de comida no se borrarán', ': se guardan aparte.', 'Actualizar la app', 'Si no funciona, enséñale esta línea al desarrollador.', 'desde la pantalla de inicio', 'no se cargó ', 'error al iniciar: ', 'la app no se mostró en 12 segundos'],
-          pt: ['O EatAps não iniciou', 'Provavelmente ficou uma versão antiga do app no aparelho. O botão abaixo a remove e carrega uma nova. ', 'Seus registros alimentares não serão apagados', ' — eles ficam salvos à parte.', 'Atualizar o app', 'Se não ajudar, mostre esta linha ao desenvolvedor.', 'da tela de início', 'não carregou ', 'falha ao iniciar: ', 'o app não apareceu em 12 segundos'],
-          tr: ['EatAps açılmadı', 'Büyük olasılıkla cihazda uygulamanın eski bir sürümü kaldı. Aşağıdaki düğme onu temizleyip yenisini yükler. ', 'Beslenme kayıtların silinmez', ' — onlar ayrı saklanıyor.', 'Uygulamayı güncelle', 'İşe yaramazsa bu satırı geliştiriciye göster.', 'ana ekrandan', 'yüklenemedi: ', 'başlatma hatası: ', 'uygulama 12 saniye içinde görüntülenmedi'],
-          ar: ['لم يبدأ EatAps', 'على الأرجح بقيت على الجهاز نسخة قديمة من التطبيق. سيحذفها الزر أدناه ويحمّل نسخة جديدة. ', 'لن تُحذف سجلات طعامك', ' — فهي محفوظة بشكل منفصل.', 'تحديث التطبيق', 'إن لم ينفع ذلك، فأرِ هذا السطر للمطوّر.', 'من الشاشة الرئيسية', 'لم يُحمّل ', 'خطأ عند البدء: ', 'لم يظهر التطبيق خلال 12 ثانية']
-        };
-        var lang = (function () {
-          var code = '';
-          try {
-            code = localStorage.getItem('eataps:lang') || '';
-            if (!TEXT[code]) {
-              for (var i = 0; i < localStorage.length; i++) {
-                var k = localStorage.key(i) || '';
-                if (k === 'eataps:v1' || k.indexOf('eataps:state') === 0) { code = 'ru'; break; }
-              }
-            }
-          } catch (e) {}
-          if (!TEXT[code]) code = String(navigator.language || '').slice(0, 2).toLowerCase();
-          return TEXT[code] ? code : 'en';
-        })();
+        // Язык экрана и <html lang/dir>. Реестр языков, тексты и функции выбора
+        // языка вставляет сборка (scripts/vite-plugin-i18n-boot.mjs) из
+        // src/locales: здесь та же функция detectLanguage, что в приложении, —
+        // загрузочный экран и приложение не могут выбрать разные языки.
+        /*__I18N_BOOT__*/
+        var lang = I18N.fallback;
+        try {
+          var stored = null;
+          try { stored = localStorage.getItem(I18N.key); } catch (e) {}
+          var legacy = false;
+          try { legacy = hasLegacyInstall(localStorage, I18N.legacyKeys, I18N.legacyPrefixes); } catch (e) {}
+          lang = detectLanguage({
+            stored: stored, legacyInstall: legacy, preferred: deviceLanguages(navigator),
+            langs: LANGS, source: I18N.source, fallback: I18N.fallback
+          });
+        } catch (e) {}
+        if (!TEXT[lang]) lang = TEXT[I18N.fallback] ? I18N.fallback : I18N.source;
+        var dir = 'ltr';
+        for (var li = 0; li < LANGS.length; li++) if (LANGS[li].code === lang) dir = LANGS[li].dir || 'ltr';
         var L = TEXT[lang];
         // Ставим язык и направление сразу: арабский интерфейс не должен
         // мигнуть зеркально перевёрнутым, пока грузится приложение.
         document.documentElement.lang = lang;
-        document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+        document.documentElement.dir = dir;
 
         function mounted() {
           var r = document.getElementById('root');
@@ -155,7 +147,7 @@
     <div id="root"></div>
     <noscript>
       <div style="max-width:420px;margin:0 auto;padding:14vh 24px;font:16px/1.5 -apple-system,sans-serif;color:#1F312B">
-        Для работы EatAps нужен включённый JavaScript.
+        <!--__I18N_NOSCRIPT__-->
       </div>
     </noscript>
     <script type="module" src="/src/main.jsx"></script>

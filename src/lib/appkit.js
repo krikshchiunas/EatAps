@@ -1,4 +1,5 @@
 import { createAppKit } from '@reown/appkit/react'
+import { t } from './i18n.js'
 import { EthersAdapter } from '@reown/appkit-adapter-ethers'
 import { SolanaAdapter } from '@reown/appkit-adapter-solana'
 import { mainnet, solana } from '@reown/appkit/networks'
@@ -24,7 +25,7 @@ if (web3Enabled) {
       projectId,
       metadata: {
         name: 'EatAps',
-        description: 'EatAps — трекер питания',
+        description: t('auth.walletDescription'),
         url: origin,
         icons: [`${origin}/icon-512.png`],
       },
