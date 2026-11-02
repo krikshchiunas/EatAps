@@ -742,7 +742,7 @@ export default {
     food_chicken_baked_with_cheese: 'دجاج مخبوز بالجبن',
     food_grilled_prawns: 'روبيان مشوي',
     food_fried_squid: 'حبار مقلي',
-    food_fish_cakes: 'كفتة سمك',
+    food_fish_cakes: 'أقراص سمك',
     food_fish_and_chips: 'سمك وبطاطس',
     food_mussels_in_cream_sauce: 'بلح البحر بصلصة الكريمة',
     food_paella: 'باييلا',

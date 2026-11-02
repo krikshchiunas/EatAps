@@ -174,7 +174,7 @@ export default {
       two: 'انتهى · احتُسب {scored} من يومين',
       few: 'انتهى · احتُسب {scored} من {count} أيام',
       many: 'انتهى · احتُسب {scored} من {count} يومًا',
-      other: 'انتهى · احتُسب {scored} من {count} يوم',
+      zero: 'انتهى · احتُسب {scored} من {count} يوم', other: 'انتهى · احتُسب {scored} من {count} يوم',
     },
     progressLine: '{pct}% من الأيام المنقضية · بقي {n}',
     leaderboard: 'لوحة الصدارة',

@@ -1,6 +1,6 @@
 import { macroLabel, amountLabel } from '../lib/foods.js'
 import { foodName } from '../lib/foodNames.js'
-import { t, isRtl } from '../lib/i18n.js'
+import { t, isRtl, fmtNum } from '../lib/i18n.js'
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useStore } from '../store.jsx'
 import { sumDay, sumQuality, sumAdvanced, satFatLimit, sugarLimit, fiberGoal, carbGrade, carbBucket, BUCKET_LABEL } from '../lib/nutrition.js'
@@ -1233,7 +1233,7 @@ function EditFoodSheet({ food, onSave, onClose }) {
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 22 }}>
               {[[t('units.kcal'), Math.round(food.kcal * scale)], [t('day.proteinShort'), +(food.protein * scale).toFixed(1)], [t('day.carbsShort'), +(food.carbs * scale).toFixed(1)], [t('day.fatShort'), +(food.fat * scale).toFixed(1)]].map(([l, v]) => (
                 <div key={l} style={{ textAlign: 'center' }}>
-                  <div className="tabular" style={{ fontSize: 20, fontWeight: 680 }}>{v}</div>
+                  <div className="tabular" style={{ fontSize: 20, fontWeight: 680 }}>{fmtNum(v)}</div>
                   <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{l}</div>
                 </div>
               ))}

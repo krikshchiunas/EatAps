@@ -143,8 +143,12 @@ export function fmtTime(d, opts = { hour: '2-digit', minute: '2-digit' }) {
 export function fmtDateTime(d, opts) {
   return new Date(d).toLocaleString(locale(), opts)
 }
+// Пусто, null и не-число — пустая строка, а не «0» и не «NaN»: неизвестное
+// значение не должно выглядеть измеренным.
 export function fmtNum(n, opts) {
-  return Number(n).toLocaleString(locale(), opts)
+  if (n == null || n === '') return ''
+  const v = Number(n)
+  return Number.isFinite(v) ? v.toLocaleString(locale(), opts) : ''
 }
 
 // ── Выбор языка ──────────────────────────────────────────────────────────────
@@ -245,6 +249,15 @@ export async function initI18n() {
     if (fallback !== code && (await setLang(fallback, { persist: false }))) return fallback
   }
   return getLang()
+}
+
+// Для тестов: подменить загрузчик пакета (медленная сеть, офлайн).
+export function __setLoaderForTests(code, loader) {
+  const prev = LOADERS[code]
+  if (loader) LOADERS[code] = loader
+  else delete LOADERS[code]
+  delete packs[code]
+  return () => { if (prev) LOADERS[code] = prev; else delete LOADERS[code]; delete packs[code] }
 }
 
 // Для тестов: сбросить состояние модуля к исходному.

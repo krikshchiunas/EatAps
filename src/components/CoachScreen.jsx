@@ -9,7 +9,7 @@ import { keyOf, addDays, humanDay, humanDow } from '../lib/date.js'
 import { sumDay } from '../lib/nutrition.js'
 import { getMealSections, foodsForMeal } from '../lib/meals.js'
 import { targetsForDay } from '../lib/body.js'
-import { t, fmtDateTime } from '../lib/i18n.js'
+import { t, fmtDateTime, fmtNum } from '../lib/i18n.js'
 import { foodName } from '../lib/foodNames.js'
 import { unitLabel } from '../lib/units.js'
 
@@ -279,9 +279,9 @@ function ClientDiary({ client, myId, onClose }) {
               {goal > 0 ? t('coach.kcalOf', { goal }) : t('units.kcal')}
             </div>
             <div className="row" style={{ justifyContent: 'center', gap: 18, marginTop: 12, fontSize: 13, color: 'var(--ink-2)' }}>
-              <span>{t('macro.p')} {totals.protein}</span>
-              <span>{t('macro.f')} {totals.fat}</span>
-              <span>{t('macro.c')} {totals.carbs}</span>
+              <span>{t('macro.p')} {fmtNum(totals.protein)}</span>
+              <span>{t('macro.f')} {fmtNum(totals.fat)}</span>
+              <span>{t('macro.c')} {fmtNum(totals.carbs)}</span>
             </div>
             {day.statsExcluded && (
               <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 10 }}>
@@ -304,7 +304,7 @@ function ClientDiary({ client, myId, onClose }) {
                   <div key={f.id} className="row between" style={{ fontSize: 14, padding: '4px 0' }}>
                     <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {f.emoji || '🍽️'} {foodName(f.name)}
-                      {f.grams ? <span style={{ color: 'var(--ink-3)' }}> · {f.grams} {unitLabel(f.unit || 'г')}</span> : null}
+                      {f.grams ? <span style={{ color: 'var(--ink-3)' }}> · {fmtNum(f.grams)} {unitLabel(f.unit || 'г')}</span> : null}
                     </span>
                     <span className="tabular" style={{ color: 'var(--ink-3)', flex: '0 0 auto', marginInlineStart: 10 }}>{f.kcal}</span>
                   </div>

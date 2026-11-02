@@ -18,7 +18,7 @@ import { createDoubleTap } from '../lib/doubleTap.js'
 import { Avatar } from './FriendsScreen.jsx'
 import FriendAccount from './FriendAccount.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
-import { t, fmtTime, fmtDate } from '../lib/i18n.js'
+import { t, fmtTime, fmtDate, fmtNum } from '../lib/i18n.js'
 import { useLang } from '../lib/useLang.js'
 import { foodName } from '../lib/foodNames.js'
 import { amountLabel } from '../lib/foods.js'
@@ -825,9 +825,9 @@ function MealRefCard({ meal: raw, onOpen }) {
 
       {hasMacros && (
         <div className="mealcard-macros">
-          <span><b>{meal.protein}</b> {t('macro.p')}</span>
-          <span><b>{meal.fat}</b> {t('macro.f')}</span>
-          <span><b>{meal.carbs}</b> {t('macro.c')}</span>
+          <span><b>{fmtNum(meal.protein)}</b> {t('macro.p')}</span>
+          <span><b>{fmtNum(meal.fat)}</b> {t('macro.f')}</span>
+          <span><b>{fmtNum(meal.carbs)}</b> {t('macro.c')}</span>
         </div>
       )}
     </button>

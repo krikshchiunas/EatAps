@@ -41,7 +41,7 @@ export default {
     kg: 'kg',
     cm: 'cm',
     pcs: 'ud.',
-    servingWord: 'porción',
+    servingWord: 'ración',
     kcalN: '{n} kcal',
     gN: '{n} g',
     mlN: '{n} ml',
@@ -50,7 +50,7 @@ export default {
     mg: 'mg',
     mcg: 'µg',
     cfu: 'mil M UFC',
-    serving: { one: '{n} porción', other: '{n} porciones' },
+    serving: { one: '{n} ración', other: '{n} raciones' },
     piece: '{n} ud.',
   },
   macro: {

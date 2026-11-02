@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from 'react'
-import { catalogRef } from './lib/catalog.js'
+import { withCatalogRef } from './lib/catalog.js'
 import { StoreCtx, useStore } from './lib/storeContext.js'
 import {
   supabase, supabaseEnabled, pullState, saveAppState, subscribeToAppState,
@@ -32,18 +32,6 @@ import { log, shortId } from './lib/log.js'
 // `from '../store.jsx'` — реэкспортируем, чтобы не трогать все компоненты.
 export { useStore }
 
-// Запись из каталога получает стабильный id продукта (и способа
-// приготовления): он связывает её с базой независимо от языка. name остаётся
-// каноническим русским — его читают старые версии приложения, синхронизация
-// и экспорт. Своё название человека каталожным не станет: catalogRef его не
-// узнает, и id снимается. Ссылка пересчитывается при КАЖДОЙ записи, в том числе
-// при правке: переименованная запись не должна тянуть за собой чужой id.
-function withCatalogRef(food) {
-  if (!food || typeof food !== 'object') return food
-  const { foodId: _f, methodId: _m, ...rest } = food
-  const ref = catalogRef(food.name)
-  return ref ? { ...rest, ...ref } : rest
-}
 
 // Пустое состояние. theme = null означает «пользователь не выбирал» — тогда
 // берём системную тему. Раньше системная фиксировалась в состояние при первом

@@ -2188,3 +2188,16 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 [dir="rtl"] .set-chev,
 [dir="rtl"] .chat-back svg,
 [dir="rtl"] .rtl-mirror { transform: scaleX(-1); }
+
+/* ── Выбор языка ─────────────────────────────────────────────────────────────
+   Строка — вариант listbox: название на самом языке, под ним — на текущем.
+   Выбранный язык виден и цветом галочки, и весом шрифта (не только цветом). */
+.lang-row { cursor: pointer; }
+.lang-row__names { display: flex; flex-direction: column; min-width: 0; text-align: start; }
+.lang-row__native { font-weight: 500; unicode-bidi: isolate; }
+.lang-row.on .lang-row__native { font-weight: 700; }
+.lang-row__local { font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
+.lang-row__mark { min-width: 1.2em; text-align: end; }
+.lang-row.on .lang-row__mark { color: var(--primary); font-weight: 700; }
+.lang-row:focus-visible, .set-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 12px; }
+.set-row__icon { flex: 0 0 auto; margin-inline-end: 10px; }

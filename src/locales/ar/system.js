@@ -62,7 +62,7 @@ export default {
       two: 'أرسل إليك {name} رسالتين',
       few: 'أرسل إليك {name} {count} رسائل',
       many: 'أرسل إليك {name} {count} رسالة',
-      other: 'أرسل إليك {name} {count} رسالة',
+      zero: 'أرسل إليك {name} {count} رسالة', other: 'أرسل إليك {name} {count} رسالة',
     },
   },
 }

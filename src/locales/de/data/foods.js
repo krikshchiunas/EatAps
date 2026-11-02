@@ -31,7 +31,7 @@ export default {
     food_rice: 'Reis',
     food_buckwheat: 'Buchweizen',
     food_broccoli: 'Brokkoli',
-    food_courgette: 'Zucchini',
+    food_courgette: 'Kabatschok (helle Zucchini)',
     food_milk: 'Milch',
     food_kefir: 'Kefir',
     food_cottage_cheese: 'Quark',

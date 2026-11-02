@@ -59,6 +59,20 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
         <Row label={t('settings.row.account')} value={accountValue} onClick={() => setPanel('account')} />
       </Group>
 
+      {/* Язык — отдельной группой наверху, а не внутри «Оформления»: его ищет
+          и тот, кто случайно включил незнакомый язык, — по значку 🌐 и по
+          названию своего языка справа. */}
+      <Group title={t('lang.title')}>
+        <Row
+          icon="🌐"
+          label={t('lang.title')}
+          value={langInfo().name}
+          valueLang={langInfo().code}
+          valueDir={langInfo().dir}
+          onClick={() => setPanel('language')}
+        />
+      </Group>
+
       <Group title={t('settings.grp.norm')}>
         <Row label={t('settings.row.body')} value={bodyValue} onClick={() => setPanel('body')} />
       </Group>
@@ -78,7 +92,6 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
 
       <Group title={t('settings.grp.appearance')}>
         <Row label={t('settings.row.theme')} value={themeLabel} onClick={() => setPanel('appearance')} />
-        <Row label={t('lang.title')} value={langInfo().name} onClick={() => setPanel('language')} />
       </Group>
 
       <Group title={t('settings.grp.data')}>

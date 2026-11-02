@@ -16,7 +16,7 @@ export default {
     unit: {
       capsule: { word: 'cápsula', count: { one: '{n} cápsula', other: '{n} cápsulas' }, inOne: 'UNA cápsula', ofOne: 'una cápsula' },
       tablet: { word: 'comprimido', count: { one: '{n} comprimido', other: '{n} comprimidos' }, inOne: 'UN comprimido', ofOne: 'un comprimido' },
-      serving: { word: 'porción', count: { one: '{n} porción', other: '{n} porciones' }, inOne: 'UNA porción', ofOne: 'una porción' },
+      serving: { word: 'ración', count: { one: '{n} ración', other: '{n} raciones' }, inOne: 'UNA ración', ofOne: 'una ración' },
       gummy: { word: 'gominola', count: { one: '{n} gominola', other: '{n} gominolas' }, inOne: 'UNA gominola', ofOne: 'una gominola' },
       drop: { word: 'gota', count: { one: '{n} gota', other: '{n} gotas' }, inOne: 'UNA gota', ofOne: 'una gota' },
       sachet: { word: 'sobre', count: { one: '{n} sobre', other: '{n} sobres' }, inOne: 'UN sobre', ofOne: 'un sobre' },

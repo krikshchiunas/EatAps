@@ -59,7 +59,7 @@ export default {
     backToLogin: 'العودة إلى الدخول',
     prompt: 'اختر كلمة مرور جديدة. 6 أحرف على الأقل.',
     promptEmail: 'اختر كلمة مرور جديدة لـ {email}. 6 أحرف على الأقل.',
-    moreChars: { one: 'بقي حرف واحد', two: 'بقي حرفان', few: 'بقيت {count} أحرف', many: 'بقي {count} حرفًا', other: 'بقي {count} حرف' },
+    moreChars: { one: 'بقي حرف واحد', two: 'بقي حرفان', few: 'بقيت {count} أحرف', many: 'بقي {count} حرفًا', zero: 'بقي {count} حرف', other: 'بقي {count} حرف' },
     again: 'أعد كتابة كلمة المرور',
     mismatch: 'كلمتا المرور غير متطابقتين',
     save: 'حفظ كلمة المرور',

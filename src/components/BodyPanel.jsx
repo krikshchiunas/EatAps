@@ -18,7 +18,7 @@ import { useStore } from '../store.jsx'
 import { ACTIVITY, GOALS, computeTargets } from '../lib/nutrition.js'
 import { bmi, bmiBand, profileTargets, WEIGHT_MIN, WEIGHT_MAX } from '../lib/body.js'
 import { Panel, Group } from './SettingsPanels.jsx'
-import { t } from '../lib/i18n.js'
+import { t, fmtNum } from '../lib/i18n.js'
 
 const AGE_MIN = 10
 const AGE_MAX = 100
@@ -141,7 +141,7 @@ export default function BodyPanel({ onClose }) {
           <KV k={t('body.protein')} v={next.proteinRefWeight !== num(d.weight)
             ? t('body.proteinPerRefKg', { n: next.proteinPerKg, ref: next.proteinRefWeight })
             : t('body.proteinPerKg', { n: next.proteinPerKg })} />
-          {b != null && band && <KV k={t('body.bmi')} v={`${b.toFixed(1)} — ${band.label}`} />}
+          {b != null && band && <KV k={t('body.bmi')} v={`${fmtNum(b, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} — ${band.label}`} />}
           {next.proteinRefWeight !== num(d.weight) && (
             <p className="set-note" style={{ padding: 0, marginTop: 10 }}>
               {t('body.refWeightNote')}

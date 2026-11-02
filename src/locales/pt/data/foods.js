@@ -597,7 +597,7 @@ export default {
     food_meat_hand_pie: 'Pastel de carne',
     food_crepes_with_chicken: 'Panquecas recheadas com frango',
     food_pepperoni_pizza: 'Pizza de pepperoni',
-    food_burger: 'Hambúrguer',
+    food_burger: 'Burger',
     food_chips_fries: 'Batata frita',
     food_nuggets: 'Nuggets',
     food_sushi_roll: 'Sushi (uramaki)',

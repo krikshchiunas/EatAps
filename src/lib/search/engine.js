@@ -31,6 +31,7 @@
 //    350 слово запроса — начало слова поля
 //    150 длинная подстрока внутри слова (от 4 букв)
 //    100…320 часть слов запроса совпала точно (по доле совпавших)
+//    140…260 многословный запрос: все слова совпали, часть — с опечаткой
 //     40…120 опечатки: все слова совпали с правками (меньше правок — выше)
 //     60…80 сближение по звучанию (русское «малако» → «молоко»)
 // Внутри тира: поле другого языка — минус 4, синоним ×0.9, ключевое слово
@@ -42,8 +43,9 @@
 //
 // ── Два прохода ──────────────────────────────────────────────────────────────
 // Строгий проход смотрит только сущности, у которых есть слово на ту же букву,
-// что и слова запроса. Если строгих совпадений меньше minResults, идёт полный
-// проход: подстроки, опечатки, звучание. Расстояние до слов считается один раз
+// что и слова запроса. Полный проход (подстроки, опечатки, звучание) идёт,
+// если строгих совпадений меньше minResults или ни одно не покрыло все слова
+// запроса — и не идёт, если нашлось название целиком или его начало. Расстояние до слов считается один раз
 // на запрос по словарю уникальных слов, а не по каждому полю.
 // ─────────────────────────────────────────────────────────────────────────────
 import { fold, tokens as toTokens, compact, stem, phoneticKey } from './normalize.js'
@@ -185,6 +187,10 @@ function fuzzyScore(f, qv, dist, cdist, phon) {
     total += best
   }
   if (total === 0) return -1 // точные совпадения уже оценил строгий проход
+  // Несколько слов, все совпали, одно-два с опечаткой («pehcuga de pollo»):
+  // это сильнее, чем точное совпадение лишь части слов (тир 100…320 строгого
+  // прохода считает только точные слова), поэтому свой диапазон 140…260.
+  if (qv.tokens.length > 1) return Math.max(140, 300 - total * 40 - (total > 1 ? 20 : 0))
   return Math.max(40, 120 - total * 40)
 }
 
@@ -219,7 +225,9 @@ export function search(index, variants, { primaryLang = '', boost, minResults = 
       for (let v = 0; v < qvs.length; v++) {
         const qv = qvs[v]
         let raw = strictScore(f, qv, full)
-        if (raw < 0 && fz && fz[v] && f.kind !== 'keyword') raw = fuzzyScore(f, qv, fz[v].dist, fz[v].cdist, fz[v].phon)
+        // Нечёткое сравнение — и там, где строгое нашло лишь часть слов: все
+        // слова с одной опечаткой сильнее, чем часть слов без опечаток.
+        if (raw < 350 && fz && fz[v] && f.kind !== 'keyword') raw = Math.max(raw, fuzzyScore(f, qv, fz[v].dist, fz[v].cdist, fz[v].phon))
         if (raw < 0) continue
         let s = raw * KIND_FACTOR[f.kind] * qv.weight
         if (f.kind === 'name' && primaryLang && f.lang && f.lang !== primaryLang) s -= OTHER_LANG_PENALTY
@@ -247,7 +255,15 @@ export function search(index, variants, { primaryLang = '', boost, minResults = 
   let out = collect(cand, false, null)
   let fuzzy = false
 
-  if (out.length < minResults) {
+  // Полный проход (подстроки, опечатки, звучание) нужен, когда строгих
+  // совпадений мало ИЛИ ни одно не покрыло все слова многословного запроса
+  // («pehcuga de pollo»: «pollo» нашлось точно, а продукт — только с
+  // исправлением). Если же есть совпадение с названием или его началом (≥600),
+  // опечатки только зашумили бы выдачу — и стоили бы времени на каждой букве.
+  const bestStrict = out.length ? out[0].base : -1
+  const multi = qvs[0].tokens.length > 1
+  const needFull = bestStrict < 600 && (out.length < minResults || (multi && bestStrict < 350))
+  if (needFull) {
     const fz = qvs.map((qv) => {
       if (qv.weight < FUZZY_MIN_WEIGHT) return null
       const pk = qv.tokens.length === 1 ? phoneticKey(qv.q) : ''

@@ -50,8 +50,8 @@ export default {
     mg: 'ملغ',
     mcg: 'مكغ',
     cfu: 'مليار وحدة',
-    serving: { one: 'حصة واحدة', two: 'حصتان', few: '{n} حصص', many: '{n} حصة', other: '{n} حصة' },
-    piece: { one: 'قطعة واحدة', two: 'قطعتان', few: '{n} قطع', many: '{n} قطعة', other: '{n} قطعة' },
+    serving: { one: 'حصة واحدة', two: 'حصتان', few: '{n} حصص', many: '{n} حصة', zero: '{n} حصة', other: '{n} حصة' },
+    piece: { one: 'قطعة واحدة', two: 'قطعتان', few: '{n} قطع', many: '{n} قطعة', zero: '{n} قطعة', other: '{n} قطعة' },
   },
   macro: {
     protein: 'بروتين',
@@ -64,9 +64,9 @@ export default {
     line: 'ب{p} ك{c} د{f}',
   },
   count: {
-    products: { one: 'صنف واحد', two: 'صنفان', few: '{count} أصناف', many: '{count} صنفًا', other: '{count} صنف' },
-    times: { one: 'مرة واحدة', two: 'مرتان', few: '{count} مرات', many: '{count} مرة', other: '{count} مرة' },
-    days: { one: 'يوم واحد', two: 'يومان', few: '{count} أيام', many: '{count} يومًا', other: '{count} يوم' },
+    products: { one: 'صنف واحد', two: 'صنفان', few: '{count} أصناف', many: '{count} صنفًا', zero: '{count} صنف', other: '{count} صنف' },
+    times: { one: 'مرة واحدة', two: 'مرتان', few: '{count} مرات', many: '{count} مرة', zero: '{count} مرة', other: '{count} مرة' },
+    days: { one: 'يوم واحد', two: 'يومان', few: '{count} أيام', many: '{count} يومًا', zero: '{count} يوم', other: '{count} يوم' },
   },
   date: {
     today: 'اليوم',

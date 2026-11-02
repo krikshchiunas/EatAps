@@ -62,11 +62,12 @@ export function Group({ title, children, note }) {
   )
 }
 
-export function Row({ label, value, onClick, danger, disabled, chevron = true }) {
+export function Row({ label, value, onClick, danger, disabled, chevron = true, icon, valueLang, valueDir }) {
   return (
     <button className={`set-row${danger ? ' danger' : ''}`} onClick={onClick} disabled={disabled}>
+      {icon && <span className="set-row__icon" aria-hidden="true">{icon}</span>}
       <span>{label}</span>
-      {value != null && <span className="set-val">{value}</span>}
+      {value != null && <span className="set-val" lang={valueLang} dir={valueDir}>{value}</span>}
       {onClick && !disabled && chevron && <Chevron />}
     </button>
   )

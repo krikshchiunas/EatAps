@@ -15,7 +15,7 @@ export default {
         label: 'Grasas saturadas', short: 'G. saturadas', sources: 'Fuentes de grasas saturadas',
         disclaimer: 'Se toman de los datos reales del producto si están indicados; si no, se estiman por tipo de alimento (carne, lácteos, bollería, etc.). La referencia diaria es no más del 10 % de las calorías (recomendación de la OMS), aparte del objetivo total de grasas.',
       },
-      carbs: { label: 'Carbohidratos', short: 'Carbs', sources: 'Fuentes de carbohidratos' },
+      carbs: { label: 'Carbohidratos', short: 'Carb.', sources: 'Fuentes de carbohidratos' },
       complexCarb: {
         label: 'Carbohidratos complejos', short: 'Complejos', sources: 'Fuentes de carbohidratos complejos',
         disclaimer: 'La parte de los carbohidratos que viene de cereales, patatas, legumbres e integrales: una clasificación por tipo de alimento, no un indicador médico de carbohidratos «saludables». El azúcar, los dulces y las bebidas no cuentan.',

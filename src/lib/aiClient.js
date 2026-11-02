@@ -13,9 +13,10 @@
 import { t, getLang } from './i18n.js'
 
 export class AIError extends Error {
-  constructor(message, { code, status, usage } = {}) {
+  constructor(message, { code, status, usage, serverMessage } = {}) {
     super(message)
     this.code = code
+    this.serverMessage = serverMessage
     this.status = status
     this.usage = usage
   }
@@ -25,12 +26,14 @@ export class AIError extends Error {
 
 const KNOWN = ['unauthorized', 'bad_image', 'image_too_large', 'empty_request', 'upstream', 'accounting_unavailable']
 
-function messageFor(code, path, fallback) {
+// Текст ошибки — всегда из словаря по коду. Сообщение сервера человеку не
+// показываем: оно на языке сервера, а не интерфейса (остаётся в error.serverMessage).
+function messageFor(code, path) {
   // Сбой распознавания фото и сбой чата — разные ситуации для человека:
   // в первом случае помогает переснять, во втором — подождать.
   if (code === 'upstream' && path.endsWith('/vision')) return t('ai.err.upstream_photo')
   if (KNOWN.includes(code)) return t(`ai.err.${code}`)
-  return fallback || t('ai.genericError')
+  return t('ai.genericError')
 }
 
 async function post(path, body, session) {
@@ -53,8 +56,8 @@ async function post(path, body, session) {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw new AIError(
-      messageFor(data.error, path, data.message),
-      { code: data.error, status: res.status, usage: data },
+      messageFor(data.error, path),
+      { code: data.error, status: res.status, usage: data, serverMessage: data.message },
     )
   }
   return data

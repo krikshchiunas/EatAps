@@ -24,7 +24,7 @@ import { groupDayByMeal, resolvedTime } from '../lib/meals.js'
 import { foodHabits } from '../lib/stats.js'
 import { Avatar } from './FriendsScreen.jsx'
 import ThoughtsFeed from './ThoughtsFeed.jsx'
-import { t } from '../lib/i18n.js'
+import { t, fmtNum } from '../lib/i18n.js'
 import { foodName } from '../lib/foodNames.js'
 import { unitLabel } from '../lib/units.js'
 
@@ -81,7 +81,7 @@ function FoodRow({ food, customFoods, onReact }) {
           <div style={{ minWidth: 0 }}>
             <div className="meal-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{foodName(food.name)}</div>
             <div className="row gap8" style={{ alignItems: 'center' }}>
-              {food.grams != null && <span className="meal-meta">{food.grams} {unitLabel(food.unit || 'г')}</span>}
+              {food.grams != null && <span className="meal-meta">{fmtNum(food.grams)} {unitLabel(food.unit || 'г')}</span>}
               {composite && (
                 <button style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 550 }} onClick={() => setOpen((o) => !o)}>
                   {open ? t('profile.hideContents') : t('profile.showContents')}

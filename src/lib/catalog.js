@@ -95,3 +95,16 @@ export function catalogRef(name) {
   }
   return null
 }
+
+// Запись из каталога получает стабильный id продукта (и способа
+// приготовления): он связывает её с базой независимо от языка. name остаётся
+// каноническим русским — его читают старые версии приложения, синхронизация
+// и экспорт. Своё название человека каталожным не станет: catalogRef его не
+// узнает, и id снимается. Ссылка пересчитывается при КАЖДОЙ записи, в том числе
+// при правке: переименованная запись не должна тянуть за собой чужой id.
+export function withCatalogRef(food) {
+  if (!food || typeof food !== 'object') return food
+  const { foodId: _f, methodId: _m, ...rest } = food
+  const ref = catalogRef(food.name)
+  return ref ? { ...rest, ...ref } : rest
+}

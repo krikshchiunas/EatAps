@@ -15,7 +15,7 @@ export default {
         label: 'Gorduras saturadas', short: 'G. saturadas', sources: 'Fontes de gorduras saturadas',
         disclaimer: 'Vêm dos dados reais do produto quando informados; caso contrário, são estimadas pelo tipo de alimento (carne, laticínios, confeitaria etc.). A referência diária é de no máximo 10% das calorias (recomendação da OMS), à parte da meta total de gorduras.',
       },
-      carbs: { label: 'Carboidratos', short: 'Carbs', sources: 'Fontes de carboidratos' },
+      carbs: { label: 'Carboidratos', short: 'Carb.', sources: 'Fontes de carboidratos' },
       complexCarb: {
         label: 'Carboidratos complexos', short: 'Complexos', sources: 'Fontes de carboidratos complexos',
         disclaimer: 'A parte dos carboidratos que vem de grãos, batatas, leguminosas e integrais — uma classificação por tipo de alimento, não um indicador médico de carboidratos “saudáveis”. Açúcar, doces e bebidas não entram.',
