@@ -89,7 +89,7 @@ function itemEntity(item, i) {
   if (!item || typeof item.name !== 'string') return null
   // Своё (source: 'custom') каталожным не считается, даже если названо так же,
   // как продукт базы: у него свои цифры, и найтись оно должно как своё.
-  const id = item.source === 'custom' ? null : catalogId('foods', item.id) || catalogId('foods', item.name)
+  const id = item.source === 'custom' ? null : catalogId('foods', item.foodId) || catalogId('foods', item.name)
   if (id) {
     const { fields, shown } = catalogFields(id, item.name, item.alias)
     return { key: id, item, fields, shownLen: shown.length }

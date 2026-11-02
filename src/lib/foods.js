@@ -1,6 +1,6 @@
 // @i18n-data-file — база продуктов: русские названия — канонические данные (переводы по id в src/locales/*/data).
 import { barcodeVariants } from './barcode.js'
-import { searchItems, ownEntity } from './search/index.js'
+import { searchItems, ownEntity, indexFor } from './search/index.js'
 import { fold, latToCyr } from './search/normalize.js'
 import { t, fmtNum, getLang, SOURCE_LANG } from './i18n.js'
 import { foodName } from './foodNames.js'
@@ -690,8 +690,11 @@ const dairyFoods = DAIRY.map((d) => ({
 
 // Иноязычные названия и синонимы живут не здесь, а в поиске по id
 // (src/lib/search/aliases.js, keywords.js) и в словарях языков.
+// foodId — стабильный id каталога (src/lib/catalog.js), то же поле, что у
+// записи дневника. Не «id»: продукт базы разворачивают в запись
+// ({ id, ...food }), и его id перезаписал бы уникальный id записи.
 export const FOODS = [...BUILDERS, ...variantFoods, ...dairyFoods, ...plainFoods]
-  .map((f) => ({ ...f, id: catalogId('foods', f.name) }))
+  .map((f) => ({ ...f, foodId: catalogId('foods', f.name) }))
 
 // Масштабирует БЖУ на порцию. Неизвестное остаётся неизвестным: если база не
 // знает белок, порция от этого его не приобретает. Раньше null молча
@@ -746,6 +749,11 @@ export const translit = latToCyr
 // тира (MEMORY_BOOST_MAX в search/engine.js).
 export function searchLocal(query, { boost, items = FOODS } = {}) {
   return searchItems(items, query, { boost }).results
+}
+
+// Построить индекс поиска заранее (в простое после старта).
+export function warmSearch() {
+  indexFor(FOODS)
 }
 
 // То же с подсказкой: { results, suggestion } — suggestion есть, когда выдача
@@ -940,7 +948,7 @@ export const CONSTRUCTOR_ING = Object.entries(ING).flatMap(([cat, items]) =>
     unitName,
     def: def || 1,
     emoji: emoji || CAT_EMOJI[cat] || '🍽️',
-    id: catalogId('foods', name),
+    foodId: catalogId('foods', name),
   }))
 )
 

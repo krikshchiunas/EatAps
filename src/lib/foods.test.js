@@ -177,7 +177,7 @@ test('продукт находится по немецкому и англий�
 test('иноязычные ключевые слова привязаны к существующим продуктам', () => {
   // Ключ, не совпавший ни с одним id, не падает и не виден: слова просто
   // молча не применяются, и поиск по-немецки перестаёт работать.
-  const ids = new Set(FOODS.map((f) => f.id))
+  const ids = new Set(FOODS.map((f) => f.foodId))
   const dangling = Object.keys(KEYWORDS).filter((k) => !isCatalogId('foods', k))
   assert.deepEqual(dangling, [], 'ключевые слова без продукта в каталоге')
   assert.ok(Object.keys(KEYWORDS).filter((k) => ids.has(k)).length > 200)

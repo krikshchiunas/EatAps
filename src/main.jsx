@@ -27,8 +27,13 @@ initI18n().finally(() => {
 
 // Названия продуктов на всех языках для поиска — в фоне, когда браузер
 // свободен: к первому открытию поиска «Haferflocken» уже находится.
-const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500))
-idle(() => import('./lib/search/index.js').then((m) => m.loadSearchNames()))
+// Индекс поиска для языка интерфейса строится тут же, а не на первой букве.
+const idle = (fn) => (window.requestIdleCallback ? window.requestIdleCallback(fn) : setTimeout(fn, 1500))
+idle(() => import('./lib/search/index.js')
+  .then((m) => m.loadSearchNames())
+  .then(() => import('./lib/foods.js'))
+  .then((f) => idle(() => f.warmSearch()))
+  .catch(() => {}))
 
 if (import.meta.env.PROD) {
   window.addEventListener('load', registerServiceWorker)

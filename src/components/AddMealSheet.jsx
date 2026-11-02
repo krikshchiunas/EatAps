@@ -437,7 +437,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     const s = scale(effective, g)
     const name = selected.hasVariants && method ? `${selected.name}, ${method.label.toLowerCase()}` : selected.name
     emit({ type, name, emoji: selected.emoji, grams: g, unit, cat: selected.cat, ...s })
-    if (selected.id === 'food_egg' && methodId(method?.label) === 'method_fried_in_butter_m') {
+    if (selected.foodId === 'food_egg' && methodId(method?.label) === 'method_fried_in_butter_m') {
       const bg = g <= 55 ? 5 : 7.5
       emit({
         type,

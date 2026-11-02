@@ -26,8 +26,11 @@ test('старые русские названия из дневника → id'
 
 test('у каждого продукта базы есть id, и он ведёт обратно к его названию', () => {
   for (const f of FOODS) {
-    assert.ok(f.id, f.name)
-    assert.equal(canonicalName('foods', f.id), f.name)
+    assert.ok(f.foodId, f.name)
+    assert.equal(canonicalName('foods', f.foodId), f.name)
+    // Поля id у продукта базы нет: { id, ...food } в записи дневника иначе
+    // затёр бы уникальный id записи, и две записи одного продукта слиплись бы.
+    assert.equal(f.id, undefined)
   }
 })
 
@@ -83,4 +86,14 @@ test('способы, порции и алкоголь — по id, со ста�
   } finally {
     await setLang(SOURCE_LANG, { persist: false })
   }
+})
+
+test('продукт базы, развёрнутый в запись, не затирает её id', () => {
+  // Так запись собирает store.addFood: { id, createdAt, ...withCatalogRef(food) }.
+  const banana = FOODS.find((f) => f.foodId === 'food_banana')
+  const a = { id: 'entry-1', createdAt: 'x', ...withCatalogRef({ ...banana, grams: 120 }) }
+  const b = { id: 'entry-2', createdAt: 'x', ...withCatalogRef({ ...banana, grams: 80 }) }
+  assert.equal(a.id, 'entry-1')
+  assert.equal(b.id, 'entry-2')
+  assert.equal(a.foodId, 'food_banana')
 })

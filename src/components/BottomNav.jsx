@@ -45,23 +45,23 @@ import { t } from '../lib/i18n.js'
 export default function BottomNav({ tab, setTab, friendsUnread = 0, profileUnread = 0 }) {
   return (
     <nav className="bottomnav">
-      <button className={tab === 'day' ? 'on' : ''} onClick={() => setTab('day')}>
+      <button className={tab === 'day' ? 'on' : ''} aria-current={tab === 'day' ? 'page' : undefined} onClick={() => setTab('day')}>
         {ICONS.day}<span>{t('nav.day')}</span>
       </button>
-      <button className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>
+      <button className={tab === 'ai' ? 'on' : ''} aria-current={tab === 'ai' ? 'page' : undefined} onClick={() => setTab('ai')}>
         {ICONS.ai}<span>AI</span>
       </button>
-      <button className={tab === 'feed' ? 'on' : ''} onClick={() => setTab('feed')}>
+      <button className={tab === 'feed' ? 'on' : ''} aria-current={tab === 'feed' ? 'page' : undefined} onClick={() => setTab('feed')}>
         {ICONS.feed}<span>{t('nav.feed')}</span>
       </button>
-      <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')} style={{ position: 'relative' }}>
+      <button className={tab === 'friends' ? 'on' : ''} aria-current={tab === 'friends' ? 'page' : undefined} onClick={() => setTab('friends')} style={{ position: 'relative' }}>
         {ICONS.friends}
         {friendsUnread > 0 && (
           <span className="nav-badge">{friendsUnread > 99 ? '99+' : friendsUnread}</span>
         )}
         <span>{t('nav.friends')}</span>
       </button>
-      <button className={tab === 'profile' ? 'on' : ''} onClick={() => setTab('profile')} style={{ position: 'relative' }}>
+      <button className={tab === 'profile' ? 'on' : ''} aria-current={tab === 'profile' ? 'page' : undefined} onClick={() => setTab('profile')} style={{ position: 'relative' }}>
         {ICONS.profile}
         {profileUnread > 0 && (
           <span className="nav-badge">{profileUnread > 99 ? '99+' : profileUnread}</span>

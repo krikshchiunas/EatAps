@@ -21,10 +21,10 @@ before(async () => {
 })
 after(() => setLang(SOURCE_LANG, { persist: false }))
 
-const ids = (q, opts) => searchLocal(q, opts).map((f) => f.id)
+const ids = (q, opts) => searchLocal(q, opts).map((f) => f.foodId)
 async function ui(code) { await setLang(code, { persist: false }) }
 const topN = (q, n = 3) => ids(q).slice(0, n)
-const FOOD_IDS = FOODS.map((f) => f.id)
+const FOOD_IDS = FOODS.map((f) => f.foodId)
 
 // ── Нормализация ─────────────────────────────────────────────────────────────
 test('нормализация: регистр, диакритика, ß, ı/İ, ё/й, пунктуация, пробелы', () => {
@@ -258,30 +258,30 @@ test('синонимы одного продукта дают одну карт�
   // Даже если тот же продукт попал в список дважды.
   const doubled = [...FOODS, ...FOODS]
   const r = searchItems(doubled, 'banana').results
-  assert.equal(r.filter((f) => f.id === 'food_banana').length, 1)
+  assert.equal(r.filter((f) => f.foodId === 'food_banana').length, 1)
 })
 
 test('порядок детерминирован и не зависит от порядка базы', async () => {
   await ui('en')
   const shuffled = [...FOODS].reverse()
   for (const q of ['milk', 'chicken', 'bread', 'хлеб', 'pan']) {
-    const a = searchLocal(q).slice(0, 15).map((f) => f.id)
-    const b = searchLocal(q, { items: shuffled }).slice(0, 15).map((f) => f.id)
+    const a = searchLocal(q).slice(0, 15).map((f) => f.foodId)
+    const b = searchLocal(q, { items: shuffled }).slice(0, 15).map((f) => f.foodId)
     assert.deepEqual(a, b, q)
-    assert.deepEqual(a, searchLocal(q).slice(0, 15).map((f) => f.id), `${q}: повтор`)
+    assert.deepEqual(a, searchLocal(q).slice(0, 15).map((f) => f.foodId), `${q}: повтор`)
   }
 })
 
 test('личная надбавка не переводит продукт через тир', async () => {
   await ui('en')
-  const boost = (f) => (f.id === 'food_milk_chocolate' ? 1 : 0)
-  assert.equal(searchLocal('milk', { boost })[0].id, 'food_milk')
+  const boost = (f) => (f.foodId === 'food_milk_chocolate' ? 1 : 0)
+  assert.equal(searchLocal('milk', { boost })[0].foodId, 'food_milk')
 })
 
 test('подсказка «вы имели в виду» — только когда выдача держится на исправлении', async () => {
   await ui('de')
   const typoRes = searchItems(FOODS, 'haferfloken')
-  assert.equal(typoRes.suggestion?.item.id, 'food_rolled_oats_dry')
+  assert.equal(typoRes.suggestion?.item.foodId, 'food_rolled_oats_dry')
   assert.equal(searchItems(FOODS, 'Haferflocken').suggestion, null)
   assert.equal(searchItems(FOODS, 'qzxqzxq').suggestion, null)
 })
@@ -295,14 +295,14 @@ test('своё блюдо ищется по своему имени и не пр
   // «Банан» человека не находится по «Plátano»: перевода у своего нет.
   assert.equal(searchByName(mine, 'plátano').length, 0)
   const pool = searchItems([...mine, ...FOODS], 'банан').results
-  assert.ok(pool.some((f) => f.id === 'u2') && pool.some((f) => f.id === 'food_banana'), 'своё и базовое — разные карточки')
+  assert.ok(pool.some((f) => f.id === 'u2') && pool.some((f) => f.foodId === 'food_banana'), 'своё и базовое — разные карточки')
 })
 
 test('ингредиенты конструктора ищутся на всех языках', async () => {
   await ui('en')
-  const names = searchIngredients('Gurke').slice(0, 3).map((i) => i.id)
+  const names = searchIngredients('Gurke').slice(0, 3).map((i) => i.foodId)
   assert.ok(names.includes('food_cucumber'), names.join())
-  assert.ok(CONSTRUCTOR_ING.every((i) => i.id === null || isCatalogId('foods', i.id)))
+  assert.ok(CONSTRUCTOR_ING.every((i) => i.foodId === null || isCatalogId('foods', i.foodId)))
 })
 
 test('добавки ищутся на всех языках', async () => {
