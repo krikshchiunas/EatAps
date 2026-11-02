@@ -30,7 +30,7 @@ export default {
     satFat: 'Doymuş yağ',
     incomplete: 'eksik veri',
     overGuide: 'önerinin üstünde',
-    withinGuide: 'öneri sınırında',
+    withinGuide: 'öneri sınırı içinde',
     satFatExplain: 'Doymuş yağ, belirtilmişse ürünün gerçek verisinden alınır; değilse besin türüne göre tahmin edilir (et, süt ürünleri, unlu mamuller vb.) — gram hassasiyetinde değildir. Günlük öneri, kalorinin en fazla %10’udur (DSÖ önerisi) ve toplam yağ hedefinden ayrı sayılır.',
     mealActions: 'Öğün işlemleri',
     nameAndTime: 'Ad ve saat',

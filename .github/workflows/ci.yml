@@ -49,6 +49,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Сборка (падает, если язык выпал из офлайн-кэша)
         run: npm run build
+      - name: Сборка с облаком-заглушкой (экраны с аккаунтом)
+        run: npm run build:cloud
       - name: E2E — экраны, RTL, переполнение, офлайн, жизненный цикл языка
         run: npm run test:e2e
       - name: Визуальная регрессия

@@ -30,9 +30,9 @@ export default {
   },
   nav: {
     day: 'اليوم',
-    feed: 'الموجز',
+    feed: 'المنشورات',
     friends: 'الأصدقاء',
-    profile: 'الملف',
+    profile: 'ملفي',
   },
   units: {
     g: 'غ',

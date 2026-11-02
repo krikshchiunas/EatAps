@@ -49,7 +49,7 @@ export default {
     cmN: '{n} cm',
     mg: 'mg',
     mcg: 'µg',
-    cfu: 'mil M UFC',
+    cfu: 'mil millones UFC',
     serving: { one: '{n} ración', other: '{n} raciones' },
     piece: '{n} ud.',
   },

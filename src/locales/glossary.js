@@ -44,7 +44,9 @@ export default {
   },
   tr: {
     terms: { protein: 'Protein', carbs: 'Karbonhidrat', fat: 'Yağ', supplements: 'Takviye', vitamins: 'vitamin', meal: 'Öğün', recipe: 'Tarif', serving: 'Porsiyon', statistics: 'İstatistik', goal: 'hedef', challenge: 'Meydan okuma', coach: 'Koç', diary: 'günlük' },
-    avoid: [/\bsupplement/i],
+    // «EatAps» оканчивается на заднерядный «a»: аффиксы — ’a, ’ı, ’ta, ’tan,
+    // ’ın, ’la (а не ’e, ’i, ’te…). Сингармонизм проверяется здесь.
+    avoid: [/\bsupplement/i, /EatAps[’'](e|i|te|ten|teki|in|le|de|den|ye|yi|nin)\b/],
     loanwords: ['Protein', 'protein', 'tablet', 'Fast', 'food', 'McDonald’s'],
   },
   ar: {

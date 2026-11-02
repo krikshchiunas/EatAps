@@ -1,11 +1,12 @@
 // Экраны, доступные только с аккаунтом (события, челленджи, друзья, лента,
 // подписка), — на всех 7 языках, с облаком-заглушкой (e2e/cloud.mjs).
 import { test, expect } from '@playwright/test'
-import { LANG_CODES, dict, auditScreen, seedState, NOW } from './helpers.mjs'
+import { LANG_CODES, dict, auditScreen, seedState, NOW, isolateNetwork } from './helpers.mjs'
 import { mockCloud, session, sessionStorageKey, USER_ID } from './cloud.mjs'
 
 async function openSignedIn(page, lang) {
   await page.clock.setFixedTime(NOW)
+  await isolateNetwork(page)
   await mockCloud(page)
   await page.addInitScript(([s, key, state, l, uid]) => {
     if (sessionStorage.getItem('e2e:seeded')) return

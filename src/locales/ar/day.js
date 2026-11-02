@@ -35,7 +35,7 @@ export default {
     mealActions: 'إجراءات الوجبة',
     nameAndTime: 'الاسم والوقت',
     changeTime: 'تغيير الوقت',
-    mealRepeated: 'تكررت {name}: {list}',
+    mealRepeated: 'تم تكرار «{name}»: {list}',
     repeatYesterdayMeal: 'تكرار وجبة الأمس',
     up: 'إلى الأعلى',
     down: 'إلى الأسفل',

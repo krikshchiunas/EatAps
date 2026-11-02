@@ -32,8 +32,8 @@ export default {
   auth: {
     emailLabel: 'E-posta',
     walletDescription: 'EatAps — beslenme takibi',
-    loginTitle: 'EatAps’e giriş',
-    registerTitle: 'EatAps’e kayıt',
+    loginTitle: 'EatAps’a giriş',
+    registerTitle: 'EatAps’a kayıt',
     loginText: 'Verilerin bulutta saklansın ve cihazların arasında eşitlensin diye giriş yap.',
     registerText: 'Bir hesap oluştur — profilin ve geçmişin bulutta saklanır ve her cihazdan erişilebilir olur.',
     google: 'Google ile devam et',

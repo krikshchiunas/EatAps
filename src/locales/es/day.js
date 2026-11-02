@@ -35,7 +35,7 @@ export default {
     mealActions: 'Acciones de la comida',
     nameAndTime: 'Nombre y hora',
     changeTime: 'Cambiar hora',
-    mealRepeated: '{name} repetido: {list}',
+    mealRepeated: 'Se ha repetido «{name}»: {list}',
     repeatYesterdayMeal: 'Repetir la de ayer',
     up: 'Subir',
     down: 'Bajar',

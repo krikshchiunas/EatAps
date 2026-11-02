@@ -70,7 +70,7 @@ export default {
       portalFailed: 'Abonelik yönetimi açılamadı',
       hero1: 'Akıllı bir',
       hero2: 'beslenme asistanı',
-      heroSub: 'Bir paket seç; kişisel ipuçları, beslenme değerlendirmesi ve hızlı makro hesabı doğrudan EatAps’te.',
+      heroSub: 'Bir paket seç; kişisel ipuçları, beslenme değerlendirmesi ve hızlı makro hesabı doğrudan EatAps’ta.',
       foot: 'Aylık ödeme. İstediğin zaman iptal et.',
       opening: 'Ödeme açılıyor…',
       subscribe: 'Abone ol',

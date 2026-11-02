@@ -48,8 +48,16 @@ export function seedState() {
 
 // Новый контекст браузера: язык устройства + (по желанию) сохранённое
 // состояние и выбранный язык. Время зафиксировано.
+// Внешние сервисы в тестах не трогаем: ответ Open Food Facts зависит от сети,
+// их лимитов и CORS, а проверяем мы приложение. Пустая выдача — честный
+// сценарий «в общей базе ничего не нашлось».
+export async function isolateNetwork(page) {
+  await page.route(/openfoodfacts\.org/, (route) => route.fulfill({ json: { products: [], count: 0, status: 0 } }))
+}
+
 export async function openApp(page, { device = 'en-US', lang = null, seed = true, path = '/' } = {}) {
   await page.clock.setFixedTime(NOW)
+  await isolateNetwork(page)
   await page.addInitScript(([state, l]) => {
     if (sessionStorage.getItem('e2e:seeded')) return
     sessionStorage.setItem('e2e:seeded', '1')
