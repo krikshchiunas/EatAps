@@ -13,6 +13,7 @@ import {
   MAX_OUTPUT_TOKENS, roughTokens, IMAGE_TOKENS,
   buildSystemPrompt, buildUserContext, resolveTone, capContext,
 } from './_shared.js'
+import { maxPhotosForTier } from '../../src/lib/aiBudget.js'
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
@@ -23,19 +24,19 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 // на остальное тело. Клиент и так жмёт снимок до ~300 КБ (fileToImage).
 const MAX_BASE64_CHARS = 3.5 * 1024 * 1024
 // Несколько фото — один приём пищи с разных сторон или несколько блюд за раз.
-// Потолок тела запроса общий, поэтому ограничиваем и сумму, а не только каждое.
-export const MAX_IMAGES = 5
+// Сколько именно — зависит от тарифа (maxPhotosForTier). Потолок тела запроса
+// общий, поэтому ограничиваем и сумму, а не только каждое фото.
 const MAX_TOTAL_BASE64_CHARS = 3.8 * 1024 * 1024
 // Каждое следующее фото — потенциально ещё блюдо и ещё карточка в ответе.
 const EXTRA_OUTPUT_PER_IMAGE = 250
 
 // Достаём список картинок из тела и проверяем его.
 // Возвращает { images } или { error, status, message }.
-export function readImages(body) {
+export function readImages(body, maxImages = 1) {
   const raw = Array.isArray(body?.images) ? body.images : body?.image ? [body.image] : []
   if (!raw.length) return { error: 'bad_image', status: 400, message: 'Нужен JPEG, PNG или WebP.' }
-  if (raw.length > MAX_IMAGES) {
-    return { error: 'too_many_images', status: 400, message: `Не больше ${MAX_IMAGES} фото за раз.` }
+  if (raw.length > maxImages) {
+    return { error: 'too_many_images', status: 400, max: maxImages, message: `На вашем тарифе — не больше ${maxImages} фото за раз.` }
   }
   let total = 0
   for (const image of raw) {
@@ -68,11 +69,12 @@ export default async function handler(req, res) {
   const user = await getUser(req)
   if (!user) return res.status(401).json({ error: 'unauthorized' })
 
-  const read = readImages(req.body)
-  if (read.error) return res.status(read.status).json({ error: read.error, message: read.message })
+  // Тариф — до разбора картинок: от него зависит, сколько их можно прислать.
+  const tier = await tierOf(user.id)
+  const read = readImages(req.body, maxPhotosForTier(tier))
+  if (read.error) return res.status(read.status).json({ error: read.error, message: read.message, max: read.max })
   const { images } = read
 
-  const tier = await tierOf(user.id)
   const model = modelForTier(tier)
   const period = periodKey()
 

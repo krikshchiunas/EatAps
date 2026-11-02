@@ -1,0 +1,4 @@
+# Тесты не деплоим: Vercel считает каждый .js в api/ отдельной serverless-
+# функцией, а на Hobby их не больше 12. Тестовые файлы съедали этот лимит,
+# и деплой падал с exceeded_serverless_functions_per_deployment.
+api/**/*.test.js

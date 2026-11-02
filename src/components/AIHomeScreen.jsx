@@ -14,11 +14,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useStore } from '../store.jsx'
-import { hasAIPlus, hasAIPremium, planByTier } from '../lib/subscription.js'
-import { sendChat, sendPhoto, fileToImage, AIError, MAX_PHOTOS } from '../lib/aiClient.js'
+import { hasAI, hasAIPlus, hasAIPremium, planByTier } from '../lib/subscription.js'
+import { sendChat, sendPhoto, fileToImageWithin, PHOTO_PAYLOAD_BUDGET, AIError } from '../lib/aiClient.js'
 import { buildContext } from '../lib/aiContext.js'
 import { resolveTone } from '../lib/aiPrompt.js'
-import { usedShare, budgetForTier, periodKey } from '../lib/aiBudget.js'
+import { usedShare, budgetForTier, periodKey, maxPhotosForTier, MAX_PHOTOS_ANY } from '../lib/aiBudget.js'
 import { pullAiUsage } from '../lib/supabase.js'
 import { keyOf } from '../lib/date.js'
 import { autoStandardMealId } from '../lib/meals.js'
@@ -40,6 +40,10 @@ export default function AIHomeScreen({ onUpgrade }) {
   const premium = hasAIPremium(subscription)
   const tier = subscription?.tier || 'FREE'
   const tone = resolveTone(prefs).id
+  // Сколько фото за раз: Free — 1, Carrot+ — 3, Pro — 5, Premium — 10.
+  // Неактивная подписка (просрочена, отменена) считается бесплатной — так же
+  // решает и сервер, иначе интерфейс разрешил бы то, в чём сервер откажет.
+  const maxPhotos = maxPhotosForTier(hasAI(subscription) ? tier : 'FREE')
 
   const [messages, setMessages] = useState([
     { role: 'assistant', greeting: tone, local: true },
@@ -180,32 +184,39 @@ export default function AIHomeScreen({ onUpgrade }) {
   }
 
   // Камера отдаёт один снимок, галерея — сколько выбрали. Всё складываем в
-  // черновик; лишнее сверх MAX_PHOTOS отбрасываем и говорим об этом.
+  // черновик; лишнее сверх лимита тарифа отбрасываем и говорим об этом.
   const attachPhotos = async (event) => {
     const files = Array.from(event.target.files || [])
     event.target.value = '' // тот же файл можно выбрать повторно
     if (!files.length || busy) return
     haptic()
     setError(null)
-    const room = MAX_PHOTOS - photos.length
-    if (room <= 0) { setError(t('ai.maxPhotos', { n: MAX_PHOTOS })); return }
+    const room = maxPhotos - photos.length
+    if (room <= 0) { setError(limitText); return }
     setAttaching(true)
     const added = []
     let failed = false
+    const share = Math.floor(PHOTO_PAYLOAD_BUDGET / maxPhotos)
     for (const file of files.slice(0, room)) {
       try {
-        const image = await fileToImage(file)
+        const image = await fileToImageWithin(file, share)
         added.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, ...image })
       } catch {
         failed = true
       }
     }
     setAttaching(false)
-    setPhotos((prev) => [...prev, ...added].slice(0, MAX_PHOTOS))
-    if (files.length > room) setError(t('ai.maxPhotos', { n: MAX_PHOTOS }))
+    setPhotos((prev) => [...prev, ...added].slice(0, maxPhotos))
+    if (files.length > room) setError(limitText)
     else if (failed) setError(t('ai.photoUnreadable'))
     inputRef.current?.focus()
   }
+
+  // На старших тарифах просто называем предел; на младших — подсказываем,
+  // что больше фото есть в тарифах выше.
+  const limitText = maxPhotos >= MAX_PHOTOS_ANY
+    ? t('ai.maxPhotos', { n: maxPhotos })
+    : t('ai.maxPhotosUpgrade', { n: maxPhotos })
 
   const removePhoto = (id) => {
     haptic()
@@ -300,11 +311,11 @@ export default function AIHomeScreen({ onUpgrade }) {
             сразу камеру и не даёт выбрать уже сделанный снимок. Поле галереи
             без capture и с multiple — можно выбрать несколько фото разом. */}
         <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={attachPhotos} />
-        <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={attachPhotos} />
+        <input ref={galleryRef} type="file" accept="image/*" multiple={maxPhotos > 1} hidden onChange={attachPhotos} />
         <button
           className="iconbtn ai-chat__camera"
           onClick={() => fileRef.current?.click()}
-          disabled={busy || attaching || photos.length >= MAX_PHOTOS}
+          disabled={busy || attaching || photos.length >= maxPhotos}
           aria-label={t('ai.camera')}
           title={t('ai.camera')}
         >
@@ -316,7 +327,7 @@ export default function AIHomeScreen({ onUpgrade }) {
         <button
           className="iconbtn ai-chat__camera"
           onClick={() => galleryRef.current?.click()}
-          disabled={busy || attaching || photos.length >= MAX_PHOTOS}
+          disabled={busy || attaching || photos.length >= maxPhotos}
           aria-label={t('ai.gallery')}
           title={t('ai.gallery')}
         >

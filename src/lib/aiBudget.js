@@ -65,6 +65,21 @@ export const MONTHLY_BUDGET = Object.freeze({
 // Запас, который резервируется до запроса. Реальную цену мы узнаём только из
 // ответа, а к тому моменту деньги уже потрачены — поэтому пускаем в модель
 // только того, у кого хватает на самый дорогой возможный ответ.
+// Сколько фото можно отправить ассистенту одним сообщением. Общий источник для
+// фронта (сколько даём прикрепить) и сервера (сколько принимаем) — чтобы они
+// не разъехались и сервер не отказывал в том, что интерфейс разрешил.
+export const MAX_PHOTOS_BY_TIER = Object.freeze({
+  [TIER.FREE]: 1,
+  [TIER.AI]: 3,
+  [TIER.AI_PLUS]: 5,
+  [TIER.AI_PREMIUM]: 10,
+})
+export const MAX_PHOTOS_ANY = Math.max(...Object.values(MAX_PHOTOS_BY_TIER))
+
+export function maxPhotosForTier(tier) {
+  return MAX_PHOTOS_BY_TIER[tier] ?? MAX_PHOTOS_BY_TIER[TIER.FREE]
+}
+
 export const MAX_OUTPUT_TOKENS = Object.freeze({
   chat: 700,
   vision: 900,
