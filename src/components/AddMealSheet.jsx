@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense } from 'react'
 import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchLocalDetailed, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel, amountLabel, unitLabel, formatAmount } from '../lib/foods.js'
 import { foodName, catalogName, methodLabel, portionLabel, alcLabel } from '../lib/foodNames.js'
 import { canonicalName, methodId } from '../lib/catalog.js'
@@ -15,7 +15,11 @@ import { useStore } from '../store.jsx'
 import Toast from './Toast.jsx'
 import RecipeEditorSheet from './RecipeEditorSheet.jsx'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
-import BarcodeScanner from './BarcodeScanner.jsx'
+import { lazyWithReload } from '../lib/lazyWithReload.js'
+
+// Сканер нужен не каждому и не сразу — в стартовый бандл не входит (но лежит в
+// офлайн-кэше, см. scripts/inject-precache.mjs).
+const BarcodeScanner = lazyWithReload(() => import('./BarcodeScanner.jsx'))
 
 const round1 = (n) => +n.toFixed(1)
 const num = (v) => {
@@ -1245,11 +1249,13 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
       {/* Сканер живёт рядом с листом, а не внутри: лист двигает transform, и
           position:fixed внутри него отсчитывался бы от листа, а не от экрана. */}
       {scanning && (
-        <BarcodeScanner
-          onClose={() => setScanning(false)}
-          onFound={pickScanned}
-          onManual={manualFromScan}
-        />
+        <Suspense fallback={null}>
+          <BarcodeScanner
+            onClose={() => setScanning(false)}
+            onFound={pickScanned}
+            onManual={manualFromScan}
+          />
+        </Suspense>
       )}
     </div>
   )

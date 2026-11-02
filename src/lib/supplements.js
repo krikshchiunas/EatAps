@@ -28,7 +28,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { MICRO_BY_KEY } from './micronutrients.js'
-import { searchItems, supplementEntity } from './search/index.js'
+import { searchModule } from './search/lazy.js'
+import { fold } from './search/normalize.js'
 import { normalizeQuery, formatAmount } from './foods.js'
 import { t } from './i18n.js'
 import { suppName } from './suppNames.js'
@@ -463,10 +464,17 @@ const POPULAR = new Set([
 ])
 
 export function searchSupplements(query) {
-  return searchItems(SUPPLEMENTS, query, {
+  const m = searchModule()
+  if (!m) {
+    // Движок ещё не загрузился — подстрока в названии и жаргоне.
+    const q = fold(query)
+    if (!q) return SUPPLEMENTS
+    return SUPPLEMENTS.filter((s) => fold(`${s.name} ${s.alias || ''} ${suppName(s)}`).includes(q))
+  }
+  return m.searchItems(SUPPLEMENTS, query, {
     minResults: 1,
     boost: (s) => (POPULAR.has(s.id) ? 1 : 0),
-    toEntity: supplementEntity,
+    toEntity: m.supplementEntity,
   }).results
 }
 

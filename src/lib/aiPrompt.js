@@ -16,6 +16,7 @@ import { TIER, PLANS, TIER_RANK } from './subscription.js'
 import { HISTORY_DAYS } from './aiContext.js'
 import { MONTHLY_BUDGET } from './aiBudget.js'
 import { t, isSupported, LANGS } from './i18n.js'
+import { DEFAULT_TONE, TONE_PREF, TONE_CONSENT_PREF, TONE_CONSENT_VERSION, hasToneConsent, resolveToneIn } from './aiTones.js'
 
 
 // ── Голос ────────────────────────────────────────────────────────────────────
@@ -163,32 +164,15 @@ export const TONES = Object.freeze({
   },
 })
 
-export const DEFAULT_TONE = 'calm'
-
-// Тон и согласие живут в prefs — синхронизируются между устройствами вместе с
-// остальными настройками. Версия согласия отдельно: если текст предупреждения
-// поменяется по сути, поднимаем её, и человек подтверждает заново.
-export const TONE_PREF = 'aiTone'
-export const TONE_CONSENT_PREF = 'aiToneConsent' // { version, at }
-export const TONE_CONSENT_VERSION = 1
+export { DEFAULT_TONE, TONE_PREF, TONE_CONSENT_PREF, TONE_CONSENT_VERSION, hasToneConsent }
 
 export function toneById(id) {
-  return TONES[id] || TONES[DEFAULT_TONE]
+  return Object.prototype.hasOwnProperty.call(TONES, id) ? TONES[id] : TONES[DEFAULT_TONE]
 }
 
-export function hasToneConsent(prefs) {
-  const c = prefs?.[TONE_CONSENT_PREF]
-  return !!c && c.version === TONE_CONSENT_VERSION
-}
-
-// Единственный источник правды о том, каким тоном говорить прямо сейчас.
-// Тон с опт-ином без действующего согласия молча падает на спокойный: так
-// протухшее согласие или сброшенные данные не оставят включённым мат.
-export function resolveTone(prefs) {
-  const t = toneById(prefs?.[TONE_PREF])
-  if (t.optIn && !hasToneConsent(prefs)) return TONES[DEFAULT_TONE]
-  return t
-}
+// Какой тон действует сейчас — та же логика, что у клиента (aiTones.js), но
+// над таблицей с текстами для модели.
+export const resolveTone = (prefs) => resolveToneIn(TONES, prefs)
 
 // ── Возможности по тирам ──────────────────────────────────────────────────────
 // Расход считается деньгами, а не штуками — таблица бюджетов и цен живёт в

@@ -22,7 +22,7 @@ import {
 import AITonePanel from './AITonePanel.jsx'
 import BodyPanel from './BodyPanel.jsx'
 import { profileTargets } from '../lib/body.js'
-import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiPrompt.js'
+import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiTones.js'
 import { planByTier } from '../lib/subscription.js'
 import { t, langInfo } from '../lib/i18n.js'
 

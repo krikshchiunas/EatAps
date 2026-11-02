@@ -21,7 +21,7 @@ import { unitLabel } from './units.js'
 import { entryName } from './foodNames.js'
 import { wellbeingLabel } from './insights.js'
 import { fold } from './search/normalize.js'
-import { matchCatalogFoodSync } from './search/index.js'
+import { searchModule } from './search/lazy.js'
 import { canonicalName } from './catalog.js'
 import { FOODS } from './foods.js'
 
@@ -226,8 +226,8 @@ export const IMPORT_MAX_ROWS = 20000
 
 // Разбор CSV в структуру дней. Ничего не пишет — возвращает предпросмотр.
 // Чтобы продукты базы узнавались на всех языках, перед разбором стоит
-// дождаться loadSearchNames() (src/lib/search/index.js); без него узнаются
-// русские названия и названия на языке интерфейса.
+// дождаться loadSearch() (src/lib/search/lazy.js); без движка продукты базы
+// не сопоставляются и сохраняются под своими названиями.
 // { days, stats:{rows, imported, skipped, dateRange}, warnings, columns }.
 export function parseImportCsv(text) {
   const clean = String(text || '').replace(/^﻿/, '')
@@ -269,7 +269,7 @@ export function parseImportCsv(text) {
     // Название продукта базы на любом языке («Haferflocken, trocken» из
     // немецкой выгрузки) → каноническая запись с id: после импорта она
     // показывается на языке человека. Своё — как записано.
-    const catalog = matchCatalogFoodSync(name, FOODS)
+    const catalog = searchModule()?.matchCatalogFoodSync(name, FOODS) ?? null
     const meal = {
       name: catalog ? canonicalName('foods', catalog) : name,
       ...(catalog ? { foodId: catalog } : {}),

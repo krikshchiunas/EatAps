@@ -13,8 +13,8 @@
 //   • пакет КАЖДОГО языка из src/locales/registry.js. Словарь грузится до
 //     первого рендера: без него человек с немецким интерфейсом, открывший
 //     обновлённое приложение без сети, увидел бы его по-русски;
-//   • многоязычный индекс поиска (src/lib/search/names.js) — поиск офлайн
-//     должен понимать «Haferflocken» так же, как в сети.
+//   • поисковый движок и названия на всех языках (src/lib/search/index.js,
+//     names.js) — поиск офлайн должен понимать «Haferflocken» так же, как в сети.
 //
 // Сборка ПАДАЕТ, если чего-то из этого нет: язык, тихо выпавший из офлайна,
 // заметили бы только люди без сети.
@@ -28,7 +28,7 @@ const dist = resolve(root, 'dist')
 const manifestPath = resolve(dist, '.vite/manifest.json')
 
 // Дополнительные ленивые точки входа, обязательные офлайн.
-export const OFFLINE_ENTRIES = ['src/lib/search/names.js']
+export const OFFLINE_ENTRIES = ['src/lib/search/index.js', 'src/lib/search/names.js', 'src/components/BarcodeScanner.jsx']
 
 const fail = (msg) => {
   console.error(`inject-precache: ✗ ${msg}`)

@@ -2,6 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { editDistance, maxDistanceFor, fuzzyWordDistance, scoreEntry, rankedSearch } from './fuzzy.js'
 import { searchLocal, getPortions, inferCat } from './foods.js'
+import { loadSearch } from './search/lazy.js'
+
+// Поисковый движок грузится лениво (search/lazy.js) — здесь заранее.
+await loadSearch()
 
 // ── Расстояние ────────────────────────────────────────────────────────────────
 

@@ -13,7 +13,7 @@
 // конкретную порцию, а не 100 г из базы.
 // ─────────────────────────────────────────────────────────────────────────────
 import { FOODS } from './foods.js'
-import { matchCatalogFood } from './search/index.js'
+import { loadSearch, searchModule } from './search/lazy.js'
 import { canonicalName } from './catalog.js'
 
 const MAX_NAME = 80
@@ -21,7 +21,8 @@ const MAX_NAME = 80
 export async function aiCardFood(card, fallbackName) {
   const original = String(card?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME)
   if (!original) return { name: fallbackName }
-  const id = await matchCatalogFood(original, FOODS)
+  await loadSearch()
+  const id = searchModule() ? await searchModule().matchCatalogFood(original, FOODS) : null
   if (!id) return { name: original }
   return { name: canonicalName('foods', id), foodId: id, aiName: original }
 }

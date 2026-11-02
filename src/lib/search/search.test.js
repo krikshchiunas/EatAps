@@ -7,16 +7,22 @@ import { setLang, LANGS, SOURCE_LANG } from '../i18n.js'
 import { FOODS, CONSTRUCTOR_ING, searchLocal, searchByName, searchIngredients } from '../foods.js'
 import { searchSupplements, SUPPLEMENTS } from '../supplements.js'
 import { loadSearchNames, searchItems, matchCatalogFoodSync, queryVariants } from './index.js'
-import { fold, stem, swapLayout, cyrToLat, latToCyr } from './normalize.js'
+import { fold } from './normalize.js'
+import { stem, swapLayout, cyrToLat, latToCyr } from './normalizeExtra.js'
 import { search, buildIndex, INDEX_VERSION } from './engine.js'
 import ALIASES from './aliases.js'
 import KEYWORDS from './keywords.js'
 import { catalogIds, isCatalogId } from '../catalog.js'
+import { loadSearch } from './lazy.js'
+
+// Поисковый движок грузится лениво (search/lazy.js) — здесь заранее.
+await loadSearch()
 
 const CODES = LANGS.map((l) => l.code)
 const tables = {}
 before(async () => {
   assert.equal(await loadSearchNames(), true)
+  assert.equal(await loadSearch(), true)
   for (const c of CODES) tables[c] = (await import(`../../locales/${c}/data/foods.js`)).default.foods
 })
 after(() => setLang(SOURCE_LANG, { persist: false }))
@@ -391,4 +397,15 @@ test('скорость: построение индекса и запросы', 
   times.sort((a, b) => a - b)
   assert.ok(build < 1500, `индекс строится ${build.toFixed(0)} мс`)
   assert.ok(times[times.length - 1] < 250, `самый медленный запрос ${times[times.length - 1].toFixed(0)} мс`)
+})
+
+test('пока движок не загрузился: подстрока по названию и переводу, без падений', async () => {
+  const { basicSearch } = await import('../foods.js')
+  await ui('de')
+  const ids = (q) => basicSearch(FOODS, q).results.map((f) => f.foodId)
+  assert.ok(ids('банан').includes('food_banana'))
+  assert.ok(ids('Banane').includes('food_banana'))
+  assert.equal(basicSearch(FOODS, '').results.length, FOODS.length)
+  assert.deepEqual(basicSearch([{ name: 'Банан', source: 'custom' }], 'Banane').results, [], 'своё не переводится')
+  assert.doesNotThrow(() => basicSearch(null, 'x'))
 })

@@ -29,8 +29,8 @@ initI18n().finally(() => {
 // свободен: к первому открытию поиска «Haferflocken» уже находится.
 // Индекс поиска для языка интерфейса строится тут же, а не на первой букве.
 const idle = (fn) => (window.requestIdleCallback ? window.requestIdleCallback(fn) : setTimeout(fn, 1500))
-idle(() => import('./lib/search/index.js')
-  .then((m) => m.loadSearchNames())
+idle(() => import('./lib/search/lazy.js')
+  .then((m) => m.loadSearch())
   .then(() => import('./lib/foods.js'))
   .then((f) => idle(() => f.warmSearch()))
   .catch(() => {}))

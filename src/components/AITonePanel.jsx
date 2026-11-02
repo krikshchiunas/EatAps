@@ -19,7 +19,7 @@
 import { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Panel, Group, Row } from './SettingsPanels.jsx'
-import { TONES, DEFAULT_TONE, TONE_PREF, TONE_CONSENT_PREF, TONE_CONSENT_VERSION, hasToneConsent } from '../lib/aiPrompt.js'
+import { TONES, DEFAULT_TONE, TONE_PREF, TONE_CONSENT_PREF, TONE_CONSENT_VERSION, hasToneConsent } from '../lib/aiTones.js'
 import { t } from '../lib/i18n.js'
 
 // Порядок показа: от нейтрального к жёсткому. savage последним — он за опт-ином.

@@ -6,6 +6,10 @@ import { LANGS, SOURCE_LANG, setLang, dataTable } from './i18n.js'
 import { catalogId, methodId } from './catalog.js'
 import { FOODS, CONSTRUCTOR_ING, BASE_GROUPS, BREADS, getPortions, searchLocal, normalizeQuery } from './foods.js'
 import { foodName, methodLabel, portionLabel } from './foodNames.js'
+import { loadSearch } from './search/lazy.js'
+
+// Поисковый движок грузится лениво (search/lazy.js) — здесь заранее.
+await loadSearch()
 
 const CYR = /[А-Яа-яЁё]/
 const OTHERS = LANGS.map((l) => l.code).filter((c) => c !== SOURCE_LANG)

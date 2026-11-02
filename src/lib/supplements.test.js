@@ -12,6 +12,10 @@ import {
   doseFields, providesFromFields, unitProvides, unitDose, needsDoseSetup, hasOwnDose,
 } from './supplements.js'
 import { MICRO_BY_KEY } from './micronutrients.js'
+import { loadSearch } from './search/lazy.js'
+
+// Поисковый движок грузится лениво (search/lazy.js) — здесь заранее.
+await loadSearch()
 
 // ── Целостность каталога ──────────────────────────────────────────────────────
 

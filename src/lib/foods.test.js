@@ -8,6 +8,10 @@ import { isCatalogId } from './catalog.js'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { FOODS, BREADS, CONSTRUCTOR_ING, scale, getPortions, inferCat, searchLocal, searchIngredients } from './foods.js'
+import { loadSearch } from './search/lazy.js'
+
+// Поисковый движок грузится лениво (search/lazy.js) — здесь заранее.
+await loadSearch()
 
 // Алкоголь даёт 7 ккал на грамм, и этих калорий нет ни в белках, ни в
 // углеводах, ни в жирах — по БЖУ такие напитки «не сходятся» законно.

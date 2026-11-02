@@ -48,7 +48,8 @@
 // запроса — и не идёт, если нашлось название целиком или его начало. Расстояние до слов считается один раз
 // на запрос по словарю уникальных слов, а не по каждому полю.
 // ─────────────────────────────────────────────────────────────────────────────
-import { fold, tokens as toTokens, compact, stem, phoneticKey } from './normalize.js'
+import { fold, tokens as toTokens, compact } from './normalize.js'
+import { stem, phoneticKey } from './normalizeExtra.js'
 import { editDistance, maxDistanceFor } from '../fuzzy.js'
 
 export const INDEX_VERSION = 4

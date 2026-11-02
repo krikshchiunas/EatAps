@@ -30,7 +30,9 @@ const full = () => {
     m[`src/locales/${c}.js`] = { file: `assets/${c}.js`, isDynamicEntry: true, imports: [`_data-${c}.js`, 'index.html'] }
     m[`_data-${c}.js`] = { file: `assets/data-${c}.js` }
   }
+  m['src/lib/search/index.js'] = { file: 'assets/search.js', isDynamicEntry: true, imports: ['index.html'] }
   m['src/lib/search/names.js'] = { file: 'assets/names.js', isDynamicEntry: true, imports: ['_data-en.js'] }
+  m['src/components/BarcodeScanner.jsx'] = { file: 'assets/scanner.js', isDynamicEntry: true, imports: ['index.html'] }
   return m
 }
 

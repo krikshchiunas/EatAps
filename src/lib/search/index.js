@@ -19,7 +19,8 @@
 // синонимы одной записи и дают одну карточку, а не три.
 // ─────────────────────────────────────────────────────────────────────────────
 import { buildIndex, search, makeField, INDEX_VERSION } from './engine.js'
-import { fold, latToCyr, cyrToLat, swapLayout } from './normalize.js'
+import { fold } from './normalize.js'
+import { latToCyr, cyrToLat, swapLayout } from './normalizeExtra.js'
 import { expandSynonyms, SYNONYM_WEIGHT } from './synonyms.js'
 import KEYWORDS from './keywords.js'
 import { getLang, dataTable, LANGS, SOURCE_LANG } from '../i18n.js'

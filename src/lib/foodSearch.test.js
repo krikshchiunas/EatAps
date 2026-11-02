@@ -11,7 +11,8 @@
 import KEYWORDS from './search/keywords.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeQuery, translit, searchLocal, searchByName, sanitizeAmount, FOODS, scale, hasMacros, macroLabel, amountLabel } from './foods.js'
+import { latToCyr as translit } from './search/normalizeExtra.js'
+import { normalizeQuery, searchLocal, searchByName, sanitizeAmount, FOODS, scale, hasMacros, macroLabel, amountLabel } from './foods.js'
 import { MEMORY_BOOST_MAX, rankedSearch } from './fuzzy.js'
 import {
   buildFoodMemory, frequentFoods, recentFoods, memoryPortion, memoryBoost,
@@ -19,6 +20,10 @@ import {
   MEMORY_WINDOW_DAYS,
 } from './library.js'
 import { mergeState, normalizeState, recentKey } from './syncModel.js'
+import { loadSearch } from './search/lazy.js'
+
+// Поисковый движок грузится лениво (search/lazy.js) — здесь заранее.
+await loadSearch()
 
 // Валидная HLC-метка: <мс:15>-<счётчик:5>-<устройство:8>. Строим руками, чтобы
 // в тесте было видно, какая правка новее.

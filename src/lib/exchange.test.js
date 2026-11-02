@@ -3,7 +3,10 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { setLang, LANGS, SOURCE_LANG } from './i18n.js'
 import { buildMealsCsv, buildDaysCsv, parseImportCsv, parseCsvLine, mapColumns, importErrorText, importWarningText } from './exchange.js'
-import { loadSearchNames } from './search/index.js'
+import { loadSearch } from './search/lazy.js'
+
+// Поисковый движок грузится лениво (search/lazy.js) — здесь заранее.
+await loadSearch()
 
 after(() => setLang(SOURCE_LANG, { persist: false }))
 const CYR = /[а-яё]/i
@@ -18,7 +21,6 @@ const days = {
 }
 
 test('выгрузка на каждом языке читается обратно, продукт базы узнаётся', async () => {
-  await loadSearchNames()
   try {
     for (const l of LANGS) {
       await setLang(l.code, { persist: false })

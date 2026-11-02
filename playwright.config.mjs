@@ -3,8 +3,12 @@
 // Запуск — после сборки: npm run build && npm run test:e2e
 // (сервер — vite preview, то есть настоящая production-сборка с service worker).
 import { defineConfig } from '@playwright/test'
+import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.E2E_PORT || 4173)
+// Сборка с «облаком» (npm run build:cloud): экраны, доступные только с аккаунтом.
+const CLOUD_PORT = PORT + 2
+const withCloud = existsSync('dist-cloud/index.html')
 
 export default defineConfig({
   testDir: 'e2e',
@@ -24,17 +28,26 @@ export default defineConfig({
   expect: {
     toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: 'disabled', caret: 'hide' },
   },
-  webServer: {
-    command: `npx vite preview --port ${PORT} --strictPort`,
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: `npx vite preview --port ${PORT} --strictPort`,
+      url: `http://localhost:${PORT}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    ...(withCloud ? [{
+      command: `npx vite preview --outDir dist-cloud --port ${CLOUD_PORT} --strictPort`,
+      url: `http://localhost:${CLOUD_PORT}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    }] : []),
+  ],
   projects: [
-    { name: 'phone-390', use: { viewport: { width: 390, height: 844 }, hasTouch: true }, testIgnore: /visual\.spec/ },
+    { name: 'phone-390', use: { viewport: { width: 390, height: 844 }, hasTouch: true }, testIgnore: /visual\.spec|cloud\.spec/ },
     { name: 'phone-375', use: { viewport: { width: 375, height: 812 }, hasTouch: true }, testMatch: /screens\.spec/ },
     { name: 'tablet-768', use: { viewport: { width: 768, height: 1024 }, hasTouch: true }, testMatch: /screens\.spec/ },
     { name: 'desktop-1440', use: { viewport: { width: 1440, height: 900 } }, testMatch: /screens\.spec/ },
+    { name: 'cloud', use: { baseURL: `http://localhost:${CLOUD_PORT}`, viewport: { width: 390, height: 844 }, hasTouch: true }, testMatch: /cloud\.spec/ },
     { name: 'visual', use: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 }, testMatch: /visual\.spec/ },
   ],
 })

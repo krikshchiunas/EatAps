@@ -198,3 +198,16 @@ test('незнакомый код языка не превращается в у
     assert.match(sys, /Отвечай на языке последнего сообщения/)
   }
 })
+
+test('клиентские тоны (aiTones.js) совпадают с серверными и не тянут тексты для модели', async () => {
+  const client = await import('./aiTones.js')
+  assert.deepEqual(Object.keys(client.TONES), Object.keys(TONES))
+  for (const id of Object.keys(TONES)) {
+    assert.equal(client.TONES[id].optIn, TONES[id].optIn, id)
+    assert.equal(client.TONES[id].label, TONES[id].label, id)
+    assert.equal(client.TONES[id].persona, undefined, `${id}: persona в клиентском бандле`)
+  }
+  for (const prefs of [{}, { aiTone: 'savage' }, { aiTone: 'savage', aiToneConsent: { version: TONE_CONSENT_VERSION } }, { aiTone: '__proto__' }]) {
+    assert.equal(client.resolveTone(prefs).id, resolveTone(prefs).id)
+  }
+})
