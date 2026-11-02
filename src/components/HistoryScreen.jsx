@@ -3,13 +3,16 @@ import { useStore } from '../store.jsx'
 import { sumDay } from '../lib/nutrition.js'
 import { keyOf, monthName, weekdaysShort } from '../lib/date.js'
 import { t } from '../lib/i18n.js'
+import { profileTargets } from '../lib/body.js'
 
 export default function HistoryScreen({ onPickDay, onClose }) {
   const { days, profile } = useStore()
   const now = new Date()
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() })
   const today = keyOf()
-  const target = profile.targets.calories
+  // Цели — через profileTargets: у профиля из облака или старой версии
+  // сохранённых targets может не быть, и календарь не должен из-за этого падать.
+  const target = profileTargets(profile)?.calories ?? null
 
   const first = new Date(ym.y, ym.m, 1)
   const startOffset = (first.getDay() + 6) % 7
@@ -115,7 +118,8 @@ function Legend({ color, text }) {
 }
 
 function MiniRing({ kcal, target }) {
-  if (kcal <= 0) return null
+  // Без цели кольцо не с чем сравнивать — не рисуем его вовсе.
+  if (kcal <= 0 || !(target > 0)) return null
   const r = 15
   const circ = 2 * Math.PI * r
   const pct = Math.min(kcal / target, 1)

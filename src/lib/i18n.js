@@ -245,6 +245,11 @@ export async function setLang(code, { persist = true } = {}) {
 export async function initI18n() {
   const code = detectLang()
   if (await setLang(code)) return code
+  // Язык определён, но его пакет сейчас недоступен. Запоминаем сам язык (не
+  // запасной!): иначе следующий запуск увидел бы данные приложения без
+  // выбранного языка, принял бы их за установку старше языков и открылся бы
+  // по-русски. А так — снова попробует язык устройства.
+  if (!readSaved()) save(code)
   for (const fallback of [FALLBACK_LANG, SOURCE_LANG]) {
     if (fallback !== code && (await setLang(fallback, { persist: false }))) return fallback
   }

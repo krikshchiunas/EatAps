@@ -161,6 +161,20 @@ test('нет пакета языка (первый запуск офлайн): �
   } finally { restore() }
 })
 
+test('первый запуск без пакета языка: запоминается язык устройства, а не запасной', async () => {
+  device(['tr-TR'])
+  const restore = __setLoaderForTests('tr', () => Promise.reject(new Error('offline')))
+  try {
+    assert.equal(await initI18n(), 'en')
+    assert.equal(localStorage.getItem(LANG_KEY), 'tr')
+  } finally { restore() }
+  // Приложение успело записать данные; следующий запуск с сетью — турецкий,
+  // а не русский «как у старой установки».
+  localStorage.setItem('eataps:state:guest', '{}')
+  __resetForTests()
+  assert.equal(await initI18n(), 'tr')
+})
+
 test('нет ни пакета, ни английского: вшитый русский, без падения', async () => {
   device(['de-DE'])
   const r1 = __setLoaderForTests('de', () => Promise.reject(new Error('offline')))

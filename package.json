@@ -7,7 +7,12 @@
     "dev": "vite",
     "build": "vite build && node scripts/inject-precache.mjs",
     "preview": "vite preview",
-    "test": "node --test src/lib/*.test.js api/stripe/*.test.js api/telegram/*.test.js api/ai/*.test.js"
+    "test": "node --test src/lib/*.test.js src/lib/search/*.test.js scripts/*.test.mjs scripts/i18n/*.test.mjs api/stripe/*.test.js api/telegram/*.test.js api/ai/*.test.js",
+    "i18n": "node scripts/i18n/check-source.mjs && node --test src/lib/i18n*.test.js src/lib/catalog.test.js src/lib/foodNames.test.js src/lib/aiCards.test.js src/lib/aiPrompt.test.js src/lib/exchange.test.js src/lib/search/*.test.js scripts/i18n/*.test.mjs scripts/inject-precache.test.mjs",
+    "test:e2e": "playwright test --project=phone-390 --project=phone-375 --project=tablet-768 --project=desktop-1440",
+    "test:visual": "playwright test --project=visual",
+    "test:visual:update": "playwright test --project=visual --update-snapshots",
+    "verify": "npm run i18n && npm test && npm run build && npm run test:e2e && npm run test:visual"
   },
   "dependencies": {
     "@reown/appkit": "^1.8.23",

@@ -1,4 +1,4 @@
-const CACHE = 'eataps-v12'
+const CACHE = 'eataps-v13'
 // Стартовые ассеты ядра (entry-скрипт + css) подставляются при сборке скриптом
 // scripts/inject-precache.mjs вместо маркера ниже.
 const BUILD_ASSETS = /* __BUILD_ASSETS__ */ []
@@ -91,7 +91,7 @@ self.addEventListener('fetch', (e) => {
           }
           return res
         } catch {
-          return (await caches.match('/')) || (await caches.match('/index.html')) || Response.error()
+          return (await caches.match('/', { ignoreVary: true })) || (await caches.match('/index.html', { ignoreVary: true })) || Response.error()
         }
       })()
     )
@@ -101,7 +101,12 @@ self.addEventListener('fetch', (e) => {
   // Остальное (хэшированные ассеты, иконки) — cache-first: они неизменяемы.
   e.respondWith(
     (async () => {
-      const cached = await caches.match(request)
+      // ignoreVary: сервер может ответить «Vary: Origin», а модульный скрипт
+      // запрашивается С заголовком Origin, тогда как при установке файл клали
+      // без него. С учётом Vary кэш «не находит» уже лежащий файл, и офлайн
+      // приложение не запускается. Хэшированные ассеты неизменяемы — Vary для
+      // них ничего не значит.
+      const cached = await caches.match(request, { ignoreVary: true })
       if (cached) return cached
       try {
         const res = await fetch(request)
