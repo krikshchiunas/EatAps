@@ -16,6 +16,7 @@ export default {
     plansAndPromo: 'Plans and promo code',
     signInNotice: 'Sign in — the assistant needs access to your diary and plan.',
     camera: 'Take a photo of food',
+    gallery: 'Choose a photo from the gallery',
     inputPh: 'Ask about food…',
     truncated: 'The answer got cut off — ask again, more briefly.',
     confidence: {

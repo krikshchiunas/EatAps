@@ -16,6 +16,7 @@ export default {
     plansAndPromo: 'Tarife und Promo-Code',
     signInNotice: 'Melde dich an – der Assistent braucht Zugriff auf dein Tagebuch und deinen Tarif.',
     camera: 'Essen fotografieren',
+    gallery: 'Foto aus der Galerie wählen',
     inputPh: 'Frag etwas zum Essen…',
     truncated: 'Die Antwort ist abgebrochen – frag noch einmal, etwas kürzer.',
     confidence: {

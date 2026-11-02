@@ -16,6 +16,7 @@ export default {
     plansAndPromo: 'Planes y código promocional',
     signInNotice: 'Inicia sesión: el asistente necesita acceso a tu diario y a tu plan.',
     camera: 'Hacer foto a la comida',
+    gallery: 'Elegir una foto de la galería',
     inputPh: 'Pregunta sobre comida…',
     truncated: 'La respuesta se cortó a la mitad: vuelve a preguntar, más corto.',
     confidence: {

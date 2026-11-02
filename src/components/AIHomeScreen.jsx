@@ -67,6 +67,7 @@ export default function AIHomeScreen({ onUpgrade }) {
   }, [session, tier])
 
   const fileRef = useRef(null)
+  const galleryRef = useRef(null)
   const feedRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -233,16 +234,35 @@ export default function AIHomeScreen({ onUpgrade }) {
       </div>
 
       <div className="ai-chat__composer">
+        {/* Два поля, а не одно: capture="environment" на iPhone открывает
+            сразу камеру и не даёт выбрать уже сделанный снимок. Поле без
+            capture открывает фото-библиотеку — блюдо, снятое за обедом,
+            можно разобрать и вечером. */}
         <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={pickPhoto} />
+        <input ref={galleryRef} type="file" accept="image/*" hidden onChange={pickPhoto} />
         <button
           className="iconbtn ai-chat__camera"
           onClick={() => fileRef.current?.click()}
           disabled={busy}
           aria-label={t('ai.camera')}
+          title={t('ai.camera')}
         >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
             <circle cx="12" cy="13" r="4" />
+          </svg>
+        </button>
+        <button
+          className="iconbtn ai-chat__camera"
+          onClick={() => galleryRef.current?.click()}
+          disabled={busy}
+          aria-label={t('ai.gallery')}
+          title={t('ai.gallery')}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
           </svg>
         </button>
         <textarea

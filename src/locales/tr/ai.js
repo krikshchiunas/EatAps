@@ -16,6 +16,7 @@ export default {
     plansAndPromo: 'Paketler ve promosyon kodu',
     signInNotice: 'Giriş yap — asistanın günlüğüne ve paketine erişmesi gerekiyor.',
     camera: 'Yemeğin fotoğrafını çek',
+    gallery: 'Galeriden fotoğraf seç',
     inputPh: 'Yemekle ilgili sor…',
     truncated: 'Yanıt yarıda kesildi — daha kısa sorarak yeniden dene.',
     confidence: {
