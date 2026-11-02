@@ -17,6 +17,10 @@ export default {
     signInNotice: 'Melde dich an – der Assistent braucht Zugriff auf dein Tagebuch und deinen Tarif.',
     camera: 'Essen fotografieren',
     gallery: 'Foto aus der Galerie wählen',
+    removePhoto: 'Foto entfernen',
+    maxPhotos: 'Du kannst höchstens {n} Fotos anhängen',
+    photoUnreadable: 'Das Foto ließ sich nicht öffnen. Versuch ein anderes.',
+    photosCount: 'Fotos: {n}',
     inputPh: 'Frag etwas zum Essen…',
     truncated: 'Die Antwort ist abgebrochen – frag noch einmal, etwas kürzer.',
     confidence: {
@@ -38,6 +42,7 @@ export default {
       unauthorized: 'Du musst dich anmelden.',
       bad_image: 'Benötigt wird JPEG, PNG oder WebP.',
       image_too_large: 'Das Foto ist zu groß – bitte verkleinern.',
+      too_many_images: 'Höchstens 5 Fotos auf einmal.',
       empty_request: 'Leere Anfrage.',
       upstream: 'Der Assistent ist gerade nicht erreichbar. Versuch es in einer Minute.',
       upstream_photo: 'Das Foto ließ sich nicht auswerten. Versuch es noch einmal.',

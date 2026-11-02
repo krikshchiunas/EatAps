@@ -23,7 +23,7 @@ export class AIError extends Error {
   get isBudget() { return this.code === 'budget_exhausted' }
 }
 
-const KNOWN = ['unauthorized', 'bad_image', 'image_too_large', 'empty_request', 'upstream', 'accounting_unavailable']
+const KNOWN = ['unauthorized', 'bad_image', 'image_too_large', 'too_many_images', 'empty_request', 'upstream', 'accounting_unavailable']
 
 function messageFor(code, path, fallback) {
   // Сбой распознавания фото и сбой чата — разные ситуации для человека:
@@ -65,9 +65,11 @@ export function sendChat({ history, context, prefs, session }) {
   return post('/api/ai/chat', { messages: history, context, prefs }, session)
 }
 
-// image: { media_type, data } — data без префикса data:...;base64,
-export function sendPhoto({ image, note, context, prefs, session }) {
-  return post('/api/ai/vision', { image, note, context, prefs }, session)
+// images: [{ media_type, data }] — data без префикса data:...;base64,
+// Одно фото или несколько (до MAX_PHOTOS) — одним запросом вместе с текстом.
+export const MAX_PHOTOS = 5
+export function sendPhoto({ images, note, context, prefs, session }) {
+  return post('/api/ai/vision', { images, note, context, prefs }, session)
 }
 
 // File → { media_type, data }. Ужимаем до 1024px по длинной стороне: модель

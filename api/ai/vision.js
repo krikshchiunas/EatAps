@@ -1,6 +1,7 @@
 // POST /api/ai/vision — распознавание еды по фотографии.
 //
-// Тело: { image: { media_type, data }, note, context, tone, prefs }
+// Тело: { images: [{ media_type, data }, …], note, context, tone, prefs }
+//   (старое { image } тоже принимаем — у кого-то в кэше висит прошлый фронт)
 // Ответ тот же, что у чата: { reply, ask, cards, memory, usage }
 //
 // Картинка приходит base64 в теле, а не ссылкой на storage: фото тарелки не
@@ -21,6 +22,45 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 // ошибку вместо нашего понятного текста. 3,5 МБ строки ≈ 2,6 МБ фото — с запасом
 // на остальное тело. Клиент и так жмёт снимок до ~300 КБ (fileToImage).
 const MAX_BASE64_CHARS = 3.5 * 1024 * 1024
+// Несколько фото — один приём пищи с разных сторон или несколько блюд за раз.
+// Потолок тела запроса общий, поэтому ограничиваем и сумму, а не только каждое.
+export const MAX_IMAGES = 5
+const MAX_TOTAL_BASE64_CHARS = 3.8 * 1024 * 1024
+// Каждое следующее фото — потенциально ещё блюдо и ещё карточка в ответе.
+const EXTRA_OUTPUT_PER_IMAGE = 250
+
+// Достаём список картинок из тела и проверяем его.
+// Возвращает { images } или { error, status, message }.
+export function readImages(body) {
+  const raw = Array.isArray(body?.images) ? body.images : body?.image ? [body.image] : []
+  if (!raw.length) return { error: 'bad_image', status: 400, message: 'Нужен JPEG, PNG или WebP.' }
+  if (raw.length > MAX_IMAGES) {
+    return { error: 'too_many_images', status: 400, message: `Не больше ${MAX_IMAGES} фото за раз.` }
+  }
+  let total = 0
+  for (const image of raw) {
+    if (typeof image?.data !== 'string' || !image.data || !ALLOWED_TYPES.includes(image.media_type)) {
+      return { error: 'bad_image', status: 400, message: 'Нужен JPEG, PNG или WebP.' }
+    }
+    total += image.data.length
+    if (image.data.length > MAX_BASE64_CHARS || total > MAX_TOTAL_BASE64_CHARS) {
+      return { error: 'image_too_large', status: 413, message: 'Фото слишком большое — сожмите его.' }
+    }
+  }
+  return { images: raw.map(({ media_type, data }) => ({ media_type, data })) }
+}
+
+// Содержимое сообщения для модели. Несколько фото подписываем «Фото 1», «Фото 2»
+// — так модель может сослаться на конкретный снимок и не путает, что где.
+export function buildContent(images, text) {
+  const content = []
+  images.forEach((image, i) => {
+    if (images.length > 1) content.push({ type: 'text', text: `Фото ${i + 1}:` })
+    content.push({ type: 'image', source: { type: 'base64', media_type: image.media_type, data: image.data } })
+  })
+  content.push({ type: 'text', text })
+  return content
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' })
@@ -28,13 +68,9 @@ export default async function handler(req, res) {
   const user = await getUser(req)
   if (!user) return res.status(401).json({ error: 'unauthorized' })
 
-  const image = req.body?.image
-  if (!image?.data || !ALLOWED_TYPES.includes(image.media_type)) {
-    return res.status(400).json({ error: 'bad_image', message: 'Нужен JPEG, PNG или WebP.' })
-  }
-  if (image.data.length > MAX_BASE64_CHARS) {
-    return res.status(413).json({ error: 'image_too_large', message: 'Фото слишком большое — сожмите его.' })
-  }
+  const read = readImages(req.body)
+  if (read.error) return res.status(read.status).json({ error: read.error, message: read.message })
+  const { images } = read
 
   const tier = await tierOf(user.id)
   const model = modelForTier(tier)
@@ -56,16 +92,17 @@ export default async function handler(req, res) {
   const context = capContext(buildUserContext(req.body?.context || {}))
   const note = String(req.body?.note || '').slice(0, 500)
 
+  const question = note || (images.length > 1
+    ? 'Что за блюда на этих фото и сколько в них КБЖУ? Если на нескольких фото одно и то же блюдо — посчитай его один раз.'
+    : 'Что это за блюдо и сколько в нём КБЖУ?')
   const messages = [{
     role: 'user',
-    content: [
-      { type: 'image', source: { type: 'base64', media_type: image.media_type, data: image.data } },
-      { type: 'text', text: [context, note || 'Что это за блюдо и сколько в нём КБЖУ?'].filter(Boolean).join('\n\n---\n\n') },
-    ],
+    content: buildContent(images, [context, question].filter(Boolean).join('\n\n---\n\n')),
   }]
 
-  const inputTokens = IMAGE_TOKENS + roughTokens(system) + roughTokens(context) + roughTokens(note)
-  const check = checkBudget({ tier, spent, inputTokens, maxOutputTokens: MAX_OUTPUT_TOKENS.vision })
+  const maxTokens = MAX_OUTPUT_TOKENS.vision + EXTRA_OUTPUT_PER_IMAGE * (images.length - 1)
+  const inputTokens = IMAGE_TOKENS * images.length + roughTokens(system) + roughTokens(context) + roughTokens(question)
+  const check = checkBudget({ tier, spent, inputTokens, maxOutputTokens: maxTokens })
   if (!check.ok) return budgetError(res, check, tier)
 
   // Резервируем верхнюю оценку до похода в модель — иначе несколько запросов,
@@ -80,7 +117,7 @@ export default async function handler(req, res) {
 
   let data
   try {
-    data = await callClaude({ model, system, messages, maxTokens: MAX_OUTPUT_TOKENS.vision })
+    data = await callClaude({ model, system, messages, maxTokens })
   } catch (e) {
     // Упавший запрос мог сжечь токены — платит за них пользователь, остальной
     // резерв возвращаем. Не списать вовсе значило бы сделать обрыв на середине

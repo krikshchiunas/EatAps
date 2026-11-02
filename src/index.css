@@ -2014,12 +2014,24 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   border-bottom-left-radius: 6px;
 }
 .ai-bubble__text { margin: 0; white-space: pre-wrap; }
+.ai-bubble__photos { margin-bottom: 8px; }
 .ai-bubble__photo {
   display: block;
   width: 100%;
   max-width: 220px;
   border-radius: 10px;
-  margin-bottom: 8px;
+}
+/* Несколько фото — сеткой квадратов, а не столбиком на весь экран. */
+.ai-bubble__photos--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 4px;
+  width: min(232px, 62vw);
+}
+.ai-bubble__photos--grid .ai-bubble__photo {
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
 }
 
 /* «Печатает»: три точки. prefers-reduced-motion уважаем — анимация гаснет,
@@ -2057,6 +2069,7 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
 .ai-chat__composer {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
   padding: 10px 0;
@@ -2066,8 +2079,53 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   -webkit-backdrop-filter: var(--blur);
 }
 .ai-chat__camera { flex: 0 0 auto; }
+
+/* Черновик фото над полем ввода: миниатюры с крестиком, листаются вбок. */
+.ai-attach {
+  flex: 1 0 100%;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 8px 2px 2px;
+  scrollbar-width: none;
+}
+.ai-attach::-webkit-scrollbar { display: none; }
+.ai-attach__item {
+  position: relative;
+  flex: 0 0 auto;
+  width: 58px; height: 58px;
+}
+.ai-attach__item img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+.ai-attach__item--loading {
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  animation: ai-blink 1.2s infinite ease-in-out;
+}
+@media (prefers-reduced-motion: reduce) { .ai-attach__item--loading { animation: none; } }
+.ai-attach__remove {
+  position: absolute;
+  top: -6px; right: -6px;
+  width: 24px; height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 15px; line-height: 1;
+  display: grid; place-items: center;
+  cursor: pointer;
+}
+[dir="rtl"] .ai-attach__remove { right: auto; left: -6px; }
 .ai-chat__input {
-  flex: 1 1 auto;
+  /* Основа 0, а не auto: с переносом строк в композере (миниатюры сверху)
+     ширина textarea по умолчанию выталкивала кнопку отправки вниз. */
+  flex: 1 1 0;
   min-width: 0;
   resize: none;
   max-height: 120px;

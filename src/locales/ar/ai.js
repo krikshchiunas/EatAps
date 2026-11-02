@@ -17,6 +17,10 @@ export default {
     signInNotice: 'سجّل الدخول — يحتاج المساعد إلى الوصول إلى يومياتك وباقتك.',
     camera: 'تصوير الطعام',
     gallery: 'اختيار صورة من المعرض',
+    removePhoto: 'إزالة الصورة',
+    maxPhotos: 'يمكنك إرفاق {n} صور كحد أقصى',
+    photoUnreadable: 'تعذّر فتح الصورة. جرّب صورة أخرى.',
+    photosCount: 'الصور: {n}',
     inputPh: 'اسأل عن الطعام…',
     truncated: 'انقطع الرد في منتصفه — اسأل من جديد باختصار.',
     confidence: {
@@ -38,6 +42,7 @@ export default {
       unauthorized: 'يجب تسجيل الدخول.',
       bad_image: 'المطلوب صورة JPEG أو PNG أو WebP.',
       image_too_large: 'الصورة كبيرة جدًا — صغّر حجمها.',
+      too_many_images: 'لا أكثر من 5 صور في المرة الواحدة.',
       empty_request: 'طلب فارغ.',
       upstream: 'المساعد غير متاح الآن. حاول بعد دقيقة.',
       upstream_photo: 'تعذّر تحليل الصورة. حاول مرة أخرى.',

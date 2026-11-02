@@ -17,6 +17,10 @@ export default {
     signInNotice: 'Sign in — the assistant needs access to your diary and plan.',
     camera: 'Take a photo of food',
     gallery: 'Choose a photo from the gallery',
+    removePhoto: 'Remove photo',
+    maxPhotos: 'You can attach up to {n} photos',
+    photoUnreadable: 'Couldn’t open that photo. Try another one.',
+    photosCount: 'Photos: {n}',
     inputPh: 'Ask about food…',
     truncated: 'The answer got cut off — ask again, more briefly.',
     confidence: {
@@ -38,6 +42,7 @@ export default {
       unauthorized: 'You need to sign in.',
       bad_image: 'JPEG, PNG or WebP needed.',
       image_too_large: 'The photo is too large — please compress it.',
+      too_many_images: 'No more than 5 photos at once.',
       empty_request: 'Empty request.',
       upstream: 'The assistant is unavailable right now. Try again in a minute.',
       upstream_photo: 'Couldn’t analyze the photo. Please try again.',

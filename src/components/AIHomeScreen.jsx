@@ -15,7 +15,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useStore } from '../store.jsx'
 import { hasAIPlus, hasAIPremium, planByTier } from '../lib/subscription.js'
-import { sendChat, sendPhoto, fileToImage, AIError } from '../lib/aiClient.js'
+import { sendChat, sendPhoto, fileToImage, AIError, MAX_PHOTOS } from '../lib/aiClient.js'
 import { buildContext } from '../lib/aiContext.js'
 import { resolveTone } from '../lib/aiPrompt.js'
 import { usedShare, budgetForTier, periodKey } from '../lib/aiBudget.js'
@@ -45,6 +45,10 @@ export default function AIHomeScreen({ onUpgrade }) {
     { role: 'assistant', greeting: tone, local: true },
   ])
   const [input, setInput] = useState('')
+  // Прикреплённые, но ещё не отправленные фото: [{ id, media_type, data, preview }].
+  // Уходят одним запросом вместе с текстом — как в мессенджере.
+  const [photos, setPhotos] = useState([])
+  const [attaching, setAttaching] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [budget, setBudget] = useState(null) // { spentMicro, budgetMicro, remainingMicro }
@@ -118,6 +122,7 @@ export default function AIHomeScreen({ onUpgrade }) {
   }, [])
 
   const send = async () => {
+    if (photos.length) return sendPhotos()
     const text = input.trim()
     if (!text || busy) return
     haptic()
@@ -142,29 +147,69 @@ export default function AIHomeScreen({ onUpgrade }) {
     setBusy(false)
   }
 
-  const pickPhoto = async (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = '' // тот же файл можно выбрать повторно
-    if (!file || busy) return
+  // Фото + текст одним сообщением. Текст человека — это и вопрос к модели, и
+  // подпись в ленте; без текста подписываем «Фото еды», чтобы следующий вопрос
+  // в чате («а сколько там белка?») имел в истории, к чему относиться.
+  const sendPhotos = async () => {
+    if (busy || !photos.length) return
+    const note = input.trim()
+    const batch = photos
     haptic()
     setError(null)
+    setInput('')
+    setPhotos([])
+    setMessages((m) => [...m, {
+      role: 'user',
+      text: note || (batch.length > 1 ? t('ai.photosCount', { n: batch.length }) : t('ai.photoMsg')),
+      photos: batch.map((p) => p.preview),
+    }])
     setBusy(true)
     try {
-      const image = await fileToImage(file)
-      setMessages((m) => [...m, { role: 'user', text: t('ai.photoMsg'), photo: image.preview }])
       const data = await sendPhoto({
-        image: { media_type: image.media_type, data: image.data },
-        note: input.trim() || undefined,
+        images: batch.map(({ media_type, data }) => ({ media_type, data })),
+        note: note || undefined,
         context: context(),
         prefs,
         session,
       })
-      setInput('')
       applyAnswer(data)
     } catch (e) {
       handleFailure(e)
     }
     setBusy(false)
+  }
+
+  // Камера отдаёт один снимок, галерея — сколько выбрали. Всё складываем в
+  // черновик; лишнее сверх MAX_PHOTOS отбрасываем и говорим об этом.
+  const attachPhotos = async (event) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = '' // тот же файл можно выбрать повторно
+    if (!files.length || busy) return
+    haptic()
+    setError(null)
+    const room = MAX_PHOTOS - photos.length
+    if (room <= 0) { setError(t('ai.maxPhotos', { n: MAX_PHOTOS })); return }
+    setAttaching(true)
+    const added = []
+    let failed = false
+    for (const file of files.slice(0, room)) {
+      try {
+        const image = await fileToImage(file)
+        added.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, ...image })
+      } catch {
+        failed = true
+      }
+    }
+    setAttaching(false)
+    setPhotos((prev) => [...prev, ...added].slice(0, MAX_PHOTOS))
+    if (files.length > room) setError(t('ai.maxPhotos', { n: MAX_PHOTOS }))
+    else if (failed) setError(t('ai.photoUnreadable'))
+    inputRef.current?.focus()
+  }
+
+  const removePhoto = (id) => {
+    haptic()
+    setPhotos((prev) => prev.filter((p) => p.id !== id))
   }
 
   // Карточка → запись в дневнике. Приём пищи берём из карточки, а если модель
@@ -234,16 +279,32 @@ export default function AIHomeScreen({ onUpgrade }) {
       </div>
 
       <div className="ai-chat__composer">
+        {photos.length > 0 && (
+          <div className="ai-attach" aria-label={t('ai.photosCount', { n: photos.length })}>
+            {photos.map((p) => (
+              <div key={p.id} className="ai-attach__item">
+                <img src={p.preview} alt="" />
+                <button
+                  type="button"
+                  className="ai-attach__remove"
+                  onClick={() => removePhoto(p.id)}
+                  disabled={busy}
+                  aria-label={t('ai.removePhoto')}
+                >×</button>
+              </div>
+            ))}
+            {attaching && <div className="ai-attach__item ai-attach__item--loading" aria-hidden />}
+          </div>
+        )}
         {/* Два поля, а не одно: capture="environment" на iPhone открывает
-            сразу камеру и не даёт выбрать уже сделанный снимок. Поле без
-            capture открывает фото-библиотеку — блюдо, снятое за обедом,
-            можно разобрать и вечером. */}
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={pickPhoto} />
-        <input ref={galleryRef} type="file" accept="image/*" hidden onChange={pickPhoto} />
+            сразу камеру и не даёт выбрать уже сделанный снимок. Поле галереи
+            без capture и с multiple — можно выбрать несколько фото разом. */}
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={attachPhotos} />
+        <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={attachPhotos} />
         <button
           className="iconbtn ai-chat__camera"
           onClick={() => fileRef.current?.click()}
-          disabled={busy}
+          disabled={busy || attaching || photos.length >= MAX_PHOTOS}
           aria-label={t('ai.camera')}
           title={t('ai.camera')}
         >
@@ -255,7 +316,7 @@ export default function AIHomeScreen({ onUpgrade }) {
         <button
           className="iconbtn ai-chat__camera"
           onClick={() => galleryRef.current?.click()}
-          disabled={busy}
+          disabled={busy || attaching || photos.length >= MAX_PHOTOS}
           aria-label={t('ai.gallery')}
           title={t('ai.gallery')}
         >
@@ -277,7 +338,7 @@ export default function AIHomeScreen({ onUpgrade }) {
           }}
           disabled={busy}
         />
-        <button className="btn ai-chat__send" onClick={send} disabled={busy || !input.trim()} aria-label={t('common.send')}>
+        <button className="btn ai-chat__send" onClick={send} disabled={busy || attaching || (!input.trim() && !photos.length)} aria-label={t('common.send')}>
           ↑
         </button>
       </div>
@@ -291,7 +352,11 @@ function Bubble({ msg, onAdd }) {
   const mine = msg.role === 'user'
   return (
     <div className={`ai-bubble ${mine ? 'ai-bubble--me' : 'ai-bubble--ai'}`}>
-      {msg.photo && <img className="ai-bubble__photo" src={msg.photo} alt="" />}
+      {msg.photos?.length > 0 && (
+        <div className={`ai-bubble__photos ${msg.photos.length > 1 ? 'ai-bubble__photos--grid' : ''}`}>
+          {msg.photos.map((src, i) => <img key={i} className="ai-bubble__photo" src={src} alt="" />)}
+        </div>
+      )}
       {msg.greeting && <p className="ai-bubble__text">{greeting(msg.greeting)}</p>}
       {msg.text && <p className="ai-bubble__text">{msg.text}</p>}
       {msg.truncated && (

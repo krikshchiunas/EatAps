@@ -17,6 +17,10 @@ export default {
     signInNotice: 'Giriş yap — asistanın günlüğüne ve paketine erişmesi gerekiyor.',
     camera: 'Yemeğin fotoğrafını çek',
     gallery: 'Galeriden fotoğraf seç',
+    removePhoto: 'Fotoğrafı kaldır',
+    maxPhotos: 'En fazla {n} fotoğraf ekleyebilirsin',
+    photoUnreadable: 'Fotoğraf açılamadı. Başka bir tane dene.',
+    photosCount: 'Fotoğraflar: {n}',
     inputPh: 'Yemekle ilgili sor…',
     truncated: 'Yanıt yarıda kesildi — daha kısa sorarak yeniden dene.',
     confidence: {
@@ -38,6 +42,7 @@ export default {
       unauthorized: 'Giriş yapman gerekiyor.',
       bad_image: 'JPEG, PNG veya WebP gerekli.',
       image_too_large: 'Fotoğraf çok büyük — küçült.',
+      too_many_images: 'Bir seferde en fazla 5 fotoğraf.',
       empty_request: 'Boş istek.',
       upstream: 'Asistan şu an kullanılamıyor. Bir dakika sonra dene.',
       upstream_photo: 'Fotoğraf çözümlenemedi. Yeniden dene.',

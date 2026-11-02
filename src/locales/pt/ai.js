@@ -17,6 +17,10 @@ export default {
     signInNotice: 'Entre na sua conta — o assistente precisa de acesso ao seu diário e ao seu plano.',
     camera: 'Fotografar a comida',
     gallery: 'Escolher uma foto da galeria',
+    removePhoto: 'Remover foto',
+    maxPhotos: 'Você pode anexar até {n} fotos',
+    photoUnreadable: 'Não foi possível abrir a foto. Tente outra.',
+    photosCount: 'Fotos: {n}',
     inputPh: 'Pergunte sobre comida…',
     truncated: 'A resposta foi cortada no meio — pergunte de novo, de forma mais curta.',
     confidence: {
@@ -38,6 +42,7 @@ export default {
       unauthorized: 'É preciso entrar na conta.',
       bad_image: 'É preciso JPEG, PNG ou WebP.',
       image_too_large: 'A foto é grande demais — comprima-a.',
+      too_many_images: 'No máximo 5 fotos de cada vez.',
       empty_request: 'Pedido vazio.',
       upstream: 'O assistente está indisponível agora. Tente daqui a um minuto.',
       upstream_photo: 'Não foi possível analisar a foto. Tente de novo.',
