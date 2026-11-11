@@ -118,6 +118,7 @@ export default {
     fatField: 'الدهون، غ',
     sugarField: 'منها سكر، غ',
     satFatField: 'منها مشبعة، غ',
+    fiberField: 'ألياف، غ',
     caffeineField: 'الكافيين، ملغ',
     checkWarn: 'تحقّق: {w}',
     saveAdd: 'حفظ وإضافة {amount}',

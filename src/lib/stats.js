@@ -5,11 +5,11 @@
 //
 // Сахар: у части продуктов (ручной ввод, напитки) есть реальное поле `sugar`
 // («из них сахар»). Там, где его нет (продукты из базы, конструкторы), значение
-// НЕ измерено — оно ОЦЕНИВАЕТСЯ из углеводов через freeSugarShare. Поэтому в UI
+// НЕ измерено — оно ОЦЕНИВАЕТСЯ по справочному составу (estimateCarbs). Поэтому в UI
 // это «Оценка сахара» (приблизительно), а не достоверное количество свободных
 // сахаров; строгого сравнения с лимитом ВОЗ у сахара нет.
 // ─────────────────────────────────────────────────────────────────────────────
-import { sumDay, freeSugarShare, sumAdvanced, satFatLimit } from './nutrition.js'
+import { sumDay, estimateCarbs, sumAdvanced, satFatLimit } from './nutrition.js'
 import { createTargetResolver, weightSummary, activitySummary } from './body.js'
 import { buildInsights } from './insights.js'
 import { normalizeName } from './text.js'
@@ -96,10 +96,11 @@ export function realSugar(m) {
   return m?.sugarSrc === SUGAR_MEASURED ? 0 : null
 }
 
-// Сахар приёма: берём реальное поле, если оно есть, иначе ОЦЕНКА из углеводов.
+// Сахар приёма: берём реальное поле, если оно есть, иначе ОЦЕНКА по
+// справочному составу продукта (nutrition.js estimateCarbs).
 export function mealSugar(m) {
   const real = realSugar(m)
-  return real != null ? real : safeNum(m?.carbs) * freeSugarShare(m)
+  return real != null ? real : estimateCarbs(m).sugar
 }
 
 // Итоги дня по всем нутриентам. Отсутствующие поля считаем нулём (неполные данные).

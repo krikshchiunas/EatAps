@@ -64,6 +64,9 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
 
   if (!food || !data) return null
   const { adv, micro, targets, pq, sugar, fiber, cc, sf } = data
+  // Сахар и клетчатку мог оценить ИИ по фото — это не этикетка.
+  const aiSugar = food.sugarSrc === 'ai'
+  const aiFiber = food.fiberSrc === 'ai'
 
   const protein = num(food.protein)
   const carbs = num(food.carbs)
@@ -132,17 +135,20 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
                   ? t('foodInfo.complexUnknown')
                   : t('foodInfo.complexShare', { n: Math.round((adv.complexCarb / carbs) * 100) })}
               />
+              {/* Сахара — все, как на этикетке; свободные (те, что ВОЗ ограничивает)
+                  — подписью. Раньше строка показывала только оценку свободных, и
+                  «4,6 г» читалось как «сахара в батончике 4,6 г». */}
               <Row
-                label={t('foodInfo.freeSugar')}
-                value={`${sugar.source === 'label' ? '' : '≈'}${gram(sugar.grams)}`}
-                sub={sugarNote(food, sugar, carbs)}
+                label={t('foodInfo.sugars')}
+                value={`${sugar.source === 'estimate' || aiSugar ? '≈' : ''}${gram(sugar.total)}`}
+                sub={sugarNote(food, sugar)}
                 tone={sugar.grams > carbs * 0.5 ? 'var(--warn)' : undefined}
               />
               <Row
                 label={t('foodInfo.fiber')}
-                value={`${fiber.source === 'label' ? '' : '≈'}${gram(fiber.grams)}`}
-                sub={fiber.source === 'label' ? t('foodInfo.fromLabel')
-                  : carbs > 0 && fiber.grams / carbs >= 0.3 ? t('foodInfo.goodSource') : undefined}
+                value={`${fiber.source === 'label' && !aiFiber ? '' : '≈'}${gram(fiber.grams)}`}
+                sub={fiber.source === 'label' ? t(aiFiber ? 'foodInfo.fromAI' : 'foodInfo.fromLabel')
+                  : carbs > 0 && fiber.grams / carbs >= 0.25 ? t('foodInfo.goodSource') : undefined}
               />
             </>
           ) : <Empty>{t('foodInfo.noCarbs')}</Empty>}
@@ -204,16 +210,16 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
   )
 }
 
-// Подпись под свободными сахарами: откуда число.
-function sugarNote(food, sugar, carbs) {
-  if (sugar.source === 'label') return t('foodInfo.fromLabel')
-  // С этикетки, но не весь сахар свободный: лактоза, сахара орехов и плодов.
-  if (sugar.source === 'adjusted') {
-    return sugar.grams === 0 ? t('foodInfo.wholeSugar') : t('foodInfo.ofLabelSugar', { n: formatAmount(Math.round(num(food.sugar) * 10) / 10) })
+// Подпись под сахарами: откуда число и сколько из него свободных.
+function sugarNote(food, sugar) {
+  const from = sugar.source === 'estimate' ? null : t(food.sugarSrc === 'ai' ? 'foodInfo.fromAI' : 'foodInfo.fromLabel')
+  let part = null
+  if (sugar.total > 0) {
+    if (sugar.grams <= 0.05) part = t('foodInfo.wholeSugar')
+    else if (sugar.total - sugar.grams <= 0.05) part = t('foodInfo.allFree')
+    else part = t('foodInfo.freePart', { n: gram(sugar.grams) })
   }
-  if (carbs > 0 && sugar.grams / carbs >= 0.8) return t('foodInfo.allSugar')
-  if (sugar.grams === 0 && carbs > 0) return t('foodInfo.wholeSugar')
-  return undefined
+  return [from, part].filter(Boolean).join(' · ') || undefined
 }
 
 // ── Мелкие части ─────────────────────────────────────────────────────────────

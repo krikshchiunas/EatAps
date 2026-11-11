@@ -33,6 +33,26 @@ const haptic = (ms = 12) => { try { navigator.vibrate?.(ms) } catch {} }
 // переводит и его.
 const greeting = (tone) => t(`ai.greeting.${tone}`)
 
+// Сахар и клетчатка из карточки ИИ — только правдоподобные: не меньше нуля
+// и не больше углеводов (клетчатку европейская этикетка в углеводы не
+// включает, поэтому для неё потолок — вес порции).
+function aiCarbDetail(card) {
+  const out = {}
+  const carbs = Math.max(0, Number(card.carbs) || 0)
+  const sugar = Number(card.sugar)
+  if (card.sugar != null && Number.isFinite(sugar) && sugar >= 0) {
+    out.sugar = Math.round(Math.min(sugar, carbs) * 10) / 10
+    out.sugarSrc = 'ai'
+  }
+  const fiber = Number(card.fiber)
+  const grams = Number(card.grams) || Infinity
+  if (card.fiber != null && Number.isFinite(fiber) && fiber >= 0 && fiber <= grams) {
+    out.fiber = Math.round(fiber * 10) / 10
+    out.fiberSrc = 'ai'
+  }
+  return out
+}
+
 export default function AIHomeScreen({ onUpgrade }) {
   const store = useStore()
   const { subscription, session, prefs, addFood, user, supabaseEnabled } = store
@@ -248,6 +268,10 @@ export default function AIHomeScreen({ onUpgrade }) {
       protein: Math.max(0, Math.round(Number(card.protein) || 0)),
       fat: Math.max(0, Math.round(Number(card.fat) || 0)),
       carbs: Math.max(0, Math.round(Number(card.carbs) || 0)),
+      // Сахар и клетчатку ИИ оценивает по составу блюда — это точнее любой
+      // доли от углеводов. Помечаем источник: на экране «Что внутри» это
+      // оценка, а не этикетка.
+      ...aiCarbDetail(card),
       type: MEAL_TYPES.includes(card.meal) ? card.meal : undefined,
       mealId: MEAL_TYPES.includes(card.meal) ? `std:${card.meal}` : autoStandardMealId(day),
     })

@@ -95,7 +95,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
   const [grams, setGrams] = useState('150')
   const [sugar, setSugar] = useState(0)
   const [query, setQuery] = useState('')
-  const [manual, setManual] = useState({ name: '', portion: '', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '' })
+  const [manual, setManual] = useState({ name: '', portion: '', kcal: '', protein: '', carbs: '', sugar: '', fiber: '', fat: '', satFat: '' })
   const [manualBasis, setManualBasis] = useState('per100') // 'per100' | 'perPortion'
   const [manualKind, setManualKind] = useState('food')
   const [manualDrink, setManualDrink] = useState({ name: '', ml: '250', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '', caffeine: '' })
@@ -498,7 +498,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
       fat: round1(num(src.fat) * k),
       source: 'custom',
     }
-    const optional = isFood ? [['sugar', src.sugar], ['satFat', src.satFat]]
+    const optional = isFood ? [['sugar', src.sugar], ['fiber', src.fiber], ['satFat', src.satFat]]
       : [['sugar', src.sugar], ['satFat', src.satFat], ['caffeine', src.caffeine]]
     for (const [key, raw] of optional) {
       const v = optionalNum(raw, k)
@@ -524,7 +524,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     if (!manualCheck.ok) return
     addCustomFood(entry)
     if (manualKind === 'food') {
-      setManual({ name: '', portion: '', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '' })
+      setManual({ name: '', portion: '', kcal: '', protein: '', carbs: '', sugar: '', fiber: '', fat: '', satFat: '' })
     } else {
       setManualDrink({ name: '', ml: '250', kcal: '', protein: '', carbs: '', sugar: '', fat: '', satFat: '', caffeine: '' })
     }
@@ -1167,6 +1167,10 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 <div className="field" style={{ marginInlineStart: 18, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 12 }}>
                   <label>{t('add.sugarField')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('common.optional')}</span></label>
                   <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.sugar} onChange={(e) => setManual({ ...manual, sugar: e.target.value })} />
+                </div>
+                <div className="field" style={{ marginInlineStart: 18, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 12 }}>
+                  <label>{t('add.fiberField')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('common.optional')}</span></label>
+                  <input className="input" type="number" inputMode="decimal" placeholder="0" value={manual.fiber} onChange={(e) => setManual({ ...manual, fiber: e.target.value })} />
                 </div>
 
                 <div className="field">

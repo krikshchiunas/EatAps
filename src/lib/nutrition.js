@@ -1,6 +1,7 @@
 // @i18n-data-file — классификация продуктов по русским основам названий.
 import { estimateSaturatedFat, classifyComplexCarb, estimateProteinQuality, usableProteinShare, categoryOf } from './nutritionClassification.js'
 import { t } from './i18n.js'
+import { carbRefFor } from './carbRef.js'
 
 export const ACTIVITY = {
   sedentary: { factor: 1.2, get label() { return t('activity.sedentary') } },
@@ -163,110 +164,81 @@ export function sumDay(meals = []) {
 const nrm = (s) => (s || '').toLowerCase().replace(/ё/g, 'е')
 const anyOf = (n, ws) => ws.some((w) => n.includes(w))
 
-// Все функции ниже принимают и название, и саму запись. Название — старый
-// вход: по нему разбирается каталог. Запись даёт больше: категорию (каталог,
-// теги Open Food Facts) и цифры с этикетки. Без неё «Country · Kinder» не
-// совпадал ни с одним русским словом и получал оценку «прочего» — 5% сахара
-// у шоколадного батончика.
-const WHOLE_FRUIT_WORDS = ['банан', 'яблоко', 'груша', 'апельсин', 'мандарин', 'виноград', 'киви', 'ананас', 'манго', 'персик', 'слив', 'абрикос', 'арбуз', 'дын', 'гранат', 'хурма', 'клубник', 'черник', 'малин', 'ежевик', 'вишн', 'смородин', 'грейпфрут', 'лимон', 'фрукт', 'ягод']
-
 const nameOf = (x) => (typeof x === 'string' ? x : x?.name)
-// Категория записи. Фрукты — отдельной строкой: в общей классификации их нет
-// (белка и жира в них нет, разбирать нечего), а сахару важно знать, что он
-// из целого плода.
-const catOf = (x) => {
-  const food = typeof x === 'string' ? { name: x } : x
-  return categoryOf(food) || (anyOf(nrm(food?.name), WHOLE_FRUIT_WORDS) ? 'fruit' : null)
-}
 const num = (v) => {
   const n = Number(v)
   return Number.isFinite(n) ? n : null
 }
 
-// Доля углеводов по названию — или null, если название ничего не говорит.
-function freeSugarShareByName(name) {
-  const n = nrm(name)
-  if (anyOf(n, ['zero', 'light', 'без сахара', 'sugarfree', 'sugar free', 'диет'])) return 0
-  if (anyOf(n, ['сахар', 'мед', 'сироп', 'варенье', 'джем', 'повидло', 'сгущен', 'нутелла', 'карамель', 'ирис'])) return 1
-  if (anyOf(n, ['cola', 'кола', 'pepsi', 'пепси', 'fanta', 'фанта', 'sprite', 'спрайт', 'газиров', 'лимонад', 'энергет', 'burn', 'monster', 'red bull', 'mirinda', 'дюшес', 'тархун', 'байкал', 'морс', 'компот', 'кисель', 'нектар'])) return 1
-  if (anyOf(n, ['сок '])) return 1
-  if (anyOf(n, ['шоколад', 'конфет', 'печенье', 'пряник', 'зефир', 'халва', 'мармелад', 'вафл', 'пончик', 'маффин', 'капкейк', 'кекс', 'торт', 'пирожн', 'эклер', 'тирамису', 'чизкейк', 'мороженое', 'пломбир', 'наполеон', 'медовик', 'брауни', 'штрудель', 'макарон ', 'десерт', 'молочный коктейль', 'какао'])) return 0.85
-  if (anyOf(n, ['кетчуп', 'соус терияки', 'терияки', 'кисло-сладкий'])) return 0.85
-  if (anyOf(n, ['изюм', 'финик', 'курага', 'чернослив', 'цукат'])) return 0.4
-  if (anyOf(n, WHOLE_FRUIT_WORDS) || n.includes('смузи')) return 0
-  if (anyOf(n, ['молоко', 'кефир', 'творог', 'йогурт', 'сметан', 'сливк', 'ряженк', 'простокваш', 'сыр', 'масло'])) return 0
-  // Кофе с молоком — это лактоза, а пиво и сухое вино — не сахар вовсе. Без этих
-  // строк их забрала бы общая доля напитков ниже, рассчитанная на газировку.
-  if (anyOf(n, ['кофе', 'капучино', 'латте', 'флэт уайт', 'эспрессо', 'американо'])) return 0
-  if (anyOf(n, ['пиво', 'вино ', 'шампанск', 'просекко', 'водк', 'виски', 'коньяк'])) return 0
-  return null
-}
-
-// Та же доля по категории: для записей, название которых не помогло.
-// Значения — типичные для группы: в шоколаде, печенье и конфетах сахар —
-// бóльшая часть углеводов; «выпечка» у нас — это и пирожки, и багет, поэтому
-// у неё доля скромная; в напитке без пометки «zero» углеводы почти всегда
-// сахар; в крупах, молочном и фруктах свободного сахара нет.
-const FREE_SUGAR_SHARE_BY_CAT = {
-  sweet: 0.85, dessert: 0.75, drink: 0.9, pastry: 0.1, sauce: 0.3, snack: 0.05,
-  dairy: 0, cheese: 0, fruit: 0, berry: 0, veg: 0, nut: 0, legume: 0, grain: 0.05,
-  bread: 0.05, pasta: 0, meat: 0, poultry: 0, fish: 0, sea: 0, egg: 0, oil: 0, supp: 0.1,
-}
-
-// Доля углеводов продукта, которая приходится на СВОБОДНЫЕ сахара (0..1) по классификации ВОЗ.
-// Сахар из цельных фруктов и лактоза молока — НЕ свободные.
-export function freeSugarShare(food) {
-  const byName = freeSugarShareByName(nameOf(food))
-  if (byName != null) return byName
-  return FREE_SUGAR_SHARE_BY_CAT[catOf(food)] ?? 0.05
-}
-
-// Доля углеводов, приходящаяся на клетчатку (грубая оценка по типу продукта).
-function fiberRatioByName(name) {
-  const n = nrm(name)
-  // Крахмалистые овощи — до общего правила овощей: у картофеля клетчатки
-  // восьмая часть углеводов, а не 40%, как у капусты.
-  if (anyOf(n, ['картоф', 'картош', 'кукуруз'])) return 0.12
-  if (anyOf(n, ['чечевиц', 'нут', 'фасол', 'горох', 'бобов', 'маш', 'соя', 'эдамаме'])) return 0.32
-  if (anyOf(n, ['орех', 'миндал', 'фундук', 'кешью', 'арахис', 'фисташк', 'семена', 'семечк', 'чиа', 'лен', 'кунжут', 'авокадо'])) return 0.4
-  if (anyOf(n, ['брокколи', 'капуст', 'шпинат', 'руккола', 'салат', 'овощ', 'перец', 'морков', 'свекл', 'огурец', 'помидор', 'кабач', 'баклажан', 'грибы', 'зелен', 'стручков'])) return 0.4
-  if (anyOf(n, ['цельнозернов', 'отруб', 'ржаной', 'бородинск', 'гречк', 'овсян', 'перловк', 'булгур', 'киноа', 'пшен'])) return 0.14
-  if (anyOf(n, ['хлеб', 'рис бур', 'макарон', 'паста', 'спагетти', 'крупа', 'каша', 'лаваш', 'батат'])) return 0.08
-  if (anyOf(n, ['ягод', 'малин', 'черник', 'ежевик', 'смородин', 'груша', 'яблоко', 'банан', 'апельсин', 'киви', 'слив', 'чернослив', 'курага', 'изюм', 'финик'])) return 0.12
-  if (anyOf(n, ['фрукт', 'фрукт', 'ананас', 'манго', 'виноград', 'дын', 'арбуз'])) return 0.06
-  if (anyOf(n, ['рис', 'сахар', 'мед', 'шоколад', 'конфет', 'сок', 'кола', 'газиров', 'сироп', 'варенье'])) return 0.01
-  return null
-}
-
-const FIBER_RATIO_BY_CAT = {
-  nut: 0.4, legume: 0.32, veg: 0.25, berry: 0.12, fruit: 0.1, grain: 0.08, bread: 0.08, pasta: 0.06,
-  snack: 0.08, pastry: 0.03, sweet: 0.04, dessert: 0.02, drink: 0.01, sauce: 0.05,
-  dairy: 0, cheese: 0, meat: 0, poultry: 0, fish: 0, sea: 0, egg: 0, oil: 0, supp: 0.05,
-}
-
-export function fiberRatioOf(food) {
-  const byName = fiberRatioByName(nameOf(food))
-  if (byName != null) return byName
-  return FIBER_RATIO_BY_CAT[catOf(food)] ?? 0.04
-}
-
-// ── Сахар и клетчатка конкретной записи ──────────────────────────────────────
-// Доли выше — оценка по типу продукта. Но у товара со штрихкода и у ручного
-// ввода есть цифры с этикетки, и раньше они просто игнорировались: Kinder со
-// 70 г сахара на этикетке показывал «≈4,6 г свободных сахаров».
+// ── Сахара и клетчатка записи ────────────────────────────────────────────────
+// Источники, от точного к оценке:
+//   1. этикетка (штрихкод, поиск по базе, ручной ввод) или оценка ИИ по фото —
+//      поля sugar и fiber самой записи;
+//   2. справочный состав продукта (carbRef.js): название → профиль на 100 г;
+//   3. категория продукта → усреднённый профиль группы.
 //
-// Возвращают { grams, source }:
-//   'label'    — число взято с этикетки как есть;
-//   'adjusted' — с этикетки, за вычетом натуральных сахаров (лактоза молока,
-//                сахара орехов и овощей): этикетка их не отделяет, ВОЗ не
-//                считает их свободными;
-//   'estimate' — этикетки нет, оценка по типу продукта.
+// Раньше сахар и клетчатку считали «долей от углеводов по слову в названии»,
+// и всё, что не совпало с русским словом, получало долю «прочего»: шоколадный
+// батончик — 5% сахара, ореховая смесь — 4% клетчатки. Отсюда «4,6 г сахара
+// в 168 г Kinder» и «0,2 г клетчатки в 40 г орехов».
+//
+// Профиль описывает продукт на 100 г, а запись — конкретную порцию, которая
+// бывает сухой крупой или варёной, с европейской этикеткой (углеводы без
+// клетчатки) или американской (с ней). Поэтому цифры профиля приводятся к
+// записи так:
+//   • по КАЛОРИЯМ — это переживает и «сухая/варёная» (вода разбавляет всё
+//     одинаково), и «европейская/американская этикетка» (калории те же);
+//   • и ограничиваются УГЛЕВОДАМИ самой записи: сахара и клетчатки не может
+//     быть больше, чем допускают её же углеводы при любом из двух способов их
+//     указывать. Это страховка от промаха профиля: жирное блюдо не получит
+//     клетчатку салатного листа.
 
-// Сахара, которые этикетка показывает вместе с добавленными, а ВОЗ свободными
-// не считает, — г на 100 г продукта. У фруктов и ягод это весь сахар.
-const INTRINSIC_SUGAR_PER100 = {
-  dairy: 5, cheese: 1, nut: 5, legume: 3, veg: 6, grain: 1, pasta: 1,
-  meat: 0.5, poultry: 0.5, fish: 0.5, sea: 0.5, egg: 0.5, fruit: Infinity, berry: Infinity,
+// Калории записи; если их нет — из Б/Ж/У.
+function entryKcal(m) {
+  const k = num(m?.kcal)
+  if (k != null && k > 0) return k
+  const e = 4 * (num(m?.protein) ?? 0) + 4 * (num(m?.carbs) ?? 0) + 9 * (num(m?.fat) ?? 0)
+  return e > 0 ? e : null
+}
+
+// Профиль, который правда описывает углеводы записи. Если углеводов в записи
+// в разы больше, чем бывает у продукта профиля («Курица в соусе терияки» —
+// профиль курицы, а углеводы из соуса и панировки), профиль ничего не знает об
+// их составе — берём профиль смешанного блюда.
+function refForEntry(m, carbs, kcal) {
+  const ref = carbRefFor(m)
+  if (carbs > 0 && kcal > 0 && ref.kcal > 0) {
+    const entryDensity = carbs / kcal
+    const refDensity = (ref.carbs + ref.fiber) / ref.kcal
+    if (entryDensity > 4 * refDensity + 0.01) return carbRefFor({ name: '', cat: 'dish' })
+  }
+  return ref
+}
+
+// Значение профиля (г на 100 г) для этой записи — см. пояснение выше.
+// slack — запас сверху: доля клетчатки у разных продуктов одной группы
+// разнится сильнее, чем доля сахара (шоколад 70% и 85%, разные ореховые смеси).
+function fromRef(ref, per100, carbs, kcal, slack = 1) {
+  if (!(per100 > 0) || !(carbs > 0)) return 0
+  const total = ref.carbs + ref.fiber
+  // Углеводы записи — по-американски, с клетчаткой: нижняя граница.
+  const lo = total > 0 ? (carbs * per100) / total : 0
+  // Углеводы записи — по-европейски, без клетчатки: верхняя граница.
+  const hi = ref.carbs > 0 ? (carbs * per100 * slack) / ref.carbs : lo
+  if (!(kcal > 0) || !(ref.kcal > 0)) return lo
+  const byEnergy = (kcal * per100) / ref.kcal
+  return Math.min(Math.max(byEnergy, lo), Math.max(lo, hi))
+}
+
+// Оценка по профилю: { ref, sugar, fiber, natural } в граммах на эту порцию.
+export function estimateCarbs(m) {
+  const carbs = Math.max(0, num(m?.carbs) ?? 0)
+  const kcal = entryKcal(m)
+  const ref = refForEntry(m, carbs, kcal)
+  const sugar = Math.min(carbs, fromRef(ref, ref.sugar, carbs, kcal))
+  const fiber = fromRef(ref, ref.fiber, carbs, kcal, 1.3)
+  const natural = ref.sugar > 0 ? (sugar * ref.natural) / ref.sugar : 0
+  return { ref, sugar, fiber, natural, kcal }
 }
 
 // Сахар с этикетки: тот же смысл нуля, что в stats.js realSugar — ноль считается
@@ -286,45 +258,81 @@ function massOf(m) {
   return n != null && n > 0 ? n : null
 }
 
+// Свободные сахара записи (ВОЗ: всё добавленное плюс мёд, сиропы, соки; НЕ
+// лактоза молока и не сахара целых плодов, орехов, овощей).
+//
+// Возвращает { grams, total, source }:
+//   total     — все сахара порции;
+//   'label'    — с этикетки (или от ИИ) как есть;
+//   'adjusted' — с этикетки за вычетом натуральных: этикетка их не отделяет;
+//   'estimate' — этикетки нет, оценка по справочному составу.
 export function freeSugarOf(m) {
   const carbs = Math.max(0, num(m?.carbs) ?? 0)
-  const share = freeSugarShare(m)
+  const est = estimateCarbs(m)
   const label = labelSugar(m)
-  if (label == null) return { grams: carbs * share, source: 'estimate' }
-  // Сахара не бывает больше углеводов; если этикетка так говорит — она ошиблась
-  // где-то ещё, и верить больше нечему, чем углеводам.
-  const sugar = carbs > 0 ? Math.min(label, carbs) : label
-  // Сладкое, напитки, соки: весь сахар этикетки — добавленный или свободный.
-  if (share >= 0.8) return { grams: sugar, source: 'label' }
-  const intrinsic = INTRINSIC_SUGAR_PER100[catOf(m)]
-  if (intrinsic == null) {
-    // Группа неизвестна: у упакованной еды сахар на этикетке — почти всегда
-    // добавленный. Это верхняя граница, а не выдумка: больше быть не может.
-    return { grams: sugar, source: 'label' }
+  if (label == null) {
+    return { grams: Math.max(0, est.sugar - est.natural), total: est.sugar, source: 'estimate' }
   }
-  if (intrinsic === Infinity) return { grams: 0, source: 'adjusted' }
+  // Сахара не бывает больше углеводов; если этикетка так говорит — верим
+  // углеводам: больше быть не может.
+  const sugar = carbs > 0 ? Math.min(label, carbs) : label
+  const { ref, kcal } = est
+  if (!(ref.natural > 0) || sugar === 0) return { grams: sugar, total: sugar, source: 'label' }
+  // Сколько натурального сахара в такой порции такого продукта. По весу — для
+  // лактозы в молочном и сахаров в орехах; у фруктов и овощей ещё и по
+  // калориям: сушёное яблоко — это то же яблоко без воды.
   const mass = massOf(m)
-  // Без массы вычесть натуральный сахар не из чего — остаётся оценка по типу,
-  // но не больше того, что на этикетке.
-  if (mass == null) return { grams: Math.min(sugar, carbs * share), source: 'estimate' }
-  return { grams: Math.max(0, sugar - (intrinsic * mass) / 100), source: 'adjusted' }
+  let natural
+  if (mass != null) {
+    natural = (mass * ref.natural) / 100
+    if (ref.plant && kcal > 0) natural = Math.max(natural, (kcal * ref.natural) / ref.kcal)
+  } else if (kcal > 0 && ref.kcal > 0) {
+    natural = (kcal * ref.natural) / ref.kcal
+  } else {
+    natural = ref.sugar > 0 ? (sugar * ref.natural) / ref.sugar : 0
+  }
+  natural = Math.min(sugar, natural)
+  const grams = sugar - natural
+  return { grams, total: sugar, source: natural >= 0.05 ? 'adjusted' : 'label' }
 }
 
+// Клетчатка записи: { grams, source } — 'label' (этикетка или ИИ) или 'estimate'.
 export function fiberOf(m) {
   const label = num(m?.fiber)
   if (label != null && label >= 0) return { grams: label, source: 'label' }
-  const carbs = Math.max(0, num(m?.carbs) ?? 0)
-  return { grams: carbs * fiberRatioOf(m), source: 'estimate' }
+  return { grams: estimateCarbs(m).fiber, source: 'estimate' }
+}
+
+// Доля свободных сахаров в углеводах (0..1). По записи — из расчёта выше; по
+// одному названию — из справочного состава продукта.
+export function freeSugarShare(food) {
+  if (typeof food !== 'string' && num(food?.carbs) > 0) {
+    return Math.min(1, freeSugarOf(food).grams / num(food.carbs))
+  }
+  const ref = carbRefFor(typeof food === 'string' ? { name: food } : food)
+  return ref.carbs > 0 ? Math.min(1, Math.max(0, ref.sugar - ref.natural) / ref.carbs) : 0
+}
+
+// Доля клетчатки относительно углеводов (по-американски, с клетчаткой).
+export function fiberRatioOf(food) {
+  if (typeof food !== 'string' && num(food?.carbs) > 0) {
+    return fiberOf(food).grams / num(food.carbs)
+  }
+  const ref = carbRefFor(typeof food === 'string' ? { name: food } : food)
+  const total = ref.carbs + ref.fiber
+  return total > 0 ? ref.fiber / total : 0
 }
 
 // Источник углеводов для разбивки: sweet / grain / fruit / veg / other.
 export function carbBucket(food) {
   const n = nrm(nameOf(food))
-  if (freeSugarShare(food) >= 0.8) return 'sweet'
+  // Сладкое — где свободные сахара бóльшая часть углеводов (у молочного
+  // шоколада это ~0,75: часть сахара — лактоза).
+  if (freeSugarShare(food) >= 0.6) return 'sweet'
   if (anyOf(n, ['хлеб', 'рис', 'гречк', 'овсян', 'макарон', 'паста', 'спагетти', 'булгур', 'киноа', 'перловк', 'пшен', 'кускус', 'лапш', 'крупа', 'каша', 'батон', 'лаваш', 'картоф', 'картош', 'пюре', 'бутерброд', 'сэндвич', 'пицц', 'бургер', 'блин', 'вареник', 'пельмен'])) return 'grain'
   if (anyOf(n, ['банан', 'яблоко', 'груша', 'апельсин', 'мандарин', 'виноград', 'киви', 'ананас', 'манго', 'персик', 'слив', 'абрикос', 'арбуз', 'дын', 'гранат', 'хурма', 'клубник', 'черник', 'малин', 'ежевик', 'вишн', 'смородин', 'грейпфрут', 'фрукт', 'ягод', 'изюм', 'финик', 'курага', 'чернослив'])) return 'fruit'
   if (anyOf(n, ['чечевиц', 'нут', 'фасол', 'горох', 'брокколи', 'капуст', 'овощ', 'перец', 'морков', 'свекл', 'огурец', 'помидор', 'кабач', 'баклажан', 'грибы', 'салат', 'шпинат'])) return 'veg'
-  const cat = catOf(food)
+  const cat = categoryOf(typeof food === 'string' ? { name: food } : food)
   if (cat === 'sweet' || cat === 'dessert' || cat === 'pastry') return 'sweet'
   if (cat === 'grain' || cat === 'bread' || cat === 'pasta' || cat === 'pizza') return 'grain'
   if (cat === 'fruit' || cat === 'berry') return 'fruit'

@@ -125,6 +125,8 @@ const NAME_RULES = [
   ['drink', [
     'almond milk', 'oat milk', 'soy milk', 'soya milk', 'rice milk', 'iced tea', 'ice tea',
     '=juice', '=juices', '=saft', '=nectar', 'smoothie', 'dr pepper',
+    // es / pt / tr
+    '=zumo', '=jugo', '=suco', 'meyve suyu', '=refresco', 'refrigerante', 'gazoz', '=cafe', 'leche de almendra', 'leite de amendoa',
   ]],
   ['sweet', ['ice cream', '=gelato', '=sorbet', 'frozen yogurt', '=pudding', 'tiramisu', 'cheesecake', 'eiscreme']],
   ['supp', ['=protein', '=whey', 'isolate', 'casein', 'gainer']],
@@ -134,6 +136,8 @@ const NAME_RULES = [
     'choco', 'schoko', '=candy', 'candies', 'bonbon', 'caramel', 'karamell', 'toffee', '=fudge', 'marshmallow',
     'gummy', 'gummies', 'gummi', 'lollipop', 'praline', 'nougat', 'marzipan', 'licorice', 'liquorice', '=jam',
     '=honey', 'syrup', '=sweets', 'nutella',
+    'cikolata', 'caramelo', 'dulce', '=doce', '=doces', 'tatli', '=miel', '=mel', '=bal', 'helado', 'sorvete', 'dondurma',
+    'azucar', 'acucar', '=seker', 'chuche', 'golosina', 'bombom', 'lokum',
     // Бренды, у которых в линейке только сладкое. Название товара со штрихкода
     // нередко вовсе не содержит слова «шоколад»: «Country · Kinder».
     '=kinder', '=milka', 'snickers', '=twix', '=mars', '=bounty', 'kitkat', 'kit kat', 'ferrero', 'raffaello',
@@ -142,42 +146,74 @@ const NAME_RULES = [
     'киндер', 'сникерс', '=твикс', 'баунти', '=милка', '=марс', 'нутелл', 'рафаэлло', 'ферреро', 'тоблерон',
     'альпен гольд', 'харибо', '=орео', 'милки вэй',
   ]],
-  ['sweet', ['cookie', 'biscuit', '=wafer', '=wafers', 'waffle', 'waffel', 'brownie', 'donut', 'doughnut', 'muffin', 'cupcake', '=cake', '=cakes', '=keks', '=kekse', 'kuchen']],
+  ['sweet', ['galleta', 'bolacha', 'biscoito', 'biskuvi', 'kurabiye', 'bizcocho', '=bolo', 'pastel', 'cookie', 'biscuit', '=wafer', '=wafers', 'waffle', 'waffel', 'brownie', 'donut', 'doughnut', 'muffin', 'cupcake', '=cake', '=cakes', '=keks', '=kekse', 'kuchen']],
   ['pastry', ['croissant', 'pastry', 'pastries', 'brioche']],
-  ['cheese', ['cheese', '=kase', 'cheddar', 'mozzarella', 'parmesan', 'parmigiano', '=gouda', '=feta', '=brie', 'camembert', 'emmental', 'halloumi']],
-  ['dairy', ['=milk', '=milch', 'yogurt', 'yoghurt', 'joghurt', 'jogurt', 'kefir', '=skyr', '=quark', '=cream', '=butter', 'buttermilk']],
+  ['cheese', ['cheese', '=kase', '=queso', '=queijo', 'peynir', 'cheddar', 'mozzarella', 'parmesan', 'parmigiano', '=gouda', '=feta', '=brie', 'camembert', 'emmental', 'halloumi']],
+  ['dairy', ['=milk', '=milch', '=leche', '=leite', '=sut', 'yogur', 'iogurte', 'yogurt', 'yoghurt', 'joghurt', 'jogurt', 'kefir', '=skyr', '=quark', '=cream', '=butter', 'buttermilk']],
   ['nut', [
     '=nut', '=nuts', 'nutmix', 'almond', 'cashew', 'peanut', 'pistachio', 'hazelnut', 'walnut', '=pecan', 'pecans',
     'macadamia', 'trail mix', '=mandeln', 'nuss', 'nusse', 'erdnuss', '=seeds', '=chia', 'flaxseed', 'sunflower seed', 'pumpkin seed',
+    'frutos secos', 'almendra', 'amendoa', 'cacahuete', '=mani', 'amendoim', '=nuez', 'nueces', '=nozes', 'castanha', 'avellana',
+    'avela', 'findik', 'ceviz', 'badem', 'fistik', 'kuruyemis', 'pipas',
   ]],
-  ['legume', ['=beans', '=bean', 'lentil', 'chickpea', 'hummus', '=tofu', 'edamame']],
-  ['bread', ['bread', '=brot', '=toast', 'bagel', 'tortilla', 'baguette', 'ciabatta']],
-  ['pasta', ['pasta', 'spaghetti', 'noodle', '=penne', 'macaroni', 'fusilli', 'tagliatelle', 'nudeln']],
-  ['grain', ['=oat', '=oats', 'oatmeal', 'porridge', 'granola', 'muesli', 'musli', 'cereal', '=rice', 'quinoa', 'buckwheat', 'couscous', 'bulgur']],
-  ['poultry', ['chicken', 'turkey', '=hahnchen', '=pute']],
-  ['meat', ['=beef', '=pork', '=ham', 'bacon', 'salami', 'sausage', 'jerky', '=wurst', 'schinken', '=lamb', '=steak']],
-  ['fish', ['salmon', '=tuna', '=fish', 'sardine', 'mackerel', '=cod', 'herring', '=lachs', 'thunfisch']],
+  ['legume', ['=beans', '=bean', 'lentil', 'chickpea', 'hummus', '=tofu', 'edamame', 'lenteja', 'lentilha', 'mercimek', 'garbanzo', 'grao de bico', 'nohut', 'frijol', 'feijao', 'fasulye']],
+  ['bread', ['bread', '=brot', '=pan', '=pao', 'ekmek', '=toast', 'bagel', 'tortilla', 'baguette', 'ciabatta']],
+  ['pasta', ['pasta', 'makarna', 'spaghetti', 'noodle', '=penne', 'macaroni', 'fusilli', 'tagliatelle', 'nudeln']],
+  ['grain', ['arroz', 'pirinc', 'avena', 'aveia', 'yulaf', '=oat', '=oats', 'oatmeal', 'porridge', 'granola', 'muesli', 'musli', 'cereal', '=rice', 'quinoa', 'buckwheat', 'couscous', 'bulgur']],
+  ['poultry', ['chicken', 'turkey', '=hahnchen', '=pute', 'pollo', 'frango', 'tavuk', '=pavo', '=peru']],
+  ['meat', ['carne', '=et', 'jamon', 'presunto', 'cerdo', 'ternera', 'sucuk', '=beef', '=pork', '=ham', 'bacon', 'salami', 'sausage', 'jerky', '=wurst', 'schinken', '=lamb', '=steak']],
+  ['fish', ['pescado', 'peixe', 'balik', '=atun', '=atum', 'salmon', '=tuna', '=fish', 'sardine', 'mackerel', '=cod', 'herring', '=lachs', 'thunfisch']],
   ['sea', ['shrimp', 'prawn', 'mussel', 'squid', 'seafood']],
-  ['egg', ['=egg', '=eggs', '=eier']],
+  ['egg', ['=egg', '=eggs', '=eier', '=huevo', '=huevos', '=ovo', '=ovos', '=yumurta']],
   ['sauce', ['sauce', 'ketchup', '=mayo', 'mayonnaise', 'mustard', 'dressing', 'pesto', 'salsa']],
   ['oil', ['=oil', 'olive oil', '=ol']],
   ['drink', [
     '=soda', '=cola', '=coca', 'lemonade', 'limonade', '=water', '=wasser', '=tea', 'coffee',
     'kaffee', '=beer', '=bier', '=wine', '=wein', '=drink', 'pepsi', 'fanta', 'sprite',
+    '=agua', '=cerveza', '=cerveja', '=bira', '=vino', '=vinho', '=sarap', '=cay', '=te', '=cha', '=kahve',
   ]],
   ['berry', ['berry', 'berries', 'beeren', 'strawberr', 'blueberr', 'raspberr', 'cranberr']],
-  ['fruit', ['=apple', '=apples', 'banana', '=orange', '=oranges', 'mango', 'pineapple', 'raisin', '=fruit', '=fruits', '=apfel', '=obst']],
-  ['veg', ['vegetable', 'broccoli', 'spinach', 'carrot', 'tomato', 'potato', 'cucumber', 'bell pepper', 'mushroom', 'gemuse', 'kartoffel']],
+  ['fruit', ['manzana', '=maca', '=elma', 'platano', '=muz', 'naranja', 'laranja', 'portakal', '=fruta', '=frutas', 'meyve', 'uzum', '=uva', '=uvas', '=apple', '=apples', 'banana', '=orange', '=oranges', 'mango', 'pineapple', 'raisin', '=fruit', '=fruits', '=apfel', '=obst']],
+  ['veg', ['verdura', 'sebze', 'patata', 'patates', 'tomate', 'domates', 'zanahoria', 'cenoura', 'havuc', 'brokkoli', 'vegetable', 'broccoli', 'spinach', 'carrot', 'tomato', 'potato', 'cucumber', 'bell pepper', 'mushroom', 'gemuse', 'kartoffel']],
 ]
 
-// Нижний регистр, ё → е, без диакритики: «Müsli» и «Musli», «Käse» и «Kase»
-// должны совпасть с одной основой.
-const fold = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').normalize('NFD').replace(/\p{M}/gu, '')
+// Нижний регистр, ё → е, без диакритики у латиницы: «Müsli» и «Musli», «Käse»
+// и «Kase» должны совпасть с одной основой. Кириллицу не трогаем: разложение
+// превратило бы «й» в «и», и «йогурт» перестал бы находиться.
+export const foldName = (s) => String(s || '')
+  .toLowerCase()
+  .replace(/ё/g, 'е')
+  // Турецкая «ı» не раскладывается на «i» с диакритикой — заменяем отдельно.
+  .replace(/ı/g, 'i')
+  .replace(/[\u00c0-\u024f]/g, (c) => c.normalize('NFD').replace(/\p{M}/gu, ''))
 
-function hit(words, phrase, stem) {
+// Название → слова и фраза для сопоставления с основами. Фраза — слова через
+// один пробел с пробелами по краям: «Kit-Kat» и «kit  kat» одинаковы.
+export function nameTokens(name) {
+  const words = foldName(name).split(/[^\p{L}\p{N}&%]+/u).filter(Boolean)
+  return { words, phrase: ' ' + words.join(' ') + ' ' }
+}
+
+// Правила основы — общие для категорий (здесь) и справочника состава
+// (carbRef.js):
+//   'choco'       — начало слова;
+//   '=nut'        — слово целиком;
+//   'ice cream'   — фраза с начала слова («ice tea» не находится в «price tea»);
+//   'йогурт+клубн' — все части есть в названии, в любом порядке.
+// Основы-фразы неизменны — разбираем каждую один раз.
+const PHRASES = new Map()
+function phraseOf(stem) {
+  let p = PHRASES.get(stem)
+  if (p === undefined) { p = ' ' + nameTokens(stem).words.join(' '); PHRASES.set(stem, p) }
+  return p
+}
+
+export function stemHit({ words, phrase }, stem) {
+  if (stem.includes('+')) return stem.split('+').every((part) => stemHit({ words, phrase }, part))
   if (stem.startsWith('=')) return words.includes(stem.slice(1))
-  // Фраза — с начала слова: «ice tea» не должен находиться в «price tea».
-  if (stem.includes(' ') || /[^\p{L}\p{N}]/u.test(stem)) return phrase.includes(' ' + stem)
+  // Фраза разбирается так же, как название: «по-деревенски» и «хот-дог»
+  // ищутся как «по деревенски» и «хот дог».
+  if (stem.includes(' ') || /[^\p{L}\p{N}&%]/u.test(stem)) return phrase.includes(phraseOf(stem))
   return words.some((w) => w.startsWith(stem))
 }
 
@@ -187,15 +223,12 @@ const NAME_CACHE_LIMIT = 4000
 export function categoryFromName(name) {
   const key = String(name || '')
   if (nameCache.has(key)) return nameCache.get(key)
-  const folded = fold(key)
-  const words = folded.split(/[^\p{L}\p{N}&]+/u).filter(Boolean)
-  // Фраза — слова через один пробел: «Kit-Kat» и «kit  kat» одинаковы.
-  const phrase = ' ' + folded.split(/[^\p{L}\p{N}&]+/u).filter(Boolean).join(' ') + ' '
+  const tokens = nameTokens(key)
   let found = null
-  if (words.length) {
+  if (tokens.words.length) {
     outer: for (const [cat, stems] of NAME_RULES) {
       for (const s of stems) {
-        if (hit(words, phrase, s)) { found = cat; break outer }
+        if (stemHit(tokens, s)) { found = cat; break outer }
       }
     }
   }

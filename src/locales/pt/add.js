@@ -118,6 +118,7 @@ export default {
     fatField: 'Gorduras, g',
     sugarField: 'dos quais açúcares, g',
     satFatField: 'das quais saturadas, g',
+    fiberField: 'fibra, g',
     caffeineField: 'Cafeína, mg',
     checkWarn: 'Confira: {w}',
     saveAdd: 'Salvar e adicionar {amount}',

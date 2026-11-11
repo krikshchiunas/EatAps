@@ -216,8 +216,10 @@ test('сахар: реальное поле имеет приоритет, ин�
   assert.equal(realSugar({ sugar: 0 }), null) // пустой ручной ввод (0) — не «указано»
   assert.equal(realSugar({}), null)
   assert.equal(mealSugar({ sugar: 20, carbs: 100, name: 'что-то' }), 20) // берём реальное
-  assert.equal(mealSugar({ carbs: 100, name: 'Сахар' }), 100) // оценка: freeSugarShare=1
-  assert.ok(Math.abs(mealSugar({ carbs: 100, name: 'Рис' }) - 5) < 0.01) // оценка: 0.05*100
+  assert.equal(mealSugar({ carbs: 100, name: 'Сахар' }), 100) // оценка: сахар — весь сахар
+  // Оценка по справочному составу: в рисе сахара почти нет (раньше было «5%
+  // от углеводов» у всего, что не узнано по названию).
+  assert.ok(mealSugar({ carbs: 100, name: 'Рис' }) < 1)
 })
 
 test('флаг sugarEstimated: true если хоть один продукт без реального сахара', () => {

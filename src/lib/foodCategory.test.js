@@ -7,7 +7,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { categoryFromOff, categoryFromName, isDrinkTag } from './foodCategory.js'
-import { freeSugarOf, fiberOf, sumQuality, freeSugarShare } from './nutrition.js'
+import { freeSugarOf, fiberOf, sumQuality } from './nutrition.js'
 import { classifyComplexCarb, estimateProteinQuality, estimateSaturatedFat } from './nutritionClassification.js'
 import { microsForEntry } from './foodMicros.js'
 import { looksLikeDrink, lookupBarcode, inferCat, scale } from './foods.js'
@@ -117,15 +117,16 @@ const kinder = {
   protein: 14.4, carbs: 92.2, fat: 56.8, satFat: 36.8, sugar: 69.9, sugarSrc: 'measured',
 }
 
-test('Kinder: свободные сахара — с этикетки, а не 5% углеводов', () => {
+test('Kinder: сахара — с этикетки, свободные — без лактозы молочной начинки', () => {
   const s = freeSugarOf(kinder)
-  assert.equal(s.source, 'label')
-  assert.equal(s.grams, 69.9)
-  // Старая запись без сахара на этикетке — оценка по типу «сладкое», а не «прочее».
+  assert.equal(s.total, 69.9, 'все сахара — ровно с этикетки')
+  assert.equal(s.source, 'adjusted')
+  assert.ok(s.grams > 55 && s.grams < 69.9, `свободных ${s.grams}`)
+  // Старая запись без сахара на этикетке — оценка по составу шоколадного
+  // батончика, а не 5% «прочего».
   const est = freeSugarOf({ ...kinder, sugar: undefined, sugarSrc: undefined })
   assert.equal(est.source, 'estimate')
-  assert.ok(est.grams > 70, `оценка ${est.grams}`)
-  assert.ok(freeSugarShare(kinder) >= 0.8)
+  assert.ok(est.total > 60 && est.total <= 92.2, `оценка ${est.total}`)
 })
 
 test('Kinder: сложных углеводов ноль уверенно, а не «состав неясен»', () => {
@@ -138,30 +139,36 @@ test('Kinder: витамины и минералы — по группе «сл�
   assert.equal(microsForEntry(kinder).confidence, 'category')
 })
 
-test('орехи: сахар орехов не свободный, клетчатка — по типу', () => {
-  const nuts = { name: "Nut-Mix Natural · Trader Joe's", unit: 'г', grams: 40, carbs: 8.4, protein: 7.6, fat: 23.6 }
-  assert.equal(freeSugarOf(nuts).grams, 0)
-  assert.equal(fiberOf(nuts).source, 'estimate')
-  assert.ok(fiberOf(nuts).grams > 3, 'у орехов клетчатки много')
+test('орехи: 40 г — около 3 г клетчатки, сахар натуральный', () => {
+  // Ровно та запись, что была на экране: старая, в «мл», без клетчатки.
+  const nuts = { name: "Nut-Mix Natural · Trader Joe's", unit: 'мл', grams: 40, kcal: 263, carbs: 4, protein: 7.6, fat: 23.6 }
+  const s = freeSugarOf(nuts)
+  assert.equal(s.grams, 0, 'сахар орехов не свободный')
+  const f = fiberOf(nuts)
+  assert.equal(f.source, 'estimate')
+  assert.ok(f.grams >= 2.5 && f.grams <= 4, `клетчатка ${f.grams}`)
   // С этикетки — как есть.
   assert.deepEqual(fiberOf({ ...nuts, fiber: 3.2 }), { grams: 3.2, source: 'label' })
-  // Натуральный сахар орехов (≈5 г на 100 г) вычитается из сахара этикетки.
+  // Сладкие орехи: натуральный сахар орехов (≈4,5 г на 100 г) вычитается.
   const sweetened = freeSugarOf({ ...nuts, sugar: 6, sugarSrc: 'measured' })
   assert.equal(sweetened.source, 'adjusted')
-  assert.equal(sweetened.grams, 4)
+  assert.ok(sweetened.grams > 1.5 && sweetened.grams < 4, `свободных ${sweetened.grams}`)
   assert.equal(microsForEntry(nuts).confidence, 'category')
 })
 
 test('йогурт: лактоза из сахара этикетки вычитается, фрукт — весь натуральный', () => {
   const y = freeSugarOf({ name: 'Йогурт клубничный', unit: 'г', grams: 150, carbs: 18, sugar: 15, sugarSrc: 'measured' })
   assert.equal(y.source, 'adjusted')
-  assert.equal(y.grams, 7.5) // 15 − 5 г/100 г × 150 г
+  assert.ok(Math.abs(y.grams - (15 - 4.5 * 1.5)) < 0.01, `свободных ${y.grams}`)
   assert.equal(freeSugarOf({ name: 'Яблоко', unit: 'г', grams: 150, carbs: 20, sugar: 15, sugarSrc: 'measured' }).grams, 0)
+  // Сушёное яблоко — то же яблоко без воды: его сахар тоже натуральный.
+  assert.equal(freeSugarOf({ name: 'Яблоко сушёное', unit: 'г', grams: 50, kcal: 122, carbs: 30, sugar: 25, sugarSrc: 'measured' }).grams, 0)
 })
 
 test('сахара этикетки не бывает больше углеводов', () => {
   const s = freeSugarOf({ name: 'Конфеты', carbs: 10, sugar: 12, sugarSrc: 'measured' })
-  assert.equal(s.grams, 10)
+  assert.equal(s.total, 10)
+  assert.ok(s.grams <= 10)
 })
 
 test('мюсли: сахар этикетки не считается сложными углеводами', () => {
@@ -173,6 +180,7 @@ test('мюсли: сахар этикетки не считается сложн
 
 test('экран дня тоже видит сахар с этикетки', () => {
   const q = sumQuality([kinder])
-  assert.equal(q.freeSugar, 70)
+  assert.equal(q.freeSugar, Math.round(freeSugarOf(kinder).grams))
+  assert.ok(q.freeSugar > 55)
   assert.equal(q.buckets.sweet, 92.2)
 })

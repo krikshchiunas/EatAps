@@ -118,6 +118,7 @@ export default {
     fatField: 'Yağ, g',
     sugarField: 'bunun şekeri, g',
     satFatField: 'bunun doymuş yağı, g',
+    fiberField: 'lif, g',
     caffeineField: 'Kafein, mg',
     checkWarn: 'Kontrol et: {w}',
     saveAdd: 'Kaydet ve {amount} ekle',

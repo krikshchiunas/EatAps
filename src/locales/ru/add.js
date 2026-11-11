@@ -119,6 +119,7 @@ export default {
     fatField: 'Жиры, г',
     sugarField: 'из них сахар, г',
     satFatField: 'из них насыщенные, г',
+    fiberField: 'клетчатка, г',
     caffeineField: 'Кофеин, мг',
     checkWarn: 'Проверьте: {w}',
     saveAdd: 'Сохранить и добавить {amount}',
