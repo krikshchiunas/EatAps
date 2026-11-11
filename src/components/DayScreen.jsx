@@ -1109,7 +1109,7 @@ function SwipeableFoodItem({ m, date, removeFood, setClipboard, onEdit, onInfo }
     startRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId, base: openRef.current, moved: false }
     timerRef.current = setTimeout(() => {
       navigator.vibrate?.(40)
-      setClipboard({ type: m.type, name: m.name, emoji: m.emoji, cat: m.cat, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat, sugar: m.sugar, satFat: m.satFat })
+      setClipboard({ type: m.type, name: m.name, emoji: m.emoji, cat: m.cat, grams: m.grams, unit: m.unit, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat, sugar: m.sugar, sugarSrc: m.sugarSrc, satFat: m.satFat, fiber: m.fiber })
       startRef.current = null
       settle(openRef.current)
     }, 600)
@@ -1242,12 +1242,32 @@ function EditFoodSheet({ food, onSave, onClose }) {
         ) : (
           <p className="muted" style={{ fontSize: 14, marginBottom: 18 }}>{t('day.noPortion')}</p>
         )}
-        <button className="btn" onClick={() => onSave(food.grams ? { ...food, grams: g, kcal: Math.round(food.kcal * scale), protein: +(food.protein * scale).toFixed(1), carbs: +(food.carbs * scale).toFixed(1), fat: +(food.fat * scale).toFixed(1) } : food)}>
+        <button className="btn" onClick={() => onSave(food.grams ? rescaleEntry(food, g, scale) : food)}>
           {t('common.save')}
         </button>
       </div>
     </div>
   )
+}
+
+// Новая порция той же еды. Сахар, насыщенные жиры и клетчатка с этикетки —
+// тоже на порцию, и меняются вместе с ней: раньше после правки граммов они
+// оставались от старой порции, и в половине батончика оказывалось столько же
+// сахара, сколько в целом.
+function rescaleEntry(food, grams, scale) {
+  const out = {
+    ...food,
+    grams,
+    kcal: Math.round(food.kcal * scale),
+    protein: +(food.protein * scale).toFixed(1),
+    carbs: +(food.carbs * scale).toFixed(1),
+    fat: +(food.fat * scale).toFixed(1),
+  }
+  for (const key of ['sugar', 'satFat', 'fiber']) {
+    const v = Number(food[key])
+    if (food[key] != null && Number.isFinite(v)) out[key] = +(v * scale).toFixed(1)
+  }
+  return out
 }
 
 

@@ -51,6 +51,7 @@ export function foodSnapshot(food) {
   if (food.type) snap.type = food.type
   if (Number.isFinite(Number(food.sugar))) snap.sugar = r1(food.sugar)
   if (Number.isFinite(Number(food.satFat))) snap.satFat = r1(food.satFat)
+  if (Number.isFinite(Number(food.fiber))) snap.fiber = r1(food.fiber)
   if (food.barcode) snap.barcode = food.barcode
   return snap
 }
@@ -506,6 +507,7 @@ export function toPer100(entry) {
   if (entry.cat) out.cat = entry.cat
   if (Number.isFinite(Number(entry.sugar))) out.sugar = r1(Number(entry.sugar) * k)
   if (Number.isFinite(Number(entry.satFat))) out.satFat = r1(Number(entry.satFat) * k)
+  if (Number.isFinite(Number(entry.fiber))) out.fiber = r1(Number(entry.fiber) * k)
   return out
 }
 
@@ -530,6 +532,7 @@ export function scaleSnapshot(snap, grams) {
   }
   if (Number.isFinite(Number(snap.sugar))) out.sugar = r1(Number(snap.sugar) * k)
   if (Number.isFinite(Number(snap.satFat))) out.satFat = r1(Number(snap.satFat) * k)
+  if (Number.isFinite(Number(snap.fiber))) out.fiber = r1(Number(snap.fiber) * k)
   return out
 }
 

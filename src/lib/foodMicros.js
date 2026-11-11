@@ -34,6 +34,8 @@
 // экране это названо ориентиром, а не медицинским показателем.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { categoryFromName } from './foodCategory.js'
+
 const nrm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е')
 
 // Слова названия. Разбиваем по всему, что не буква и не цифра: «Гречка,
@@ -669,7 +671,10 @@ function matchProfile(food) {
       }
     }
   }
-  const cat = food?.cat
+  // Категория: явная (каталог, теги Open Food Facts), иначе — по иноязычному
+  // названию или бренду. Товар со штрихкода зовут «Country · Kinder», и без
+  // этого шага его витамины не считались вовсе.
+  const cat = food?.cat || categoryFromName(food?.name)
   if (cat && BY_CAT[cat]) return Object.freeze({ id: 'cat:' + cat, per100: BY_CAT[cat], confidence: 'category' })
   return null
 }

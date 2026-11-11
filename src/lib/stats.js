@@ -99,7 +99,7 @@ export function realSugar(m) {
 // Сахар приёма: берём реальное поле, если оно есть, иначе ОЦЕНКА из углеводов.
 export function mealSugar(m) {
   const real = realSugar(m)
-  return real != null ? real : safeNum(m?.carbs) * freeSugarShare(m?.name)
+  return real != null ? real : safeNum(m?.carbs) * freeSugarShare(m)
 }
 
 // Итоги дня по всем нутриентам. Отсутствующие поля считаем нулём (неполные данные).

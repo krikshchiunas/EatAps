@@ -4,6 +4,7 @@ import { fold } from './search/normalize.js'
 import { t, fmtNum, getLang, SOURCE_LANG } from './i18n.js'
 import { foodName } from './foodNames.js'
 import { catalogId } from './catalog.js'
+import { categoryFromOff, categoryFromName, isDrinkTag } from './foodCategory.js'
 // Русские названия продуктов — в словаре по id (src/locales/ru/data/foods.js),
 // здесь только id и цифры: название хранится один раз, а не дважды.
 import ruFoods from '../locales/ru/data/foods.js'
@@ -723,6 +724,7 @@ export function scale(food, grams) {
     out.sugarSrc = food.sugarSrc || 'measured'
   }
   if (food.satFat != null) out.satFat = +(food.satFat * k).toFixed(1)
+  if (food.fiber != null) out.fiber = +(food.fiber * k).toFixed(1)
   return out
 }
 
@@ -1124,7 +1126,9 @@ export function inferCat(name) {
   for (const [cat, stems] of CAT_HINTS) {
     if (stems.some((stem) => words.some((w) => w.startsWith(stem)))) return cat
   }
-  return null
+  // Латинское название с полки: «Nut-Mix Natural · Trader Joe's» — горсть, а не
+  // «порция / половина / двойная».
+  return categoryFromName(name)
 }
 
 export function getPortions(food) {
@@ -1173,16 +1177,34 @@ export function searchIngredients(query) {
 
 const OFF_FIELDS = [
   'product_name', 'product_name_ru', 'generic_name', 'brands', 'quantity',
-  'product_quantity', 'serving_size', 'serving_quantity', 'nutriments', 'categories_tags',
+  'product_quantity', 'product_quantity_unit', 'serving_size', 'serving_quantity', 'nutriments', 'categories_tags',
   'image_front_url', 'image_front_small_url', 'image_url', 'image_small_url',
 ].join(',')
 
-const DRINK_TAGS = /(beverages|boissons|drinks|напитки|waters|juices|sodas|milks)/i
-const VOLUME_RE = /\d\s*(ml|мл|cl|l\b|л\b|liter|litre|литр)/i
+// Объём и масса в строке количества с упаковки: «330 ml», «1 л», «200 g»,
+// «16 oz (454 g)». Граница слова — не \b: для кириллицы он не работает, и
+// «1 л» раньше не узнавался вовсе.
+const VOLUME_RE = /\d\s*(ml|мл|cl|dl|l|л|liter|litre|литр|fl\.?\s*oz)(?![a-zа-я])/i
+const WEIGHT_RE = /\d\s*(g|gr|kg|mg|г|кг|oz|lb|lbs)(?![a-zа-я])/i
+const FL_OZ_RE = /fl\.?\s*oz/gi
 
-function looksLikeDrink(p) {
-  if ((p.categories_tags || []).some((t) => DRINK_TAGS.test(t))) return true
-  return VOLUME_RE.test(p.quantity || '') || VOLUME_RE.test(p.serving_size || '')
+// Напиток ли это. Порядок — от прямого к косвенному:
+//   1. единица количества из базы (g или ml) — это прямой ответ;
+//   2. строка количества: «330 ml» или «200 g»;
+//   3. категории. Раньше они шли первыми и искали подстроку «beverages» — а
+//      она есть в «plant-based-foods-and-beverages», которым база помечает
+//      ВСЁ растительное. Орехи, крупы и хлеб со штрихкода записывались в
+//      миллилитрах, со стаканчиком вместо иконки.
+export function looksLikeDrink(p) {
+  const unit = String(p?.product_quantity_unit || '').trim().toLowerCase()
+  if (unit === 'ml' || unit === 'cl' || unit === 'l') return true
+  if (unit === 'g' || unit === 'kg') return false
+  const q = String(p?.quantity || '')
+  const vol = VOLUME_RE.test(q)
+  const wt = WEIGHT_RE.test(q.replace(FL_OZ_RE, ''))
+  if (vol !== wt) return vol
+  if ((p?.categories_tags || []).some(isDrinkTag)) return true
+  return VOLUME_RE.test(String(p?.serving_size || ''))
 }
 
 // Значение на 100 г/мл. Если база знает только «за порцию», пересчитываем —
@@ -1254,6 +1276,13 @@ const posNum = (v, max) => {
   return Number.isFinite(n) && n > 0 && n <= max ? n : null
 }
 
+// Иконка товара из базы: по категории, если она известна. Молоко остаётся
+// молоком, а не безликим стаканчиком; пачка без категории — тележкой, как раньше.
+function offEmoji(cat, drink) {
+  if (cat && cat !== 'drink' && CAT_EMOJI[cat]) return CAT_EMOJI[cat]
+  return drink ? '🥤' : '🛒'
+}
+
 // Поиск продукта по считанному коду.
 //
 // Возвращает:
@@ -1302,15 +1331,17 @@ export async function lookupBarcode(code, signal) {
   if (serving) portions.push({ label: 'порция', grams: Math.round(serving) })
   if (pack && pack !== serving) portions.push({ label: 'упаковка', grams: Math.round(pack) })
 
-  // cat намеренно не ставим — как и у продуктов из поиска по той же базе.
-  // Во-первых, классификация питательности (nutritionClassification) читает
-  // `food.cat || inferCategory(food)`: выдуманная категория «блюдо» перекрыла бы
-  // разбор по названию, и сканированное молоко перестало бы считаться молочным.
-  // Во-вторых, подсказки порций для «блюда» — тарелка на 350 г — для
-  // произвольной пачки с полки бессмысленны.
+  // Категория — из таксономии самой базы (categories_tags), а не выдуманная.
+  // Без неё вся классификация питательности работала по одному названию, а
+  // название с полки — это «Country · Kinder»: шоколад получал 5% сахара, а
+  // витамины «не удалось отнести ни к одной группе». «Блюдо» отсюда не
+  // приходит никогда: оно перекрыло бы точный разбор по названию, а порции
+  // «тарелка 350 г» для пачки с полки бессмысленны. Нет подходящего тега —
+  // нет и категории, как раньше.
+  const cat = categoryFromOff(product.categories_tags)
   const food = {
     name,
-    emoji: drink ? '🥤' : '🛒',
+    emoji: offEmoji(cat, drink),
     unit,
     kcal: Math.round(kcal),
     // null, а не ноль: см. пояснение в searchOpenFoodFacts ниже.
@@ -1321,6 +1352,7 @@ export async function lookupBarcode(code, signal) {
     barcode: code,
     portions,
   }
+  if (cat) food.cat = cat
   // Фото упаковки. База отдаёт лицевую сторону в нескольких размерах и на
   // разных языках (на русском поддомене — сразу русскую этикетку, если она
   // залита). Поля может не быть вовсе — тогда ключа photo просто нет.
@@ -1331,6 +1363,8 @@ export async function lookupBarcode(code, signal) {
   if (sugar != null) food.sugar = +(+sugar).toFixed(1)
   const satFat = per100(n, 'saturated-fat', serving)
   if (satFat != null) food.satFat = +(+satFat).toFixed(1)
+  const fiber = per100(n, 'fiber', serving)
+  if (fiber != null) food.fiber = +(+fiber).toFixed(1)
 
   // Сколько подставить в поле количества. Порция с упаковки — лучший ответ;
   // маленькую пачку человек обычно съедает целиком; иначе просто круглое число,
@@ -1345,7 +1379,7 @@ export async function searchOpenFoodFacts(query, signal) {
     'https://ru.openfoodfacts.org/cgi/search.pl?search_terms=' +
     encodeURIComponent(query) +
     '&search_simple=1&action=process&json=1&page_size=25' +
-    '&fields=product_name,product_name_ru,brands,nutriments'
+    '&fields=product_name,product_name_ru,brands,nutriments,categories_tags'
   const res = await fetch(url, { signal })
   if (!res.ok) throw new Error('off_http_' + res.status)
   const data = await res.json()
@@ -1367,15 +1401,23 @@ export async function searchOpenFoodFacts(query, signal) {
       // как измеренный факт: человек добавлял продукт и получал в дневнике
       // честный на вид ноль белка. Не знаем — так и говорим.
       const macro = (v) => (v == null || !Number.isFinite(+v) ? null : +(+v).toFixed(1))
-      return {
+      const cat = categoryFromOff(p.categories_tags)
+      const food = {
         name: label,
         kcal: Math.round(kcal),
         protein: macro(n.proteins_100g),
         carbs: macro(n.carbohydrates_100g),
         fat: macro(n.fat_100g),
-        emoji: '🛒',
+        emoji: offEmoji(cat, false),
         source: 'off',
       }
+      if (cat) food.cat = cat
+      // То же, что у штрихкода: цифры с этикетки важнее оценки по типу.
+      for (const [key, field] of [['sugar', 'sugars_100g'], ['satFat', 'saturated-fat_100g'], ['fiber', 'fiber_100g']]) {
+        const v = macro(n[field])
+        if (v != null) food[key] = v
+      }
+      return food
     })
     .filter((f) => f && f.kcal > 0 && f.kcal < 1000)
     .slice(0, 20)

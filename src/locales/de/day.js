@@ -170,6 +170,7 @@ export default {
     freeSugar: 'Freier Zucker',
     allSugar: 'fast alles Zucker',
     wholeSugar: 'Zucker aus dem ganzen Lebensmittel, kein freier Zucker',
+    ofLabelSugar: 'von {n} g Zucker laut Etikett, der Rest ist natürlich',
     fiber: 'Ballaststoffe',
     goodSource: 'gute Quelle',
     noCarbs: 'Diese Portion enthält keine Kohlenhydrate.',

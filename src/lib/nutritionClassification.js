@@ -12,6 +12,8 @@
 // Держим таблицы здесь, а не в компонентах — UI только показывает результат.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { categoryFromName } from './foodCategory.js'
+
 const nrm = (s) => (s || '').toLowerCase().replace(/ё/g, 'е')
 const anyOf = (n, ws) => ws.some((w) => n.includes(w))
 
@@ -34,13 +36,19 @@ const NAME_CATEGORY_WORDS = [
   [['протеин', 'whey', 'гейнер', 'изолят'], 'supp'],
 ]
 
-function inferCategory(food) {
+// Русские основы проверяются первыми — это язык каталога. Если они молчат,
+// пробуем иноязычные слова и бренды: товар со штрихкода называется
+// «Country · Kinder», и без этого шага он не относился ни к чему.
+export function inferCategory(food) {
   const n = nrm(food?.name)
   for (const [words, cat] of NAME_CATEGORY_WORDS) {
     if (anyOf(n, words)) return cat
   }
-  return null
+  return categoryFromName(food?.name)
 }
+
+// Категория записи: явная (каталог, теги Open Food Facts) → по названию.
+export const categoryOf = (food) => food?.cat || inferCategory(food)
 
 // ── Насыщенные жиры ──────────────────────────────────────────────────────────
 // Доля жира продукта, приходящаяся на насыщенные жиры — по категории (грубая,
@@ -53,6 +61,8 @@ const SAT_FAT_RATIO_BY_CAT = {
   legume: 0.15, grain: 0.18, pasta: 0.30, pizza: 0.45, asian: 0.25,
   mexican: 0.35, fastfood: 0.42, mcdonalds: 0.42, salad: 0.30, soups: 0.35,
   hot: 0.35, caucasus: 0.35, breakfast: 0.35,
+  // Чипсы, крекеры, попкорн: жарят на подсолнечном и пальмовом маслах.
+  snack: 0.30,
 }
 
 // Именные переопределения (сильнее категории — но всё равно оценка, не измерение).
@@ -69,7 +79,7 @@ function satFatRatio(food) {
   for (const [words, ratio] of SAT_FAT_NAME_OVERRIDES) {
     if (anyOf(n, words)) return ratio
   }
-  const byCat = SAT_FAT_RATIO_BY_CAT[food?.cat || inferCategory(food)]
+  const byCat = SAT_FAT_RATIO_BY_CAT[categoryOf(food)]
   if (byCat != null) return byCat
   return null
 }
@@ -103,7 +113,12 @@ const COMPLEX_CARB_ALLOW_WORDS = [
 
 // Явно НЕ считаем сложными углеводами, даже если название пересекается с чем-то
 // из allow-list (напр. «печенье овсяное» — это не овсянка).
-const COMPLEX_CARB_DENY_CATS = new Set(['sweet', 'dessert', 'drink', 'pastry'])
+const COMPLEX_CARB_DENY_CATS = new Set(['sweet', 'dessert', 'drink', 'pastry', 'snack'])
+// Группы, где углеводы — это лактоза, сахара плода или клетчатка, а крахмала
+// почти нет. Ответ «сложных здесь ноль» для них известен, а не «состав неясен».
+const COMPLEX_CARB_NONE_CATS = new Set([
+  'dairy', 'cheese', 'meat', 'poultry', 'fish', 'sea', 'egg', 'oil', 'nut', 'fruit', 'berry', 'supp',
+])
 const COMPLEX_CARB_DENY_WORDS = [
   'сахар', 'мед', 'сироп', 'варенье', 'джем', 'повидло', 'сгущен', 'конфет',
   'шоколад', 'печенье', 'пряник', 'зефир', 'халва', 'мармелад', 'вафл',
@@ -115,16 +130,35 @@ export function classifyComplexCarb(food) {
   const carbs = Number(food?.carbs)
   if (!Number.isFinite(carbs) || carbs <= 0) return { share: 0, confidence: 'estimated' }
   const n = nrm(food?.name)
-  if (COMPLEX_CARB_DENY_CATS.has(food?.cat) || anyOf(n, COMPLEX_CARB_DENY_WORDS)) {
+  const cat = food?.cat
+  if (COMPLEX_CARB_DENY_CATS.has(cat) || anyOf(n, COMPLEX_CARB_DENY_WORDS)) {
     return { share: 0, confidence: 'estimated' }
   }
-  if (COMPLEX_CARB_ALLOW_CATS.has(food?.cat) || anyOf(n, COMPLEX_CARB_ALLOW_WORDS)) {
-    return { share: 1, confidence: 'estimated' }
+  if (COMPLEX_CARB_ALLOW_CATS.has(cat) || anyOf(n, COMPLEX_CARB_ALLOW_WORDS)) {
+    return { share: starchShare(food, carbs), confidence: 'estimated' }
+  }
+  // Русские слова промолчали — пробуем иноязычное название: у товара со
+  // штрихкода оно часто единственное, что есть.
+  const guessed = cat || categoryFromName(food?.name)
+  if (COMPLEX_CARB_DENY_CATS.has(guessed) || COMPLEX_CARB_NONE_CATS.has(guessed)) {
+    return { share: 0, confidence: 'estimated' }
+  }
+  if (COMPLEX_CARB_ALLOW_CATS.has(guessed)) {
+    return { share: starchShare(food, carbs), confidence: 'estimated' }
   }
   // Смешанные блюда (пельмени, пицца, бургеры и т.п.) и всё остальное без явного
   // совпадения — не относим к «сложным углеводам» по умолчанию (низкая уверенность
   // в том, что это преимущественно цельный источник).
   return { share: 0, confidence: 'unknown' }
+}
+
+// Крупа или бобовые — но сахар с этикетки сложным углеводом не бывает. Мюсли с
+// 20 г сахара на 60 г углеводов раньше целиком шли в «сложные», и вместе со
+// свободными сахарами разбор порции давал больше углеводов, чем в ней есть.
+function starchShare(food, carbs) {
+  const sugar = Number(food?.sugar)
+  if (!Number.isFinite(sugar) || sugar <= 0) return 1
+  return Math.max(0, Math.min(1, (carbs - sugar) / carbs))
 }
 
 // ── Качество источника белка: DIAAS ──────────────────────────────────────────
@@ -168,6 +202,7 @@ const PROTEIN_DIAAS_BY_CAT = {
   pizza: 0.85, asian: 0.85, mexican: 0.82, fastfood: 0.88, mcdonalds: 0.88,
   caucasus: 0.92,
   pastry: 0.45, sweet: 0.45, dessert: 0.60, drink: 0.60, sauce: 0.45, oil: 0.30,
+  snack: 0.50,      // картофельные чипсы выше, пшеничные крекеры ниже
 }
 
 // Именные уточнения — сильнее категории. Здесь то, где справочное значение
@@ -208,7 +243,7 @@ export function estimateProteinQuality(food) {
   for (const [words, diaas] of PROTEIN_DIAAS_NAME_OVERRIDES) {
     if (anyOf(n, words)) return { diaas, confidence: 'estimated' }
   }
-  const byCat = PROTEIN_DIAAS_BY_CAT[food?.cat || inferCategory(food)]
+  const byCat = PROTEIN_DIAAS_BY_CAT[categoryOf(food)]
   if (byCat != null) return { diaas: byCat, confidence: 'estimated' }
   return { diaas: null, confidence: 'unknown' }
 }

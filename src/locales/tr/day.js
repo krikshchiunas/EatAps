@@ -170,6 +170,7 @@ export default {
     freeSugar: 'Serbest şeker',
     allSugar: 'neredeyse tamamı şeker',
     wholeSugar: 'bütün besinden gelen şeker, serbest değil',
+    ofLabelSugar: 'etiketteki {n} g şekerin bu kadarı, gerisi doğal',
     fiber: 'Lif',
     goodSource: 'iyi kaynak',
     noCarbs: 'Bu porsiyonda karbonhidrat yok.',

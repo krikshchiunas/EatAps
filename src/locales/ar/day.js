@@ -170,6 +170,7 @@ export default {
     freeSugar: 'السكريات الحرة',
     allSugar: 'معظمه سكر',
     wholeSugar: 'سكريات من الطعام الكامل، ليست حرة',
+    ofLabelSugar: 'من {n} غ من السكريات على الملصق، والباقي طبيعي',
     fiber: 'الألياف',
     goodSource: 'مصدر جيد',
     noCarbs: 'لا توجد كربوهيدرات في هذه الحصة.',

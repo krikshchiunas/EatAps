@@ -170,6 +170,7 @@ export default {
     freeSugar: 'Free sugars',
     allSugar: 'almost all of it is sugar',
     wholeSugar: 'sugars from whole food, not free sugars',
+    ofLabelSugar: 'of {n} g sugars on the label, the rest are natural',
     fiber: 'Fibre',
     goodSource: 'good source',
     noCarbs: 'No carbs in this portion.',

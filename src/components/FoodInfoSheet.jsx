@@ -3,8 +3,8 @@ import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { amountLabel, formatAmount } from '../lib/foods.js'
 import { foodName } from '../lib/foodNames.js'
 import { t } from '../lib/i18n.js'
-import { sumAdvanced, freeSugarShare, fiberRatioOf } from '../lib/nutrition.js'
-import { estimateProteinQuality, usableProteinShare, PROTEIN_QUALITY_LOW } from '../lib/nutritionClassification.js'
+import { sumAdvanced, freeSugarOf, fiberOf } from '../lib/nutrition.js'
+import { estimateProteinQuality, usableProteinShare, classifyComplexCarb, estimateSaturatedFat, PROTEIN_QUALITY_LOW } from '../lib/nutritionClassification.js'
 import { microsForEntry, massOf } from '../lib/foodMicros.js'
 import { MICRO_GROUPS, MICRONUTRIENTS, microTargets, formatMicro } from '../lib/micronutrients.js'
 
@@ -51,14 +51,19 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
     // Свободные сахара и клетчатку считаем здесь, а не через sumQuality: та
     // округляет до целых граммов ради экрана дня, а в разборе одной порции
     // округление до целого превращает 0,53 г клетчатки в колe в «1 г».
-    const carbs = num(food.carbs)
-    const freeSugar = carbs * freeSugarShare(food.name)
-    const fiber = carbs * fiberRatioOf(food.name)
-    return { adv, micro, targets, pq, freeSugar, fiber }
+    // Цифры с этикетки (сахар, клетчатка) важнее оценки по типу продукта.
+    const sugar = freeSugarOf(food)
+    const fiber = fiberOf(food)
+    // Уверенность — по ЭТОЙ записи, а не через свод sumAdvanced: у свода из
+    // одной неопознанной записи она «partial», а не «unknown», и экран писал
+    // «≈0 г · 0% углеводов» там, где на самом деле ничего не известно.
+    const cc = classifyComplexCarb(food)
+    const sf = estimateSaturatedFat(food)
+    return { adv, micro, targets, pq, sugar, fiber, cc, sf }
   }, [food, profile, microGoals])
 
   if (!food || !data) return null
-  const { adv, micro, targets, pq, freeSugar, fiber } = data
+  const { adv, micro, targets, pq, sugar, fiber, cc, sf } = data
 
   const protein = num(food.protein)
   const carbs = num(food.carbs)
@@ -122,21 +127,22 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
             <>
               <Row
                 label={t('foodInfo.complex')}
-                value={`${adv.complexCarbConfidence !== 'measured' ? '≈' : ''}${gram(adv.complexCarb)}`}
-                sub={adv.complexCarbConfidence === 'unknown'
+                value={cc.confidence === 'unknown' ? '—' : `≈${gram(adv.complexCarb)}`}
+                sub={cc.confidence === 'unknown'
                   ? t('foodInfo.complexUnknown')
                   : t('foodInfo.complexShare', { n: Math.round((adv.complexCarb / carbs) * 100) })}
               />
               <Row
                 label={t('foodInfo.freeSugar')}
-                value={`≈${gram(freeSugar)}`}
-                sub={freeSugarShare(food.name) >= 0.8 ? t('foodInfo.allSugar') : freeSugarShare(food.name) === 0 ? t('foodInfo.wholeSugar') : undefined}
-                tone={freeSugar > carbs * 0.5 ? 'var(--warn)' : undefined}
+                value={`${sugar.source === 'label' ? '' : '≈'}${gram(sugar.grams)}`}
+                sub={sugarNote(food, sugar, carbs)}
+                tone={sugar.grams > carbs * 0.5 ? 'var(--warn)' : undefined}
               />
               <Row
                 label={t('foodInfo.fiber')}
-                value={`≈${gram(fiber)}`}
-                sub={fiberRatioOf(food.name) >= 0.3 ? t('foodInfo.goodSource') : undefined}
+                value={`${fiber.source === 'label' ? '' : '≈'}${gram(fiber.grams)}`}
+                sub={fiber.source === 'label' ? t('foodInfo.fromLabel')
+                  : carbs > 0 && fiber.grams / carbs >= 0.3 ? t('foodInfo.goodSource') : undefined}
               />
             </>
           ) : <Empty>{t('foodInfo.noCarbs')}</Empty>}
@@ -147,10 +153,10 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
           {fat > 0 ? (
             <Row
               label={t('foodInfo.saturated')}
-              value={adv.satFatConfidence === 'unknown' ? '—' : `${adv.satFatConfidence !== 'measured' ? '≈' : ''}${gram(adv.satFat)}`}
-              sub={adv.satFatConfidence === 'measured' ? t('foodInfo.fromLabel')
-                : adv.satFatConfidence === 'unknown' ? t('foodInfo.nothingToSay')
-                  : t('foodInfo.satShare', { n: Math.round((adv.satFat / fat) * 100) })}
+              value={sf.confidence === 'unknown' ? '—' : `${sf.confidence !== 'measured' ? '≈' : ''}${gram(sf.grams)}`}
+              sub={sf.confidence === 'measured' ? t('foodInfo.fromLabel')
+                : sf.confidence === 'unknown' ? t('foodInfo.nothingToSay')
+                  : t('foodInfo.satShare', { n: Math.round((sf.grams / fat) * 100) })}
             />
           ) : <Empty>{t('foodInfo.noFat')}</Empty>}
         </Section>
@@ -196,6 +202,18 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
       </div>
     </div>
   )
+}
+
+// Подпись под свободными сахарами: откуда число.
+function sugarNote(food, sugar, carbs) {
+  if (sugar.source === 'label') return t('foodInfo.fromLabel')
+  // С этикетки, но не весь сахар свободный: лактоза, сахара орехов и плодов.
+  if (sugar.source === 'adjusted') {
+    return sugar.grams === 0 ? t('foodInfo.wholeSugar') : t('foodInfo.ofLabelSugar', { n: formatAmount(Math.round(num(food.sugar) * 10) / 10) })
+  }
+  if (carbs > 0 && sugar.grams / carbs >= 0.8) return t('foodInfo.allSugar')
+  if (sugar.grams === 0 && carbs > 0) return t('foodInfo.wholeSugar')
+  return undefined
 }
 
 // ── Мелкие части ─────────────────────────────────────────────────────────────
