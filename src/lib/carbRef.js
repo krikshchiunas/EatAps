@@ -324,7 +324,7 @@ const RULES = [
   // «картофельные чипсы» — не картофель, «кукурузные палочки» — не кукуруза)
   ['cornSticks', ['кукурузные палочк', 'кукурузные шарик']],
   ['popcorn', ['попкорн', 'popcorn']],
-  ['chips', ['чипс', 'начос', 'chips', 'crisps', 'nachos', 'pringles', '=lays', 'doritos', 'cheetos']],
+  ['chips', ['чипс', 'начос', 'chips', 'crisps', 'crunchips', 'nachos', 'pringles', '=lays', 'doritos', 'cheetos', 'chio', 'lorenz']],
   ['pretzel', ['брецел', 'крендел', 'pretzel', 'brezel']],
   ['cornflakes', ['кукурузные хлопья', 'хлопья кукуруз', 'корнфлекс', 'cornflakes', 'corn flakes']],
 
