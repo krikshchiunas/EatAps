@@ -1,16 +1,15 @@
 // Полная выгрузка данных пользователя (DSGVO, право на переносимость).
 //
-// Два слоя в одном файле:
-//   • raw      — состояние приложения как есть, все разделы без исключений: по
-//                нему данные можно восстановить или перенести в другой сервис;
+// Выгружается выбранный период (с — по, включительно); его длина ограничена
+// тарифом — см. EXPORT_LIMIT_DAYS. Два слоя в одном файле:
+//   • raw      — дни периода как есть плюс все разделы, не привязанные к датам
+//                (свои продукты, рецепты, добавки, настройки): по нему данные
+//                можно восстановить или перенести в другой сервис;
 //   • computed — то, что приложение РАСЧИТЫВАЕТ и показывает, но не хранит:
 //                цели дня, суммы, сахара и клетчатка, насыщенные жиры, каждый
 //                витамин и минерал (еда + добавки), тренировки и активность,
-//                статистика за периоды. Без этого слоя «минералы» в файл не
-//                попадали вовсе — в хранилище их нет, они выводятся из записей.
-//   • account  — то, что живёт на сервере в отдельных таблицах (мысли,
-//                комментарии, переписка, подписки, тренер, челленджи, ИИ):
-//                собирается fetchAccountExport и передаётся сюда готовым.
+//                итоги периода. В хранилище этого нет — выводится из записей.
+// Социальное (мысли, ответы, реакции, переписка) сюда не входит.
 import { sumDay, sumQuality, sumAdvanced, freeSugarOf, fiberOf, sugarLimit, fiberGoal, satFatLimit, carbGrade } from './nutrition.js'
 import { estimateSaturatedFat, classifyComplexCarb, estimateProteinQuality } from './nutritionClassification.js'
 import { microsForEntry } from './foodMicros.js'
@@ -18,10 +17,11 @@ import { buildMicroSummary } from './microSummary.js'
 import { microTargets, MICRONUTRIENTS } from './micronutrients.js'
 import { stackMicroKeys, suppTotals } from './suppStack.js'
 import { createTargetResolver, dayWeight, effectiveActivity, effectiveActivityFactor, hasDayActivity, profileTargets } from './body.js'
-import { PERIODS, computeStats, foodHabits } from './stats.js'
+import { foodHabits } from './stats.js'
 import { computeMicroStats } from './microStats.js'
+import { TIER, isActive } from './subscription.js'
 
-export const EXPORT_VERSION = 2
+export const EXPORT_VERSION = 3
 
 const RAW_KEYS = [
   'profile', 'theme', 'days', 'customFoods', 'customIngredients', 'favorites',
@@ -138,55 +138,105 @@ function dayOut(date, day, { resolve, profile, goals, stackKeys }) {
   }
 }
 
-// Итоги периодов — как на экране статистики. Без заготовок графиков (keys,
-// weekly, nutrients — по ячейке на каждый календарный день, даже пустой: это
-// дублирует computed.days и раздувало файл до полумегабайта на один день) и без
-// трёх копий одних и тех же строк микронутриентов с полным справочным текстом.
-function periodsOut(days, profile, goals, stackKeys, today) {
-  return PERIODS.map((p) => {
-    const s = computeStats(days, profile, p.key, today)
-    const m = computeMicroStats(days, s.loggedKeys || [], { profile, goals, stackKeys })
-    return {
-      period: p.key,
-      totalDays: s.totalDays,
-      loggedDays: s.loggedDays,
-      excludedDays: s.excludedDays,
-      countedDates: s.loggedKeys,
-      summary: s.summary,
-      body: s.body,
-      products: s.products,
-      insights: s.insights,
-      micronutrientAverages: {
-        coverage: m.coverage,
-        rows: (m.rows || []).map(({ def, shown, ...row }) => row),
-      },
-    }
-  })
+// ── Сколько дней можно выгрузить за раз ──────────────────────────────────────
+// Длина выбранного периода (с — по, включительно), а не «только последние
+// дни»: бесплатно можно выгрузить любую неделю истории. null — без ограничения.
+export const EXPORT_LIMIT_DAYS = Object.freeze({
+  [TIER.FREE]: 7,
+  [TIER.AI]: 31,
+  [TIER.AI_PLUS]: 183,
+  [TIER.AI_PREMIUM]: null,
+})
+
+export function exportLimitDays(subscription) {
+  const tier = isActive(subscription) ? subscription.tier : TIER.FREE
+  return tier in EXPORT_LIMIT_DAYS ? EXPORT_LIMIT_DAYS[tier] : EXPORT_LIMIT_DAYS[TIER.FREE]
 }
 
-// state   — состояние стора (useStore());
-// account — результат fetchAccountExport или null (гость/офлайн);
-// now     — для тестов.
-export function buildExport(state, { account = null, now = new Date(), user = null, deviceId = null } = {}) {
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const dayNumber = (key) => {
+  const [y, m, d] = key.split('-').map(Number)
+  return Date.UTC(y, m - 1, d) / 86_400_000
+}
+
+// Дней в периоде включительно: 10.11–10.11 — один день.
+export function rangeLength(from, to) {
+  return dayNumber(to) - dayNumber(from) + 1
+}
+
+// { ok: true } или { ok: false, error: 'invalid' | 'order' | 'limit', limit }.
+export function validateExportRange(from, to, subscription) {
+  if (!DATE_RE.test(from || '') || !DATE_RE.test(to || '')) return { ok: false, error: 'invalid' }
+  if (from > to) return { ok: false, error: 'order' }
+  const limit = exportLimitDays(subscription)
+  if (limit != null && rangeLength(from, to) > limit) return { ok: false, error: 'limit', limit }
+  return { ok: true }
+}
+
+const avg = (list, pick) => {
+  const vals = list.map(pick).filter((v) => Number.isFinite(v))
+  return vals.length ? round(vals.reduce((a, b) => a + b, 0) / vals.length, 1) : null
+}
+
+// Итоги выбранного периода. Средние — по дням, где есть еда: пустой день
+// означает «не записывал», а не «ничего не ел».
+function rangeSummary(dayRows, days, { profile, goals, stackKeys }) {
+  const fed = dayRows.filter((d) => d.meals.length > 0)
+  const weights = dayRows.filter((d) => d.body.weight != null)
+  const micro = computeMicroStats(days, fed.map((d) => d.date), { profile, goals, stackKeys })
+  return {
+    daysInRange: dayRows.length,
+    daysWithFood: fed.length,
+    strengthTrainings: dayRows.filter((d) => d.workout.strengthTraining).length,
+    averagePerDay: {
+      kcal: avg(fed, (d) => d.totals.kcal),
+      protein: avg(fed, (d) => d.totals.protein),
+      fat: avg(fed, (d) => d.totals.fat),
+      carbs: avg(fed, (d) => d.totals.carbs),
+      fiber: avg(fed, (d) => d.totals.fiber),
+      freeSugar: avg(fed, (d) => d.totals.freeSugar),
+      saturatedFat: avg(fed, (d) => d.totals.saturatedFat),
+    },
+    weight: weights.length
+      ? {
+          first: weights[0].body.weight,
+          last: weights[weights.length - 1].body.weight,
+          change: round(weights[weights.length - 1].body.weight - weights[0].body.weight, 1),
+        }
+      : null,
+    micronutrientAverages: {
+      coverage: micro.coverage,
+      rows: (micro.rows || []).map(({ def, shown, ...row }) => row),
+    },
+  }
+}
+
+// state — состояние стора (useStore());
+// from, to — 'YYYY-MM-DD', включительно; проверку по тарифу делает
+//   validateExportRange, здесь период просто применяется;
+// now — для тестов.
+export function buildExport(state, { from, to, now = new Date() } = {}) {
   const s = state || {}
-  const days = s.days && typeof s.days === 'object' ? s.days : {}
+  const allDays = s.days && typeof s.days === 'object' ? s.days : {}
   const profile = s.profile || null
   const prefs = s.prefs || {}
   const goals = (typeof prefs.microGoals === 'object' && prefs.microGoals) || {}
   const stack = Array.isArray(s.supplements) ? s.supplements : []
   const stackKeys = stackMicroKeys(stack)
-  const resolve = createTargetResolver(days, profile)
-  const today = now.toISOString().slice(0, 10)
+  // Цели считаются по ВСЕЙ истории: вес на первый день периода может быть
+  // записан раньше него.
+  const resolve = createTargetResolver(allDays, profile)
 
-  const raw = Object.fromEntries(RAW_KEYS.map((k) => [k, s[k] ?? null]))
-  const dates = Object.keys(days).sort()
+  const dates = Object.keys(allDays).filter((d) => (!from || d >= from) && (!to || d <= to)).sort()
+  const days = Object.fromEntries(dates.map((d) => [d, allDays[d]]))
+  const raw = Object.fromEntries(RAW_KEYS.map((k) => [k, k === 'days' ? days : s[k] ?? null]))
+  const dayRows = dates.map((date) => dayOut(date, days[date], { resolve, profile, goals, stackKeys }))
 
   return {
     format: 'eataps-export',
     version: EXPORT_VERSION,
     exportedAt: now.toISOString(),
-    user: user ? { id: user.id, email: user.email || null, createdAt: user.created_at || null } : null,
-    deviceId,
+    range: { from: from || dates[0] || null, to: to || dates[dates.length - 1] || null },
     raw,
     computed: {
       profile: {
@@ -196,7 +246,8 @@ export function buildExport(state, { account = null, now = new Date(), user = nu
           key: d.key, name: d.label, unit: d.unit, group: d.group, kind: d.kind, ul: d.ul, ulScope: d.ulScope,
         })),
       },
-      days: dates.map((date) => dayOut(date, days[date], { resolve, profile, goals, stackKeys })),
+      summary: rangeSummary(dayRows, days, { profile, goals, stackKeys }),
+      days: dayRows,
       workouts: dates
         .filter((d) => days[d]?.strength || hasDayActivity(days[d]))
         .map((d) => ({
@@ -208,9 +259,7 @@ export function buildExport(state, { account = null, now = new Date(), user = nu
       weightHistory: dates
         .map((d) => ({ date: d, weight: dayWeight(days[d]) }))
         .filter((r) => r.weight != null),
-      periods: periodsOut(days, profile, goals, stackKeys, today),
       foodHabits: foodHabits(days),
     },
-    account,
   }
 }

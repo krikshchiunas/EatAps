@@ -2,7 +2,7 @@
 // рассчитывается (тренировки, цели, сахара, клетчатку, витамины и минералы).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildExport } from './exportData.js'
+import { buildExport, exportLimitDays, validateExportRange, rangeLength } from './exportData.js'
 import { MICRONUTRIENTS } from './micronutrients.js'
 
 const profile = { sex: 'male', age: 30, height: 180, weight: 80, activity: 'light', goal: 'maintain' }
@@ -65,16 +65,71 @@ test('по каждому дню посчитаны тренировка, вес
   assert.equal(day.meals[0].name, 'Гречка')
 })
 
-test('сводки тренировок, веса и периодов', () => {
+test('сводки тренировок, веса и итоги периода', () => {
   const out = buildExport(state, { now })
   assert.deepEqual(out.computed.workouts.map((w) => w.date), ['2026-11-10'])
   assert.deepEqual(out.computed.weightHistory, [{ date: '2026-11-10', weight: 79.5 }, { date: '2026-11-11', weight: 79.2 }])
-  assert.deepEqual(out.computed.periods.map((p) => p.period), ['7d', '30d', '6m', '1y'])
+  const sum = out.computed.summary
+  assert.equal(sum.daysInRange, 2)
+  assert.equal(sum.daysWithFood, 1)
+  assert.equal(sum.strengthTrainings, 1)
+  assert.equal(sum.averagePerDay.kcal, 298)
+  assert.deepEqual(sum.weight, { first: 79.5, last: 79.2, change: -0.3 })
+  assert.equal(sum.micronutrientAverages.rows.length, MICRONUTRIENTS.length)
+})
+
+test('в файле нет социального: мыслей, ответов, переписки', () => {
+  const out = buildExport(state, { now })
+  assert.equal('account' in out, false)
+})
+
+test('период применяется включительно и только к дням', () => {
+  const out = buildExport(state, { from: '2026-11-11', to: '2026-11-11', now })
+  assert.deepEqual(Object.keys(out.raw.days), ['2026-11-11'])
+  assert.deepEqual(out.computed.days.map((d) => d.date), ['2026-11-11'])
+  assert.deepEqual(out.range, { from: '2026-11-11', to: '2026-11-11' })
+  assert.deepEqual(out.computed.workouts, [])
+  // Разделы без дат выгружаются целиком.
+  assert.deepEqual(out.raw.recipes, state.recipes)
+  assert.deepEqual(out.raw.supplements, state.supplements)
+})
+
+test('цель дня учитывает вес, записанный до начала периода', () => {
+  const out = buildExport(state, { from: '2026-11-11', to: '2026-11-11', now })
+  const full = buildExport(state, { now })
+  assert.deepEqual(out.computed.days[0].targets, full.computed.days.find((d) => d.date === '2026-11-11').targets)
+})
+
+const sub = (tier, status = 'active') => ({ tier, status })
+
+test('лимит длины периода по тарифу', () => {
+  assert.equal(exportLimitDays(sub('FREE')), 7)
+  assert.equal(exportLimitDays(sub('AI')), 31)
+  assert.equal(exportLimitDays(sub('AI_PLUS')), 183)
+  assert.equal(exportLimitDays(sub('AI_PREMIUM')), null)
+  // Истёкшая платная подписка — бесплатный лимит.
+  assert.equal(exportLimitDays(sub('AI_PREMIUM', 'canceled')), 7)
+  assert.equal(exportLimitDays(null), 7)
+})
+
+test('проверка периода: границы включительно', () => {
+  assert.equal(rangeLength('2026-11-10', '2026-11-10'), 1)
+  assert.equal(rangeLength('2026-03-01', '2026-03-31'), 31) // через перевод часов
+  assert.deepEqual(validateExportRange('2026-11-01', '2026-11-07', sub('FREE')), { ok: true })
+  assert.deepEqual(validateExportRange('2026-11-01', '2026-11-08', sub('FREE')), { ok: false, error: 'limit', limit: 7 })
+  assert.deepEqual(validateExportRange('2026-01-01', '2026-01-31', sub('AI')), { ok: true })
+  assert.equal(validateExportRange('2026-01-01', '2026-02-01', sub('AI')).error, 'limit')
+  assert.deepEqual(validateExportRange('2026-01-01', '2026-07-02', sub('AI_PLUS')), { ok: true })
+  assert.equal(validateExportRange('2026-01-01', '2026-07-03', sub('AI_PLUS')).error, 'limit')
+  assert.deepEqual(validateExportRange('2015-01-01', '2026-11-16', sub('AI_PREMIUM')), { ok: true })
+  assert.equal(validateExportRange('2026-11-08', '2026-11-01', sub('AI_PREMIUM')).error, 'order')
+  assert.equal(validateExportRange('', '2026-11-01', sub('AI_PREMIUM')).error, 'invalid')
 })
 
 test('экспорт сериализуется в JSON и не падает на пустом состоянии', () => {
-  assert.doesNotThrow(() => JSON.stringify(buildExport(state, { now, account: { thoughts: [] } })))
+  assert.doesNotThrow(() => JSON.stringify(buildExport(state, { now })))
   const empty = buildExport({}, { now })
   assert.deepEqual(empty.computed.days, [])
+  assert.equal(empty.computed.summary.averagePerDay.kcal, null)
   assert.doesNotThrow(() => JSON.stringify(empty))
 })

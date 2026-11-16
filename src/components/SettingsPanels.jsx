@@ -13,8 +13,9 @@ import { createPortal } from 'react-dom'
 import { useStore } from '../store.jsx'
 import { SYNC } from '../lib/syncEngine.js'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
-import { deleteAccount, listFriends, fetchAccountExport } from '../lib/supabase.js'
-import { buildExport } from '../lib/exportData.js'
+import { deleteAccount, listFriends } from '../lib/supabase.js'
+import { buildExport, exportLimitDays, validateExportRange, rangeLength } from '../lib/exportData.js'
+import { keyOf, addDays } from '../lib/date.js'
 import {
   notificationsSupported, notificationPermission, requestNotificationPermission,
   getMutedFriends, toggleFriendMuted,
@@ -26,7 +27,7 @@ import ConfirmDialog from './ConfirmDialog.jsx'
 import PromoRedeemForm from './PromoRedeemForm.jsx'
 import LegalSheet from './LegalSheet.jsx'
 import { Avatar } from './FriendsScreen.jsx'
-import { planByTier } from '../lib/subscription.js'
+import { planByTier, isActive, TIER } from '../lib/subscription.js'
 import { t, fmtDate, fmtTime, fmtDateTime } from '../lib/i18n.js'
 import LanguageList from './LanguageList.jsx'
 
@@ -554,42 +555,65 @@ export function DataPanel({ onClose }) {
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  // DSGVO: право на переносимость. Всё состояние приложения, всё рассчитанное
-  // по нему (цели, суммы, витамины и минералы, тренировки, статистика) и — для
-  // вошедших — всё из серверных таблиц: мысли, ответы, переписка, тренер.
-  const exportData = async () => {
-    if (busy) return
+  // Период по умолчанию — самый длинный, что позволяет тариф, до сегодня; без
+  // ограничения — вся история.
+  const limit = exportLimitDays(store.subscription)
+  const tier = isActive(store.subscription) ? store.subscription.tier : TIER.FREE
+  const today = keyOf()
+  const firstDay = Object.keys(store.days || {}).sort()[0] || today
+  const [from, setFrom] = useState(() => (limit != null ? addDays(today, -(limit - 1)) : firstDay))
+  const [to, setTo] = useState(today)
+  const check = validateExportRange(from, to, store.subscription)
+  const rangeError = check.ok ? null : t(`settings.data.err.${check.error}`, { n: check.error === 'limit' ? rangeLength(from, to) : 0, limit })
+
+  // DSGVO: право на переносимость. Дневник за выбранный период и всё
+  // рассчитанное по нему: цели, суммы, витамины и минералы, тренировки.
+  const exportData = () => {
+    if (busy || !check.ok) return
     setBusy(true)
-    try {
-      const account = store.signedIn && store.user?.id ? await fetchAccountExport(store.user.id) : null
-      const dump = buildExport(store, { account, user: store.user, deviceId: store.deviceId })
-      const blob = new Blob([JSON.stringify(dump)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `eataps-export-${dump.exportedAt.slice(0, 10)}.json`
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-      setDone(true)
-      setTimeout(() => setDone(false), 2500)
-    } finally {
-      setBusy(false)
-    }
+    // Даём кнопке перерисоваться в «Собираем данные…»: расчёт за длинный
+    // период занимает секунду-другую и идёт в том же потоке.
+    setTimeout(() => {
+      try {
+        const dump = buildExport(store, { from, to })
+        const blob = new Blob([JSON.stringify(dump)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `eataps-export-${from}_${to}.json`
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        setDone(true)
+        setTimeout(() => setDone(false), 2500)
+      } finally {
+        setBusy(false)
+      }
+    }, 0)
   }
 
   return (
     <Panel title={t('settings.data.title')} onClose={onClose}>
-      <Group
-        title={t('settings.data.export')}
-        note={t('settings.data.exportNote')}
-      >
+      <Group title={t('settings.data.export')}>
+        <div className="row gap12" style={{ padding: '12px 14px' }}>
+          <div className="field" style={{ flex: 1, minWidth: 0 }}>
+            <label className="label" htmlFor="export-from">{t('settings.data.from')}</label>
+            <input id="export-from" className="input" type="date" value={from} max={to || today} onChange={(e) => setFrom(e.target.value)} style={{ marginTop: 6 }} />
+          </div>
+          <div className="field" style={{ flex: 1, minWidth: 0 }}>
+            <label className="label" htmlFor="export-to">{t('settings.data.to')}</label>
+            <input id="export-to" className="input" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} style={{ marginTop: 6 }} />
+          </div>
+        </div>
         <Row
           label={busy ? t('settings.data.collecting') : done ? t('settings.data.saved') : t('settings.data.download')}
           onClick={exportData}
-          disabled={busy}
+          disabled={busy || !check.ok}
           chevron={false}
         />
       </Group>
+      {rangeError && <p className="set-note" style={{ color: 'var(--danger)', marginTop: -14, marginBottom: 10 }}>{rangeError}</p>}
+      <p className="set-note" style={{ marginTop: rangeError ? 0 : -14, marginBottom: 8 }}>{t(`settings.data.limit.${tier}`)}</p>
+      <p className="set-note" style={{ marginTop: 0, marginBottom: 22 }}>{t('settings.data.exportNote')}</p>
 
       <Group
         note={t('settings.data.resetNote')}

@@ -765,56 +765,6 @@ export async function listConversations(myId, limit = 200) {
   return Array.from(byPartner, ([id, last]) => ({ id, last }))
 }
 
-// DSGVO «право на переносимость»: всё, что лежит о человеке в отдельных
-// таблицах (не в app_state). Каждый раздел читается сам по себе: таблицы без
-// миграции или без политики чтения дают { error }, а не роняют весь экспорт.
-// Чтение постранично — у PostgREST потолок в 1000 строк на ответ, и длинная
-// переписка иначе молча обрезалась бы.
-const EXPORT_PAGE = 1000
-
-async function selectAll(build) {
-  const out = []
-  for (let from = 0; ; from += EXPORT_PAGE) {
-    const { data, error } = await build().range(from, from + EXPORT_PAGE - 1)
-    if (error) throw error
-    out.push(...(data || []))
-    if (!data || data.length < EXPORT_PAGE) return out
-  }
-}
-
-export async function fetchAccountExport(uid) {
-  if (!supabase || !uid) return null
-  const or2 = (a, b) => `${a}.eq.${uid},${b}.eq.${uid}`
-  const sections = {
-    publicProfile: () => supabase.from('profiles').select('*').eq('user_id', uid),
-    thoughts: () => supabase.from('posts').select('*').eq('user_id', uid).order('created_at'),
-    thoughtReplies: () => supabase.from('post_comments').select('*').eq('user_id', uid).order('created_at'),
-    thoughtReactions: () => supabase.from('post_reactions').select('*').eq('user_id', uid),
-    dayComments: () => supabase.from('day_comments').select('*').or(or2('client', 'author')).order('created_at'),
-    messages: () => supabase.from('messages').select(MSG_COLS).or(or2('sender', 'recipient')).order('created_at'),
-    follows: () => supabase.from('follows').select('*').or(or2('follower_id', 'following_id')),
-    blocks: () => supabase.from('blocks').select('*').eq('blocker_id', uid),
-    coachLinks: () => supabase.from('coach_links').select('*').or(or2('coach', 'client')),
-    challenges: () => supabase.from('challenge_members').select('*').eq('user_id', uid),
-    challengeDays: () => supabase.from('challenge_days').select('*').eq('user_id', uid),
-    notifications: () => supabase.from('notifications').select('*').eq('recipient_id', uid).order('created_at'),
-    supportRequests: () => supabase.from('support_messages').select('*').eq('user_id', uid).order('created_at'),
-    aiUsage: () => supabase.from('ai_usage').select('*').eq('user_id', uid),
-    subscription: () => supabase.from('subscriptions').select('*').eq('user_id', uid),
-    promoGrants: () => supabase.from('promo_grants').select('*').eq('user_id', uid),
-  }
-  const entries = await Promise.all(Object.entries(sections).map(async ([key, build]) => {
-    try {
-      return [key, await selectAll(build)]
-    } catch (e) {
-      return [key, { error: e?.message || String(e) }]
-    }
-  }))
-  const out = Object.fromEntries(entries)
-  out.friends = await listFriends(uid).catch((e) => ({ error: e?.message || String(e) }))
-  return out
-}
-
 // DSGVO «право на удаление»: стираем данные из облака и удаляем сам аккаунт.
 // Данные удаляем всегда (RLS: свои); аккаунт — через RPC delete_current_user
 // (SECURITY DEFINER, см. schema.sql). Если RPC нет — возвращаем partial.
