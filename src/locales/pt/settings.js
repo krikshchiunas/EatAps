@@ -132,9 +132,10 @@ export default {
     data: {
       title: 'Dados',
       export: 'Exportação',
-      exportNote: 'Um arquivo JSON: perfil, diário alimentar de todos os dias, seus alimentos e configurações. Conversas e pensamentos não entram — eles ficam guardados à parte.',
+      exportNote: 'Um arquivo JSON com tudo: perfil, diário de todos os dias, treinos e atividade, peso, bem-estar, metas, totais de calorias e macros, açúcares, fibras, gordura saturada, todas as vitaminas e minerais (da comida e dos suplementos), suplementos, seus alimentos, receitas, modelos, favoritos, estatísticas e configurações. Se você entrou na conta — também pensamentos, respostas, conversas, seguidores, treinador e desafios.',
       saved: 'Arquivo salvo ✓',
       download: 'Baixar meus dados',
+      collecting: 'Coletando dados…',
       resetNote: 'Apaga o perfil e todo o diário em todos os seus aparelhos. A conta e os amigos continuam. Não dá para desfazer.',
       reset: 'Redefinir perfil e dados',
       confirmReset: 'Tem certeza de que quer apagar a nossa história?',

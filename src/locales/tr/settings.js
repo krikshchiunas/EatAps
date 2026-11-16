@@ -132,9 +132,10 @@ export default {
     data: {
       title: 'Veriler',
       export: 'Dışa aktarma',
-      exportNote: 'Bir JSON dosyası: profil, tüm günlerin beslenme günlüğü, kendi ürünlerin ve ayarların. Sohbetler ve düşünceler dahil değil — ayrı saklanırlar.',
+      exportNote: 'Her şeyi içeren bir JSON dosyası: profil, tüm günlerin günlüğü, antrenman ve aktivite, kilo, iyi oluş, hedefler, kalori ve makro toplamları, şekerler, lif, doymuş yağ, tüm vitamin ve mineraller (yiyecek ve takviyelerden), takviyeler, kendi ürünlerin, tarifler, şablonlar, favoriler, istatistikler ve ayarlar. Giriş yaptıysan — düşünceler, yanıtlar, sohbetler, takipler, koç ve meydan okumalar da.',
       saved: 'Dosya kaydedildi ✓',
       download: 'Verilerimi indir',
+      collecting: 'Veriler toplanıyor…',
       resetNote: 'Tüm cihazlarındaki profili ve günlüğün tamamını siler. Hesap ve arkadaşlar kalır. Geri alınamaz.',
       reset: 'Profili ve verileri sıfırla',
       confirmReset: 'Ortak geçmişimizi silmek istediğinden emin misin?',

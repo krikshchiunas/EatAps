@@ -13,7 +13,8 @@ import { createPortal } from 'react-dom'
 import { useStore } from '../store.jsx'
 import { SYNC } from '../lib/syncEngine.js'
 import { ACTIVITY, GOALS } from '../lib/nutrition.js'
-import { deleteAccount, listFriends } from '../lib/supabase.js'
+import { deleteAccount, listFriends, fetchAccountExport } from '../lib/supabase.js'
+import { buildExport } from '../lib/exportData.js'
 import {
   notificationsSupported, notificationPermission, requestNotificationPermission,
   getMutedFriends, toggleFriendMuted,
@@ -551,31 +552,29 @@ export function DataPanel({ onClose }) {
   const { resetAll } = store
   const [confirm, setConfirm] = useState(false)
   const [done, setDone] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  // DSGVO: право на переносимость. Выгрузка ровно того, что лежит на этом
-  // устройстве в состоянии приложения. Чат и мысли живут в отдельных таблицах
-  // и в файл не попадают — об этом сказано под кнопкой, а не умолчано.
-  const exportData = () => {
-    const dump = {
-      profile: store.profile,
-      theme: store.theme,
-      days: store.days,
-      customFoods: store.customFoods,
-      customIngredients: store.customIngredients,
-      recents: store.recents,
-      prefs: store.prefs,
-      subscription: store.subscription,
-      exportedAt: new Date().toISOString(),
+  // DSGVO: право на переносимость. Всё состояние приложения, всё рассчитанное
+  // по нему (цели, суммы, витамины и минералы, тренировки, статистика) и — для
+  // вошедших — всё из серверных таблиц: мысли, ответы, переписка, тренер.
+  const exportData = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const account = store.signedIn && store.user?.id ? await fetchAccountExport(store.user.id) : null
+      const dump = buildExport(store, { account, user: store.user, deviceId: store.deviceId })
+      const blob = new Blob([JSON.stringify(dump)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `eataps-export-${dump.exportedAt.slice(0, 10)}.json`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setDone(true)
+      setTimeout(() => setDone(false), 2500)
+    } finally {
+      setBusy(false)
     }
-    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'eataps-data.json'
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-    setDone(true)
-    setTimeout(() => setDone(false), 2500)
   }
 
   return (
@@ -584,7 +583,12 @@ export function DataPanel({ onClose }) {
         title={t('settings.data.export')}
         note={t('settings.data.exportNote')}
       >
-        <Row label={done ? t('settings.data.saved') : t('settings.data.download')} onClick={exportData} chevron={false} />
+        <Row
+          label={busy ? t('settings.data.collecting') : done ? t('settings.data.saved') : t('settings.data.download')}
+          onClick={exportData}
+          disabled={busy}
+          chevron={false}
+        />
       </Group>
 
       <Group

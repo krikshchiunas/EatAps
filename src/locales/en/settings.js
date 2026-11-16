@@ -132,9 +132,10 @@ export default {
     data: {
       title: 'Data',
       export: 'Export',
-      exportNote: 'A JSON file: your profile, your food diary for every day, your own foods and settings. Chats and thoughts aren’t included — they’re stored separately.',
+      exportNote: 'A JSON file with everything: profile, diary for every day, workouts and activity, weight, wellbeing, targets, calorie and macro totals, sugars, fiber, saturated fat, every vitamin and mineral (from food and supplements), supplements, your own foods, recipes, templates, favorites, statistics and settings. If you’re signed in — also thoughts, replies, chats, follows, coach and challenges.',
       saved: 'File saved ✓',
       download: 'Download my data',
+      collecting: 'Collecting data…',
       resetNote: 'Erases your profile and your whole diary on all your devices. Your account and friends stay. This can’t be undone.',
       reset: 'Reset profile and data',
       confirmReset: 'Are you sure you want to delete our history?',
