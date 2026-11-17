@@ -15,9 +15,9 @@ import { estimateSaturatedFat, classifyComplexCarb, estimateProteinQuality } fro
 import { microsForEntry } from './foodMicros.js'
 import { buildMicroSummary } from './microSummary.js'
 import { microTargets, MICRONUTRIENTS } from './micronutrients.js'
-import { stackMicroKeys, suppTotals } from './suppStack.js'
+import { stackMicroKeys, suppTotals, stackKey } from './suppStack.js'
 import { createTargetResolver, dayWeight, effectiveActivity, effectiveActivityFactor, hasDayActivity, profileTargets } from './body.js'
-import { foodHabits } from './stats.js'
+import { computeStats, foodHabits } from './stats.js'
 import { computeMicroStats } from './microStats.js'
 import { TIER, isActive } from './subscription.js'
 
@@ -180,10 +180,12 @@ const avg = (list, pick) => {
 
 // Итоги выбранного периода. Средние — по дням, где есть еда: пустой день
 // означает «не записывал», а не «ничего не ел».
-function rangeSummary(dayRows, days, { profile, goals, stackKeys }) {
+function rangeSummary(dayRows, days, { profile, goals, stackKeys, countedDates }) {
   const fed = dayRows.filter((d) => d.meals.length > 0)
   const weights = dayRows.filter((d) => d.body.weight != null)
-  const micro = computeMicroStats(days, fed.map((d) => d.date), { profile, goals, stackKeys })
+  // Средние витаминов — по тем же дням, что учитывает статистика (как на
+  // экране: дни «недозаписанные» и исключённые туда не входят).
+  const micro = computeMicroStats(days, countedDates || fed.map((d) => d.date), { profile, goals, stackKeys })
   return {
     daysInRange: dayRows.length,
     daysWithFood: fed.length,
@@ -205,10 +207,70 @@ function rangeSummary(dayRows, days, { profile, goals, stackKeys }) {
         }
       : null,
     micronutrientAverages: {
+      countedDays: micro.days,
       coverage: micro.coverage,
       rows: (micro.rows || []).map(({ def, shown, ...row }) => row),
     },
   }
+}
+
+// Добавки за период: что, сколько дней из периода, сколько раз и в какой
+// сумме принято. Одна и та же добавка в разные дни — по stackKey, как в стеке.
+function supplementsOut(dayRows, rangeDays) {
+  const by = new Map()
+  for (const d of dayRows) {
+    for (const e of d.supplements) {
+      const k = stackKey(e)
+      let r = by.get(k)
+      if (!r) {
+        r = { name: e.name, emoji: e.emoji || '💊', unit: e.unit || 'шт', dates: new Set(), timesTaken: 0, totalDose: 0, provides: {} }
+        by.set(k, r)
+      }
+      r.dates.add(d.date)
+      r.timesTaken += 1
+      r.totalDose += Number(e.dose) || 1
+      for (const key in e.provides || {}) r.provides[key] = (r.provides[key] || 0) + (Number(e.provides[key]) || 0)
+    }
+  }
+  return [...by.values()]
+    .map((r) => ({
+      name: r.name,
+      emoji: r.emoji,
+      unit: r.unit,
+      daysTaken: r.dates.size,
+      daysInRange: rangeDays,
+      adherencePct: rangeDays > 0 ? round((r.dates.size / rangeDays) * 100, 1) : null,
+      timesTaken: r.timesTaken,
+      totalDose: round(r.totalDose, 2),
+      totalProvides: roundValues(r.provides),
+      averagePerTakenDay: roundValues(Object.fromEntries(Object.entries(r.provides).map(([k, v]) => [k, v / r.dates.size]))),
+      dates: [...r.dates],
+    }))
+    .sort((a, b) => b.daysTaken - a.daysTaken || a.name.localeCompare(b.name))
+}
+
+// Графики — с той же детализацией, что на экране статистики: до месяца по
+// дням, до полугода по неделям, дальше по месяцам.
+const granFor = (n) => (n <= 31 ? 'day' : n <= 183 ? 'week' : 'month')
+
+// Статистика за выбранный период — тот же расчёт, что у экрана «Статистика»
+// (средние, попадание в цель, лучший/худший день, частые продукты, вес и ИМТ,
+// активность, недельный срез, связи еды и самочувствия), включая сравнение
+// с предыдущим таким же по длине периодом. Считается по ВСЕЙ истории: иначе
+// не с чем было бы сравнить и не по чему вести цели.
+function statisticsOut(allDays, profile, from, to) {
+  const n = rangeLength(from, to)
+  const { period, keys, ...stats } = computeStats(allDays, profile, { key: 'custom', days: n, gran: granFor(n) }, to)
+  return { from, to, days: n, granularity: period.gran, ...deepRound(stats) }
+}
+
+// Экран округляет при показе, а в файл суммы уходили с хвостом двоичной дроби
+// («-0.9000000000000057 кг»).
+function deepRound(v) {
+  if (typeof v === 'number') return round(v)
+  if (Array.isArray(v)) return v.map(deepRound)
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepRound(x)]))
+  return v
 }
 
 // state — состояние стора (useStore());
@@ -231,12 +293,16 @@ export function buildExport(state, { from, to, now = new Date() } = {}) {
   const days = Object.fromEntries(dates.map((d) => [d, allDays[d]]))
   const raw = Object.fromEntries(RAW_KEYS.map((k) => [k, k === 'days' ? days : s[k] ?? null]))
   const dayRows = dates.map((date) => dayOut(date, days[date], { resolve, profile, goals, stackKeys }))
+  const rangeFrom = from || dates[0] || null
+  const rangeTo = to || dates[dates.length - 1] || null
+  const statistics = rangeFrom && rangeTo ? statisticsOut(allDays, profile, rangeFrom, rangeTo) : null
+  const rangeDays = rangeFrom && rangeTo ? rangeLength(rangeFrom, rangeTo) : 0
 
   return {
     format: 'eataps-export',
     version: EXPORT_VERSION,
     exportedAt: now.toISOString(),
-    range: { from: from || dates[0] || null, to: to || dates[dates.length - 1] || null },
+    range: { from: rangeFrom, to: rangeTo },
     raw,
     computed: {
       profile: {
@@ -246,7 +312,9 @@ export function buildExport(state, { from, to, now = new Date() } = {}) {
           key: d.key, name: d.label, unit: d.unit, group: d.group, kind: d.kind, ul: d.ul, ulScope: d.ulScope,
         })),
       },
-      summary: rangeSummary(dayRows, days, { profile, goals, stackKeys }),
+      summary: rangeSummary(dayRows, days, { profile, goals, stackKeys, countedDates: statistics?.loggedKeys }),
+      statistics,
+      supplements: supplementsOut(dayRows, rangeDays),
       days: dayRows,
       workouts: dates
         .filter((d) => days[d]?.strength || hasDayActivity(days[d]))

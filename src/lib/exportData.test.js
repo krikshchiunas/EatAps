@@ -133,3 +133,47 @@ test('экспорт сериализуется в JSON и не падает н�
   assert.equal(empty.computed.summary.averagePerDay.kcal, null)
   assert.doesNotThrow(() => JSON.stringify(empty))
 })
+
+test('добавки за период: дни приёма, суммы веществ, витамины от добавок в средних', () => {
+  const out = buildExport(state, { from: '2026-11-10', to: '2026-11-11', now })
+  assert.deepEqual(out.computed.supplements.map((s) => [s.name, s.daysTaken, s.daysInRange, s.adherencePct]), [['Магний', 1, 2, 50]])
+  assert.deepEqual(out.computed.supplements[0].totalProvides, { mg: 200 })
+  assert.deepEqual(out.computed.supplements[0].dates, ['2026-11-10'])
+})
+
+test('статистика выбранного периода — как на экране «Статистика»', () => {
+  const days = {}
+  for (let i = 1; i <= 14; i++) {
+    const k = `2026-10-${String(i).padStart(2, '0')}`
+    days[k] = {
+      meals: [{ id: 'g' + i, name: 'Гречка', grams: 600, unit: 'г', kcal: 1900, protein: 70, fat: 50, carbs: 280 },
+        { id: 'c' + i, name: 'Курица', grams: 150, unit: 'г', kcal: 250, protein: 35, fat: 10, carbs: 0 }],
+      mealSections: [], supps: [{ id: 's' + i, name: 'Витамин D3', provides: { vitD: 50 } }],
+      mood: 4, wellbeing: [], note: '', weight: 80 - i * 0.1, strength: i % 2 === 0,
+    }
+  }
+  const out = buildExport({ profile, days, prefs: {} }, { from: '2026-10-08', to: '2026-10-14', now })
+  const st = out.computed.statistics
+  assert.equal(st.days, 7)
+  assert.equal(st.granularity, 'day')
+  assert.equal(st.loggedDays, 7)
+  assert.deepEqual(st.loggedKeys, ['2026-10-08', '2026-10-09', '2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14'])
+  assert.equal(st.summary.avg.kcal, 2150)
+  // Сравнение с предыдущими 7 днями (01–07 октября) — тоже из истории.
+  assert.equal(st.nutrients.kcal.series.length, 7)
+  assert.ok(st.products.frequent.some((p) => p.name === 'Гречка'))
+  assert.equal(st.body.weight.current, 78.6)
+  assert.equal(st.body.weight.delta, -0.6) // без хвоста двоичной дроби
+  // Средние витаминов — по тем же учтённым дням, витамин D — от добавки.
+  const d = out.computed.summary.micronutrientAverages
+  assert.equal(d.countedDays, 7)
+  assert.equal(d.rows.find((r) => r.key === 'vitD').fromSupp, 50)
+  assert.equal(statsGran(40), 'week')
+  assert.equal(statsGran(400), 'month')
+})
+
+function statsGran(n) {
+  const days = { '2026-01-01': { meals: [], mealSections: [], supps: [], wellbeing: [] } }
+  const to = new Date(Date.UTC(2026, 0, n)).toISOString().slice(0, 10)
+  return buildExport({ profile, days }, { from: '2026-01-01', to, now }).computed.statistics.granularity
+}

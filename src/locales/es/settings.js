@@ -132,7 +132,7 @@ export default {
     data: {
       title: 'Datos',
       export: 'Exportación',
-      exportNote: 'Un archivo JSON del periodo elegido: diario, entrenamientos y actividad, peso, bienestar, objetivos, calorías y macros, azúcares, fibra, grasas saturadas, todas las vitaminas y minerales (de comida y suplementos) y totales del periodo. Además, tus alimentos, recetas, plantillas, favoritos, suplementos y ajustes.',
+      exportNote: 'Un archivo JSON del periodo elegido: diario, entrenamientos y actividad, peso, bienestar, objetivos, calorías y macros, azúcares, fibra, grasas saturadas, todas las vitaminas y minerales (de comida y suplementos), estadísticas del periodo y un resumen de suplementos (cuántos días y cuánto tomaste). Además, tus alimentos, recetas, plantillas, favoritos, suplementos y ajustes.',
       saved: 'Archivo guardado ✓',
       download: 'Descargar mis datos',
       collecting: 'Recopilando datos…',

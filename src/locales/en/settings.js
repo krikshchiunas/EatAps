@@ -132,7 +132,7 @@ export default {
     data: {
       title: 'Data',
       export: 'Export',
-      exportNote: 'A JSON file for the chosen period: diary, workouts and activity, weight, wellbeing, targets, calories and macros, sugars, fiber, saturated fat, every vitamin and mineral (from food and supplements) and period totals. Plus your own foods, recipes, templates, favorites, supplements and settings.',
+      exportNote: 'A JSON file for the chosen period: diary, workouts and activity, weight, wellbeing, targets, calories and macros, sugars, fiber, saturated fat, every vitamin and mineral (from food and supplements), statistics for the period and a supplement summary (how many days and how much you took). Plus your own foods, recipes, templates, favorites, supplements and settings.',
       saved: 'File saved ✓',
       download: 'Download my data',
       collecting: 'Collecting data…',

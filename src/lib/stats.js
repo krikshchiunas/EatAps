@@ -651,9 +651,13 @@ function weeklyStats(days, keys, ctx, today) {
 }
 
 // ── Главная точка входа: собрать всю статистику за период ─────────────────────
+// periodKey — ключ из PERIODS или готовый период { key, days, gran } (так
+// экспорт считает статистику за выбранные «с — по»: today = «по»).
 export function computeStats(days, profile, periodKey, today = keyOf()) {
   const D = days && typeof days === 'object' ? days : {} // не падаем на null/undefined
-  const period = PERIODS.find((p) => p.key === periodKey) || PERIODS[0]
+  const period = (periodKey && typeof periodKey === 'object' && periodKey.days > 0)
+    ? periodKey
+    : PERIODS.find((p) => p.key === periodKey) || PERIODS[0]
   const keys = periodKeys(period.days, today)
   const prevKeys = periodKeys(period.days, addDays(keys[0], -1))
 

@@ -132,7 +132,7 @@ export default {
     data: {
       title: 'Daten',
       export: 'Export',
-      exportNote: 'Eine JSON-Datei für den gewählten Zeitraum: Tagebuch, Training und Aktivität, Gewicht, Befinden, Ziele, Kalorien und Makros, Zucker, Ballaststoffe, gesättigte Fette, alle Vitamine und Mineralstoffe (aus Essen und Supplements) und Zeitraum-Summen. Dazu eigene Lebensmittel, Rezepte, Vorlagen, Favoriten, Supplements und Einstellungen.',
+      exportNote: 'Eine JSON-Datei für den gewählten Zeitraum: Tagebuch, Training und Aktivität, Gewicht, Befinden, Ziele, Kalorien und Makros, Zucker, Ballaststoffe, gesättigte Fette, alle Vitamine und Mineralstoffe (aus Essen und Supplements), Statistik für den Zeitraum und eine Übersicht der Supplements (an wie vielen Tagen und wie viel). Dazu eigene Lebensmittel, Rezepte, Vorlagen, Favoriten, Supplements und Einstellungen.',
       saved: 'Datei gespeichert ✓',
       download: 'Meine Daten herunterladen',
       collecting: 'Daten werden gesammelt…',

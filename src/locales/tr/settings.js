@@ -132,7 +132,7 @@ export default {
     data: {
       title: 'Veriler',
       export: 'Dışa aktarma',
-      exportNote: 'Seçilen döneme ait bir JSON dosyası: günlük, antrenman ve aktivite, kilo, iyi oluş, hedefler, kalori ve makrolar, şekerler, lif, doymuş yağ, tüm vitamin ve mineraller (yiyecek ve takviyelerden) ve dönem toplamları. Ayrıca kendi ürünlerin, tarifler, şablonlar, favoriler, takviyeler ve ayarlar.',
+      exportNote: 'Seçilen döneme ait bir JSON dosyası: günlük, antrenman ve aktivite, kilo, iyi oluş, hedefler, kalori ve makrolar, şekerler, lif, doymuş yağ, tüm vitamin ve mineraller (yiyecek ve takviyelerden), döneme ait istatistikler ve takviye özeti (kaç gün ve ne kadar aldığın). Ayrıca kendi ürünlerin, tarifler, şablonlar, favoriler, takviyeler ve ayarlar.',
       saved: 'Dosya kaydedildi ✓',
       download: 'Verilerimi indir',
       collecting: 'Veriler toplanıyor…',
