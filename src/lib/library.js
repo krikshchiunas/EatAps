@@ -53,6 +53,11 @@ export function foodSnapshot(food) {
   if (Number.isFinite(Number(food.satFat))) snap.satFat = r1(food.satFat)
   if (Number.isFinite(Number(food.fiber))) snap.fiber = r1(food.fiber)
   if (food.barcode) snap.barcode = food.barcode
+  // Мой продукт помнит, чей он и вариантом чего является: по этим ссылкам
+  // ингредиент рецепта переключается между «моим» и «обычным» (см.
+  // RecipeEditorSheet), не теряя веса.
+  if (typeof food.productId === 'string' && food.productId) snap.productId = food.productId
+  if (typeof food.baseId === 'string' && food.baseId) snap.baseId = food.baseId
   return snap
 }
 

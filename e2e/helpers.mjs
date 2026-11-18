@@ -43,6 +43,22 @@ export function seedState() {
     profile: { name: 'Lena', sex: 'female', age: 31, height: 168, weight: 62, goal: 'maintain', activity: 'light' },
     prefs: { tourSeen: tour },
     days,
+    // «Мои продукты»: товар с полки, привязанный к Гауде из базы. Название —
+    // данные человека и показывается как есть на любом языке, поэтому латиницей:
+    // кириллица на нерусском экране — сигнал утечки для auditScreen.
+    products: [{
+      id: 'prd-gouda', name: 'Gouda 45%', brand: 'Lambert', emoji: '🧀', unit: 'г',
+      kcal: 356, protein: 25, carbs: 0, fat: 27, cat: 'cheese', baseId: 'food_gouda',
+      barcode: '4601234567893', packGrams: 230, portionGrams: 20, createdAt: NOW.toISOString(),
+    }],
+    // Рецепт с обычной Гаудой из базы — в редакторе у неё есть «Мой: …».
+    recipes: [{
+      id: 'rcp-omelette', name: 'Omelette', emoji: '🍳', servings: 2, notes: '', createdAt: NOW.toISOString(),
+      items: [
+        { name: 'Гауда', emoji: '🧀', unit: 'г', grams: 40, kcal: 142, protein: 10, carbs: 0, fat: 11 },
+        { name: 'Банан', emoji: '🍌', unit: 'г', grams: 120, kcal: 107, protein: 1.3, carbs: 27, fat: 0.4 },
+      ],
+    }],
   }
 }
 

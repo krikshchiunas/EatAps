@@ -24,7 +24,7 @@ import { TIER, isActive } from './subscription.js'
 export const EXPORT_VERSION = 3
 
 const RAW_KEYS = [
-  'profile', 'theme', 'days', 'customFoods', 'customIngredients', 'favorites',
+  'profile', 'theme', 'days', 'customFoods', 'customIngredients', 'products', 'favorites',
   'templates', 'recipes', 'supplements', 'recents', 'prefs', 'subscription',
 ]
 

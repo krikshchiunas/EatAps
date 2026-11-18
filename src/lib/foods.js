@@ -3,7 +3,7 @@ import { searchModule } from './search/lazy.js'
 import { fold } from './search/normalize.js'
 import { t, fmtNum, getLang, SOURCE_LANG } from './i18n.js'
 import { foodName } from './foodNames.js'
-import { catalogId } from './catalog.js'
+import { catalogId, canonicalName } from './catalog.js'
 import { categoryFromOff, categoryFromName, isDrinkTag } from './foodCategory.js'
 // Русские названия продуктов — в словаре по id (src/locales/ru/data/foods.js),
 // здесь только id и цифры: название хранится один раз, а не дважды.
@@ -778,6 +778,11 @@ export function basicSearch(items, query) {
     if (!i || typeof i.name !== 'string') return false
     const own = fold(i.name)
     if (own.includes(q)) return true
+    // Мой продукт находится и по продукту базы, вариантом которого он является.
+    if (i.source === 'product') {
+      const base = canonicalName('foods', i.baseId)
+      return !!base && (fold(base).includes(q) || fold(foodName(base)).includes(q))
+    }
     return i.source !== 'custom' && fold(foodName(i.name)).includes(q)
   })
   return { results, suggestion: null }
@@ -1175,11 +1180,36 @@ export function searchIngredients(query) {
 
 // ── Товар по штрихкоду ───────────────────────────────────────────────────────
 
-const OFF_FIELDS = [
-  'product_name', 'product_name_ru', 'generic_name', 'brands', 'quantity',
+// Поля, которые нужны от базы. Название — на языке интерфейса, затем основное
+// и запасные (английское, русское): у польского творога в базе может быть
+// только «product_name_pl», а человек с немецким интерфейсом должен увидеть
+// хоть какое-то название, а не «не найден».
+const OFF_COMMON_FIELDS = [
+  'product_name', 'abbreviated_product_name', 'generic_name', 'brands', 'quantity',
   'product_quantity', 'product_quantity_unit', 'serving_size', 'serving_quantity', 'nutriments', 'categories_tags',
   'image_front_url', 'image_front_small_url', 'image_url', 'image_small_url',
-].join(',')
+]
+
+const nameLangs = () => [...new Set([getLang(), SOURCE_LANG, 'en'])]
+
+function offFields() {
+  const extra = nameLangs().flatMap((l) => [`product_name_${l}`, `generic_name_${l}`])
+  return [...OFF_COMMON_FIELDS, ...extra].join(',')
+}
+
+// Название товара: сначала на языке интерфейса, потом основное, потом
+// запасные языки; общее название («сыр полутвёрдый») — в последнюю очередь.
+export function offProductName(p, langs = nameLangs()) {
+  const pick = (k) => (typeof p?.[k] === 'string' && p[k].trim() ? p[k].trim() : '')
+  const [ui, ...rest] = langs
+  return (
+    pick(`product_name_${ui}`) || pick('product_name') ||
+    rest.map((l) => pick(`product_name_${l}`)).find(Boolean) ||
+    pick('abbreviated_product_name') ||
+    pick(`generic_name_${ui}`) || pick('generic_name') ||
+    rest.map((l) => pick(`generic_name_${l}`)).find(Boolean) || ''
+  )
+}
 
 // Объём и масса в строке количества с упаковки: «330 ml», «1 л», «200 g»,
 // «16 oz (454 g)». Граница слова — не \b: для кириллицы он не работает, и
@@ -1283,32 +1313,117 @@ function offEmoji(cat, drink) {
   return drink ? '🥤' : '🛒'
 }
 
+// Калорийность на 100 г/мл из того, что есть в базе. Порядок — от прямого:
+//   1. ккал напрямую;
+//   2. килоджоули (energy-kj, а у старых записей — просто energy: в базе это
+//      всегда кДж) → ккал;
+//   3. ничего нет, но известны все три макронутриента — по коэффициентам
+//      Этуотера (4/4/9). Это не догадка, а пересчёт настоящих цифр с той же
+//      этикетки; запись помечается kcalSrc: 'macros'.
+// Отдельно — частая ошибка заполнения базы: в поле «ккал» вписаны килоджоули
+// (377 «ккал» у творога 9%). Если число в ~4.2 раза больше того, что дают
+// БЖУ, а делённое на 4.184 с ними сходится, — это кДж, и мы их переводим.
+export function offKcal(n, serving) {
+  const macros = ['proteins', 'carbohydrates', 'fat'].map((k) => per100(n, k, serving))
+  const known = macros.every((v) => v != null)
+  const fromMacros = known ? macros[0] * 4 + macros[1] * 4 + macros[2] * 9 : null
+
+  let kcal = per100(n, 'energy-kcal', serving)
+  if (kcal != null && fromMacros != null && fromMacros > 20) {
+    const asKj = kcal / 4.184
+    if (kcal > fromMacros * 2.5 && Math.abs(asKj - fromMacros) <= fromMacros * 0.25) {
+      return { kcal: asKj, src: 'kj-fixed' }
+    }
+  }
+  if (kcal != null) return { kcal, src: 'label' }
+  const kj = per100(n, 'energy-kj', serving) ?? per100(n, 'energy', serving)
+  if (kj != null) return { kcal: kj / 4.184, src: 'label' }
+  if (fromMacros != null && fromMacros > 0) return { kcal: fromMacros, src: 'macros' }
+  return { kcal: null, src: null }
+}
+
+// Сколько ждать базу. Без предела «Ищем продукт…» на плохой связи висело
+// бесконечно: fetch сам по себе не сдаётся минутами.
+const OFF_TIMEOUT_MS = 8000
+
+async function fetchOff(url, signal) {
+  const ctrl = new AbortController()
+  const onAbort = () => ctrl.abort()
+  if (signal) {
+    if (signal.aborted) ctrl.abort()
+    else signal.addEventListener?.('abort', onAbort, { once: true })
+  }
+  const timer = setTimeout(() => ctrl.abort(), OFF_TIMEOUT_MS)
+  try {
+    return await fetch(url, { signal: ctrl.signal })
+  } catch (e) {
+    // Свой таймаут — это «нет связи», а не отмена: экран предложит повторить.
+    if (!signal?.aborted && ctrl.signal.aborted) throw new Error('off_timeout')
+    throw e
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener?.('abort', onAbort)
+  }
+}
+
+// Ответы базы на время жизни вкладки: тот же товар, отсканированный второй раз
+// (вернулся в сканер, отменил), не идёт в сеть повторно. Только память —
+// в хранилище устройства история сканов не пишется.
+const BARCODE_CACHE = new Map()
+const BARCODE_CACHE_MAX = 100
+
 // Поиск продукта по считанному коду.
 //
 // Возвращает:
-//   { status: 'ok', food }            — нашли и название, и калорийность
-//   { status: 'no-nutrition', name }  — название есть, данных о составе нет
-//   { status: 'not-found' }           — такого кода в базе нет
+//   { status: 'ok', food }                   — нашли и название, и калорийность
+//   { status: 'no-nutrition', name, draft }  — название есть, данных о составе нет
+//   { status: 'not-found' }                  — такого кода в базе нет
 // Ошибка сети — исключение: «нет связи» и «нет товара» человеку надо показывать
 // по-разному, и молча подменять одно другим нельзя.
+//
+// Свои продукты (вкладка «Мои продукты») сюда не входят: их сканер узнаёт
+// раньше, без сети, — см. findOwn в BarcodeScanner.
 export async function lookupBarcode(code, signal) {
+  const cacheKey = `${getLang()}|${code}`
+  if (BARCODE_CACHE.has(cacheKey)) return BARCODE_CACHE.get(cacheKey)
   let product = null
   // Разбор штрихкода нужен только сканеру — грузится вместе с ним.
   const { barcodeVariants } = await import('./barcode.js')
+  const fields = offFields()
   // Один и тот же товар лежит в базе то с ведущим нулём, то без — пробуем оба.
   for (const variant of barcodeVariants(code)) {
-    const url = `https://ru.openfoodfacts.org/api/v2/product/${encodeURIComponent(variant)}.json?fields=${OFF_FIELDS}`
-    const res = await fetch(url, { signal })
+    const url = `https://ru.openfoodfacts.org/api/v2/product/${encodeURIComponent(variant)}.json?fields=${fields}`
+    let res
+    try {
+      res = await fetchOff(url, signal)
+    } catch (e) {
+      if (signal?.aborted) throw e
+      // Мобильная связь рвётся на полуслове чаще, чем база падает. Один повтор
+      // почти бесплатен и избавляет от лишнего «нет связи».
+      res = await fetchOff(url, signal)
+    }
     if (res.status === 404) continue
+    if (res.status >= 500 || res.status === 429) {
+      await new Promise((r) => setTimeout(r, 400))
+      res = await fetchOff(url, signal)
+      if (res.status === 404) continue
+    }
     if (!res.ok) throw new Error('off_http_' + res.status)
     const data = await res.json()
     if (data && data.status === 1 && data.product) { product = data.product; break }
   }
-  if (!product) return { status: 'not-found' }
+  const result = product ? parseOffProduct(product, code) : { status: 'not-found' }
+  if (BARCODE_CACHE.size >= BARCODE_CACHE_MAX) BARCODE_CACHE.clear()
+  BARCODE_CACHE.set(cacheKey, result)
+  return result
+}
 
-  const raw = (product.product_name_ru || product.product_name || product.generic_name || '').trim()
+// Карточка базы → запись для экрана количества. Отдельно от сети — чтобы
+// разбор можно было проверить тестом на настоящих ответах базы.
+export function parseOffProduct(product, code) {
+  const raw = offProductName(product)
   if (!raw) return { status: 'not-found' }
-  const brand = product.brands ? product.brands.split(',')[0].trim() : ''
+  const brand = product.brands ? String(product.brands).split(',')[0].trim() : ''
   const name = brand && !raw.toLowerCase().includes(brand.toLowerCase()) ? `${raw} · ${brand}` : raw
 
   const drink = looksLikeDrink(product)
@@ -1316,20 +1431,12 @@ export async function lookupBarcode(code, signal) {
   const serving = posNum(product.serving_quantity, 3000)
   const pack = posNum(product.product_quantity, 5000)
 
-  const n = product.nutriments || {}
-  let kcal = per100(n, 'energy-kcal', serving)
-  if (kcal == null) {
-    const kj = per100(n, 'energy', serving)
-    if (kj != null) kcal = kj / 4.184
-  }
-  // Название нашли — но состав в базе не заполнен. Переписывать название рукой
-  // человека уже не заставим, а цифры пусть возьмёт с этикетки.
-  if (kcal == null || !(kcal > 0) || kcal >= 1000) return { status: 'no-nutrition', name, drink }
-
-  // Порции — только те, что указаны на упаковке.
+  // Порции — только те, что указаны на упаковке. «пачка» — каталожная порция
+  // (portion_pack): она переводится. Раньше здесь была «упаковка», которой в
+  // каталоге нет, и в английском интерфейсе на кнопке висело русское слово.
   const portions = []
   if (serving) portions.push({ label: 'порция', grams: Math.round(serving) })
-  if (pack && pack !== serving) portions.push({ label: 'упаковка', grams: Math.round(pack) })
+  if (pack && pack !== serving) portions.push({ label: /* @i18n-data */ 'пачка', grams: Math.round(pack) })
 
   // Категория — из таксономии самой базы (categories_tags), а не выдуманная.
   // Без неё вся классификация питательности работала по одному названию, а
@@ -1339,8 +1446,28 @@ export async function lookupBarcode(code, signal) {
   // «тарелка 350 г» для пачки с полки бессмысленны. Нет подходящего тега —
   // нет и категории, как раньше.
   const cat = categoryFromOff(product.categories_tags)
+  // Фото упаковки. База отдаёт лицевую сторону в нескольких размерах и на
+  // разных языках (на русском поддомене — сразу русскую этикетку, если она
+  // залита). Поля может не быть вовсе — тогда ключа photo просто нет.
+  const photo = product.image_front_url || product.image_front_small_url || product.image_url || product.image_small_url
+
+  const n = product.nutriments || {}
+  const { kcal, src } = offKcal(n, serving)
+  // Название нашли — но состав в базе не заполнен. Переписывать название рукой
+  // человека уже не заставим, а цифры пусть возьмёт с этикетки. Всё остальное,
+  // что известно (бренд, вес пачки, фото, штрихкод), едет в черновик своего
+  // продукта: вписать нужно только цифры.
+  if (kcal == null || !(kcal > 0) || kcal >= 1000) {
+    const draft = { name, title: raw, brand, unit, barcode: code, portions }
+    if (cat) draft.cat = cat
+    if (photo) draft.photo = photo
+    return { status: 'no-nutrition', name, drink, draft }
+  }
+
   const food = {
     name,
+    title: raw,
+    brand,
     emoji: offEmoji(cat, drink),
     unit,
     kcal: Math.round(kcal),
@@ -1352,11 +1479,8 @@ export async function lookupBarcode(code, signal) {
     barcode: code,
     portions,
   }
+  if (src === 'macros' || src === 'kj-fixed') food.kcalSrc = src
   if (cat) food.cat = cat
-  // Фото упаковки. База отдаёт лицевую сторону в нескольких размерах и на
-  // разных языках (на русском поддомене — сразу русскую этикетку, если она
-  // залита). Поля может не быть вовсе — тогда ключа photo просто нет.
-  const photo = product.image_front_url || product.image_front_small_url || product.image_url || product.image_small_url
   if (photo) food.photo = photo
 
   const sugar = per100(n, 'sugars', serving)

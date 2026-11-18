@@ -23,8 +23,8 @@ import { fold } from './normalize.js'
 import { latToCyr, cyrToLat, swapLayout } from './normalizeExtra.js'
 import { expandSynonyms, SYNONYM_WEIGHT } from './synonyms.js'
 import KEYWORDS from './keywords.js'
-import { getLang, dataTable, LANGS, SOURCE_LANG } from '../i18n.js'
-import { catalogId } from '../catalog.js'
+import { getLang, dataTable, LANGS, SOURCE_LANG, t, hasOwn } from '../i18n.js'
+import { catalogId, canonicalName } from '../catalog.js'
 
 const own = (o, k) => !!o && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k)
 
@@ -86,8 +86,36 @@ function catalogFields(id, ruName, extraKeywords) {
   return { fields, shown }
 }
 
+// Мой продукт (товар с полки, см. lib/myProducts.js): своё название и бренд —
+// главное, а названия продукта базы, вариантом которого он является, — на всех
+// языках, как синонимы. «Гауда 45% · Ламбер» находится по «Ламбер», по
+// «гауда», по «сыр» и по «gouda», но своё название при этом весит больше:
+// свой товар не становится чужим продуктом базы и не склеивается с ним в
+// одну карточку (ключ — свой, по id продукта).
+export function productEntity(item, i) {
+  if (!item || typeof item.name !== 'string') return null
+  const fields = [{ text: item.name, kind: 'name', lang: '', primary: true }]
+  if (item.brand) fields.push({ text: item.brand, kind: 'keyword', lang: '' })
+  // Категория на языке интерфейса («Сыры», «Cheese»): у «Гауды» в названии
+  // нет слова «сыр», а свой сыр человек ищет именно так.
+  if (item.cat && hasOwn(`add.sec.${item.cat}`)) fields.push({ text: t(`add.sec.${item.cat}`), kind: 'keyword', lang: getLang() })
+  const lat = cyrToLat(fold(item.name))
+  if (lat) fields.push({ text: lat, kind: 'translit', lang: '' })
+  const base = catalogId('foods', item.baseId)
+  if (base) {
+    const ruName = canonicalName('foods', base) || ''
+    const { fields: baseFields } = catalogFields(base, ruName)
+    for (const f of baseFields) {
+      if (f.kind === 'keyword') continue // ключевые слова базы — слишком широкие для своего товара
+      if (f.text) fields.push({ ...f, kind: 'alias', primary: false })
+    }
+  }
+  return { key: `prd:${item.productId ?? item.id ?? item.name}:${i}`, item, fields, shownLen: item.name.length }
+}
+
 function itemEntity(item, i) {
   if (!item || typeof item.name !== 'string') return null
+  if (item.source === 'product') return productEntity(item, i)
   // Своё (source: 'custom') каталожным не считается, даже если названо так же,
   // как продукт базы: у него свои цифры, и найтись оно должно как своё.
   const id = item.source === 'custom' ? null : catalogId('foods', item.foodId) || catalogId('foods', item.name)

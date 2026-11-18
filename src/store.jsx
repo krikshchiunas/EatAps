@@ -15,8 +15,9 @@ import {
   emptyMeta, blankDay, pickSyncable, normalizeState, mergeState, sameSyncable, clearedState,
   addTombstone, setDayFieldTs, setPrefTs,
   tombMeal, tombSection, tombCustomFood, tombCustomIngredient, tombFavorite,
-  tombTemplate, tombRecipe, tombSupp, tombSupplement, recentKey,
+  tombTemplate, tombRecipe, tombSupp, tombSupplement, tombProduct, recentKey,
 } from './lib/syncModel.js'
+import { upsertProduct } from './lib/myProducts.js'
 import { createSyncEngine, SYNC } from './lib/syncEngine.js'
 import { buildFoodMemory, favoriteKey, foodSnapshot, MAX_FAVORITES } from './lib/library.js'
 import { sanitizeMicroGoal } from './lib/micronutrients.js'
@@ -43,6 +44,7 @@ const empty = {
   days: {},
   customFoods: [],
   customIngredients: [],
+  products: [],
   favorites: [],
   templates: [],
   recipes: [],
@@ -788,6 +790,38 @@ export function StoreProvider({ children }) {
     }))
   }, [])
 
+  // ── Мои продукты ────────────────────────────────────────────────────────────
+  // Товары с полки: название, бренд, цифры с этикетки, штрихкод и ссылка на
+  // продукт базы (см. lib/myProducts.js). Правила — как у избранного: решение
+  // «новый или правка» принимается ДО setState по актуальному состоянию, а
+  // обновляющий колбэк остаётся чистым (React вправе вызвать его дважды).
+  //
+  // Возвращает { entry, existing, full }: existing — продукт с тем же id или
+  // штрихкодом уже был и обновлён; full — список полон, ничего не сохранено.
+  const saveProduct = useCallback((product) => {
+    const ts = clock.tick()
+    const id = product?.id || newId()
+    const res = upsertProduct(stateRef.current.products, product, { id, ts })
+    if (!res.entry) return { entry: null, existing: null, full: res.full }
+    const entry = res.entry
+    setState((s) => {
+      const cur = s.products || []
+      const i = cur.findIndex((p) => p.id === entry.id)
+      if (i >= 0) return { ...s, products: cur.map((p, k) => (k === i ? entry : p)) }
+      return { ...s, products: [entry, ...cur] }
+    })
+    return { entry, existing: res.existing, full: false }
+  }, [])
+
+  const removeProduct = useCallback((id) => {
+    const ts = clock.tick()
+    setState((s) => ({
+      ...s,
+      products: (s.products || []).filter((p) => p.id !== id),
+      meta: addTombstone(s.meta, tombProduct(id), ts),
+    }))
+  }, [])
+
   // ── Избранное ───────────────────────────────────────────────────────────────
   // Явный выбор человека, в отличие от вычисляемых «частого» и «недавнего».
   // Сущность с id и меткой — сливается между устройствами теми же правилами,
@@ -1153,6 +1187,7 @@ export function StoreProvider({ children }) {
     resolvedTheme: effectiveTheme(state.theme),
     customFoods: state.customFoods || [],
     customIngredients: state.customIngredients || [],
+    products: state.products || [],
     favorites: state.favorites || [],
     templates: state.templates || [],
     recipes: state.recipes || [],
@@ -1190,6 +1225,8 @@ export function StoreProvider({ children }) {
     addCustomFood,
     removeCustomFood,
     addCustomIngredient,
+    saveProduct,
+    removeProduct,
     toggleFavorite,
     saveTemplate,
     removeTemplate,
@@ -1236,7 +1273,7 @@ export function StoreProvider({ children }) {
   }), [
     state, auth, phase, recovering, syncStatus, foodMemory,
     setProfile, setTheme, addFood, addFoods, repeatDay, repeatMeal, removeFood, editFood, upsertMealSection, deleteMealSection,
-    moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient, toggleFavorite,
+    moveMealSection, setMood, toggleWellbeing, addCustomFood, removeCustomFood, addCustomIngredient, saveProduct, removeProduct, toggleFavorite,
     saveTemplate, removeTemplate, saveRecipe, removeRecipe,
     addSupp, removeSupp, editSupp, saveStackItem, removeStackItem, setSuppDose, setMicroGoal,
     setDayWeight, setDayActivity, setDayActivityScore, setDayStrength, setDefaultActivityScore,

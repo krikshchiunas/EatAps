@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense } from 'react'
-import { MILKS, BASE_GROUPS, FOODS, scale, searchLocal, searchLocalDetailed, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel, amountLabel, unitLabel, formatAmount } from '../lib/foods.js'
+import { MILKS, BASE_GROUPS, FOODS, CONSTRUCTOR_ING, scale, searchLocal, searchLocalDetailed, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel, amountLabel, unitLabel, formatAmount } from '../lib/foods.js'
 import { foodName, catalogName, methodLabel, portionLabel, alcLabel } from '../lib/foodNames.js'
 import { canonicalName, methodId } from '../lib/catalog.js'
 import { t, getLang, locale } from '../lib/i18n.js'
@@ -14,6 +14,9 @@ import { useSearchNames } from '../lib/useSearchNames.js'
 import { useStore } from '../store.jsx'
 import Toast from './Toast.jsx'
 import RecipeEditorSheet from './RecipeEditorSheet.jsx'
+import ProductEditorSheet from './ProductEditorSheet.jsx'
+import { ProductRow, useProductFilter } from './ProductRow.jsx'
+import { productsAsFoods, productAsFood, findProductByBarcode, productById, productLabel, productsForBase, ownProductsFirst } from '../lib/myProducts.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 
@@ -60,8 +63,9 @@ const isHotDrink = (food) => {
 }
 
 // Подпись категории — из словаря (add.sec.<ключ>) в момент показа.
+// «Мои продукты» — первыми: это то, что человек покупает и ест чаще всего.
 const SECTIONS = [
-  'mine', 'drink', 'alcohol', 'grain', 'meat', 'poultry', 'fish', 'veg', 'fruit', 'dairy', 'cheese',
+  'products', 'mine', 'drink', 'alcohol', 'grain', 'meat', 'poultry', 'fish', 'veg', 'fruit', 'dairy', 'cheese',
   'nut', 'bread', 'pastry', 'snack', 'sweet', 'sauce', 'dish', 'dessert', 'mcdonalds', 'fastfood',
 ].map((key) => ({ key, get label() { return t(`add.sec.${key}`) } }))
 
@@ -79,7 +83,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
   const {
     customFoods, customIngredients, recents, favorites, foodMemory, prefs,
     addCustomFood, removeCustomFood, addCustomIngredient, toggleFavorite, setPref,
-    templates, recipes, removeTemplate, saveRecipe, removeRecipe,
+    templates, recipes, removeTemplate, saveRecipe, removeRecipe, products,
   } = useStore()
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
 
@@ -103,6 +107,11 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
   const [mode, setMode] = useState('search')
   const [scanning, setScanning] = useState(false)
   const [toast, setToast] = useState(null)
+  // Редактор своего продукта: null | { product } | { draft, note, then }.
+  // then: 'pick' — после сохранения сразу открыть продукт на экране количества
+  // (так работает «нет в базе → завести свой → записать съеденное»).
+  const [productEditor, setProductEditor] = useState(null)
+  const [productQuery, setProductQuery] = useState('')
 
   // Тост может нести действие «Отменить», поэтому это не строка, а объект.
   // Временем жизни и разметкой заведует сам Toast.
@@ -149,9 +158,13 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
   // Свои продукты ищутся вместе с базой, а не отдельным списком с примитивным
   // «включает подстроку»: иначе «мой борщь» с опечаткой не находился, а точное
   // совпадение из базы уезжало вниз под неточное своё.
+  //
+  // Мои продукты идут первыми и ни с чем не склеиваются: «Гауда» из базы и
+  // своя Гауда с полки — два разных выбора, и оба должны остаться в выдаче.
+  const productFoods = useMemo(() => productsAsFoods(products), [products])
   const searchPool = useMemo(() => {
     const seen = new Set()
-    const out = []
+    const out = [...productFoods]
     for (const f of [...customFoods, ...FOODS]) {
       const k = favoriteKey(f)
       if (seen.has(k)) continue // свой продукт перекрывает одноимённый из базы
@@ -159,7 +172,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
       out.push(f)
     }
     return out
-  }, [customFoods])
+  }, [customFoods, productFoods])
+  const shownProducts = useProductFilter(products, section === 'products' ? productQuery : '')
 
   // Названия всех языков догружаются в фоне; когда придут — выдача обновится.
   const namesReady = useSearchNames()
@@ -168,8 +182,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     [q, query, searchPool, boost, namesReady],
   )
   const local = useMemo(() => {
-    if (q) return found.results
-    if (section === 'alcohol') return []
+    if (q) return ownProductsFirst(found.results)
+    if (section === 'alcohol' || section === 'products') return []
     if (section === 'mine') return customFoods.filter((f) => f.source === 'custom')
     if (section) return searchPool.filter((f) => f.cat === section && !f.builder)
     return searchPool
@@ -367,7 +381,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     // Памяти нет — прежний список недавних, затем нейтральное значение.
     const remembered = memoryPortion(foodMemory, { name: food.name, unit: u })
     const last = remembered || recents.find((r) => r.name === food.name && r.unit === u && r.grams)?.grams
-    setGrams(last ? String(last) : u === 'мл' ? '250' : '150')
+    // Свой продукт знает порцию с упаковки — она точнее нейтральных 150 г.
+    setGrams(last ? String(last) : food.defaultGrams ? String(food.defaultGrams) : u === 'мл' ? '250' : '150')
   }
 
   // Тап по строке памяти → экран количества. Сначала ищем канонический продукт
@@ -405,6 +420,47 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     // человек всё равно съедает не «порцию по ГОСТу», а сколько съел.
     const fallback = food.unit === 'мл' ? '250' : '100'
     setGrams(food.defaultGrams ? String(food.defaultGrams) : fallback)
+  }
+
+  // Сканер сначала смотрит в «Мои продукты»: однажды заведённая пачка
+  // узнаётся мгновенно, без сети и со своими цифрами.
+  const findOwnProduct = (code) => {
+    const p = findProductByBarcode(products, code)
+    return p ? productAsFood(p) : null
+  }
+
+  // Кода нет в базе или у товара нет состава — заводим свой продукт с этим
+  // штрихкодом. Вписать цифры с этикетки придётся один раз: в следующий раз
+  // сканер узнает пачку сам (см. findOwnProduct).
+  const productFromScan = (draft) => {
+    setScanning(false)
+    setProductEditor({ draft, then: 'pick' })
+  }
+
+  // Открыть редактор своего продукта на основе того, что сейчас выбрано:
+  // товар со штрихкода, продукт базы, найденное в глобальной базе.
+  const toMyProducts = (food) => {
+    if (food?.source === 'product') {
+      const own = productById(products, food.productId)
+      if (own) { setProductEditor({ product: own, then: 'pick' }); return }
+    }
+    const fromBase = food?.source !== 'off' && food?.foodId
+    // Каноническое название базы — русское; в форму идёт название на языке
+    // человека: своё он и назовёт по-своему.
+    const draft = fromBase ? { ...food, name: foodName(food.name, food.foodId) } : food
+    setProductEditor({ draft, note: fromBase ? 'fromBase' : food?.barcode ? 'filled' : null, then: 'pick' })
+  }
+
+  const onProductSaved = (entry, { updated } = {}) => {
+    showToast(t(updated ? 'products.updated' : 'products.saved', { name: productLabel(entry) }))
+    if (productEditor?.then === 'pick') {
+      const food = productAsFood(entry)
+      if (food) {
+        const keepGrams = selected && grams
+        pickScanned(food)
+        if (keepGrams) setGrams(keepGrams)
+      }
+    }
   }
 
   // Товара нет в базе (или у него нет состава) — уходим на ручной ввод. Если
@@ -539,6 +595,20 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
           показывает и главный экран, после того как лист закроется. */}
       <Toast toast={toast} onDone={() => setToast(null)} />
 
+      {productEditor && (
+        <ProductEditorSheet
+          product={productEditor.product}
+          draft={productEditor.draft}
+          note={productEditor.note}
+          onClose={() => setProductEditor(null)}
+          onSaved={onProductSaved}
+          onDeleted={() => {
+            showToast(t('products.deleted'))
+            if (selected?.source === 'product' && selected.productId === productEditor.product?.id) clearFood()
+          }}
+        />
+      )}
+
       {editRcp && (
         <RecipeEditorSheet
           recipe={editRcp}
@@ -602,6 +672,55 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
                 setAlcQuery={setAlcQuery}
                 onPick={(item) => setAlcItem(item)}
               />
+            )}
+
+            {/* «Мои продукты» — то, что человек покупает. Здесь их и заводят:
+                руками или по штрихкоду; отсюда же добавляют в приём. */}
+            {!query.trim() && section === 'products' && (
+              <div style={{ marginBottom: 6 }}>
+                <div className="row gap8" style={{ marginBottom: 14 }}>
+                  <button className="btn soft" style={{ flex: 1, height: 44, marginTop: 0 }} onClick={() => setProductEditor({ draft: {}, then: 'pick' })}>＋ {t('products.add')}</button>
+                  <button className="btn soft" style={{ flex: 1, height: 44, marginTop: 0 }} onClick={() => setScanning(true)}>📷 {t('products.scan')}</button>
+                </div>
+                {products.length >= 6 && (
+                  <input
+                    className="input"
+                    type="search"
+                    enterKeyHint="search"
+                    autoComplete="off"
+                    placeholder={t('products.searchPh')}
+                    aria-label={t('products.searchPh')}
+                    value={productQuery}
+                    onChange={(e) => setProductQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
+                    style={{ marginBottom: 12 }}
+                  />
+                )}
+                {products.length === 0 ? (
+                  <p className="muted" style={{ padding: '4px 0 10px', fontSize: 14, lineHeight: 1.5 }}>{t('products.empty')}</p>
+                ) : (
+                  <>
+                    <SectionLabel text={t('products.title')} count={products.length} />
+                    {shownProducts.map((p) => {
+                      const food = productAsFood(p)
+                      const g = memoryPortion(foodMemory, food)
+                      return (
+                        <ProductRow
+                          key={p.id}
+                          p={p}
+                          onOpen={() => pickFood(food)}
+                          onEdit={() => setProductEditor({ product: p })}
+                          quickLabel={g > 0 ? amountLabel(g, food.unit) : null}
+                          onQuick={() => quickAdd({ ...scale(food, g), name: food.name, emoji: food.emoji, unit: food.unit, cat: food.cat, grams: g })}
+                        />
+                      )
+                    })}
+                    {shownProducts.length === 0 && (
+                      <p className="muted" style={{ fontSize: 14, padding: '8px 0' }}>{t('products.nothingFound')}</p>
+                    )}
+                  </>
+                )}
+              </div>
             )}
 
             {/* «Моё» — место, где человек управляет тем, что создал сам:
@@ -926,7 +1045,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
               </div>
             )}
 
-            {local.length === 0 && !query.trim() && !hasMemory && section !== 'alcohol' && section !== 'mine' && (
+            {local.length === 0 && !query.trim() && !hasMemory && section !== 'alcohol' && section !== 'mine' && section !== 'products' && (
               <p className="muted" style={{ padding: '10px 0' }}>{t('add.startTyping')}</p>
             )}
 
@@ -979,7 +1098,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
         )}
 
         {mode === 'search' && selected?.builder === 'constructor' && (
-          <ConstructorBuilder selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} addCustomFood={addCustomFood} customIngredients={customIngredients} addCustomIngredient={addCustomIngredient} type={type} />
+          <ConstructorBuilder selected={selected} onBack={clearFood} onAdd={emit} onClose={onClose} addCustomFood={addCustomFood} customIngredients={customIngredients} addCustomIngredient={addCustomIngredient} products={products} productFoods={productFoods} type={type} />
         )}
 
         {mode === 'search' && selected?.kind === 'composite' && !selected.builder && (
@@ -1003,7 +1122,20 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
               <FoodThumb key={selected.photo || selected.name} food={selected} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="meal-name" style={{ fontSize: 18 }}>{foodName(selected.name)}</div>
-                <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={clearFood}>{t('add.pickOther')}</button>
+                {selected.source === 'product' && (
+                  <div className="meal-meta">{t('products.badge')}</div>
+                )}
+                <div className="row wrap" style={{ columnGap: 14 }}>
+                  <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={clearFood}>{t('add.pickOther')}</button>
+                  {/* Свой продукт — правится; любой другой простой продукт можно
+                      сделать своим: со штрихкода — с цифрами с упаковки, из
+                      базы — как образец, который поправят по своей этикетке. */}
+                  {!selected.hasVariants && (
+                    <button className="tap44" style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 550 }} onClick={() => toMyProducts(selected)}>
+                      {selected.source === 'product' ? t('products.edit') : `＋ ${t('products.toMine')}`}
+                    </button>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => toggleFav(selected)}
@@ -1258,6 +1390,8 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
             onClose={() => setScanning(false)}
             onFound={pickScanned}
             onManual={manualFromScan}
+            onMissing={productFromScan}
+            findOwn={findOwnProduct}
           />
         </Suspense>
       )}
@@ -1630,7 +1764,32 @@ function Stepper({ value, set, min = 0, suffix }) {
   )
 }
 
-function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, customIngredients = [], addCustomIngredient, type }) {
+// Ингредиенты конструктора по id продукта базы: у своего продукта, который
+// является вариантом такого ингредиента, та же мера («ломтик 20 г» у сыра).
+const ING_BY_FOOD_ID = new Map(CONSTRUCTOR_ING.filter((i) => i.foodId).map((i) => [i.foodId, i]))
+
+// Свой продукт → ингредиент конструктора (значения на 100 г, мера, сколько
+// класть по умолчанию). Мера — от ингредиента базы, вариантом которого он
+// является, иначе порция с упаковки.
+function productIngredient(food) {
+  const base = ING_BY_FOOD_ID.get(food.baseId)
+  return {
+    name: food.name,
+    kcal: food.kcal,
+    protein: food.protein,
+    carbs: food.carbs,
+    fat: food.fat,
+    each: base?.each || food.defaultGrams || 30,
+    unitName: base?.unitName || 'порция',
+    def: base?.def || 1,
+    emoji: food.emoji,
+    product: true,
+    productId: food.productId,
+    baseId: food.baseId || null,
+  }
+}
+
+function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, customIngredients = [], addCustomIngredient, products = [], productFoods = [], type }) {
   const group = BASE_GROUPS[selected.baseGroup] || BASE_GROUPS.bread
   const [baseName, setBaseName] = useState(selected.preset?.base || group.items[0].name)
   const [slices, setSlices] = useState(selected.preset?.slices || 1)
@@ -1684,7 +1843,27 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
 
   const nq = ingQuery.trim().toLowerCase().replace(/ё/g, 'е')
   const customMatches = nq ? customIngredients.filter((i) => i.name.toLowerCase().replace(/ё/g, 'е').includes(nq)) : []
-  const suggestions = ingQuery.trim() ? [...customMatches, ...searchIngredients(ingQuery).slice(0, 8)] : []
+  // Свои продукты — сразу после своих ингредиентов: «сыр» показывает и свою
+  // Гауду с полки, и обычный сыр из базы.
+  const productMatches = ingQuery.trim() ? searchLocal(ingQuery, { items: productFoods }).slice(0, 4).map(productIngredient) : []
+  const suggestions = ingQuery.trim() ? [...customMatches, ...productMatches, ...searchIngredients(ingQuery).slice(0, 8)] : []
+
+  // «Мой ↔ обычный» для начинки: тот же ингредиент другим продуктом, сколько
+  // штук положено — столько и остаётся.
+  const swapsFor = (it) => {
+    const taken = new Set(items.map((x) => x.name))
+    if (it.product) {
+      const base = ING_BY_FOOD_ID.get(it.baseId)
+      return base && !taken.has(base.name) ? [{ ing: base, mine: false }] : []
+    }
+    return productsForBase(products, it.foodId).slice(0, 2)
+      .map((p) => productAsFood(p)).filter(Boolean).map(productIngredient)
+      .filter((ing) => !taken.has(ing.name))
+      .map((ing) => ({ ing, mine: true }))
+  }
+  const swapIngredient = (it, ing) => {
+    setItems((prev) => prev.map((p) => (p.name === it.name ? { ...ing, count: p.count } : p)))
+  }
 
   const addCustom = () => {
     const nm = ci.name.trim()
@@ -1753,25 +1932,53 @@ function ConstructorBuilder({ selected, onBack, onAdd, onClose, addCustomFood, c
       <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>{t('add.filling')}</label>
       {withMacros.length > 0 && (
         <div style={{ marginBottom: 12 }}>
-          {withMacros.map((it) => (
-            <div key={it.name} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.emoji} {foodName(it.name)}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{it.count} {portionLabel(it.unitName)} · {t('units.gN', { n: it.grams })} · {t('units.kcalN', { n: it.m.kcal })}</div>
+          {withMacros.map((it) => {
+            const swaps = swapsFor(it)
+            return (
+              <div key={it.name} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <div className="row between">
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 550, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.emoji} {foodName(it.name)}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                      {it.count} {portionLabel(it.unitName)} · {t('units.gN', { n: it.grams })} · {t('units.kcalN', { n: it.m.kcal })}
+                      {it.product ? ` · ${t('products.tag')}` : ''}
+                    </div>
+                  </div>
+                  <Stepper value={it.count} set={(c) => setCount(it.name, c)} min={0} />
+                </div>
+                {swaps.length > 0 && (
+                  <div className="row wrap gap8" style={{ marginTop: 6 }}>
+                    {swaps.map(({ ing, mine }) => {
+                      const label = mine ? ing.name : foodName(ing.name)
+                      return (
+                        <button
+                          key={(mine ? 'p:' : 'b:') + ing.name}
+                          className="chip"
+                          onClick={() => swapIngredient(it, ing)}
+                          aria-label={t('recipe.swapAria', { from: foodName(it.name), to: label })}
+                          style={{ fontSize: 13, maxWidth: '100%', minWidth: 0 }}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                            ⇄ {mine ? t('recipe.swapMine', { name: label }) : t('recipe.swapBase', { name: label })}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-              <Stepper value={it.count} set={(c) => setCount(it.name, c)} min={0} />
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
       <input className="input" placeholder={t('add.ingPh')} value={ingQuery} onChange={(e) => setIngQuery(e.target.value)} style={{ marginBottom: suggestions.length ? 8 : 12 }} />
       {suggestions.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           {suggestions.map((ing) => (
-            <button key={ing.name} className="meal-item" style={{ textAlign: 'start', width: '100%' }} onClick={() => addIngredient(ing)}>
+            <button key={(ing.product ? 'p:' : '') + ing.name} className="meal-item" style={{ textAlign: 'start', width: '100%' }} onClick={() => addIngredient(ing)}>
               <span className="meal-emoji">{ing.emoji}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
-                <span className="meal-name" style={{ display: 'block' }}>{foodName(ing.name)}{ing.custom ? ` · ${t('add.mineTag')}` : ''}</span>
+                <span className="meal-name" style={{ display: 'block' }}>{foodName(ing.name)}{ing.custom ? ` · ${t('add.mineTag')}` : ing.product ? ` · ${t('products.tag')}` : ''}</span>
                 <span className="meal-meta">{t('add.ingMeta', { n: ing.def, unit: portionLabel(ing.unitName), kcal: ing.kcal })}</span>
               </span>
               <span style={{ color: 'var(--primary)', fontSize: 22 }}>＋</span>
@@ -2078,6 +2285,7 @@ function FoodRow({ f, onClick, onDelete, favorite, onFav, quickLabel, onQuick })
   // зашиты «100 мл» и «мой напиток» — собственное БЛЮДО подписывалось как
   // напиток и в чужих единицах.
   else if (f.source === 'custom') subtitle = t('add.subCustomFood', { n: f.kcal, macros: macroText(f), unit: unitLabel(f.unit || 'г') })
+  else if (f.source === 'product') subtitle = t('add.subProduct', { n: f.kcal, macros: macroText(f), unit: unitLabel(f.unit || 'г') })
   else if (f.hasVariants) subtitle = t('add.subMethods', { count: f.methods.length })
   else subtitle = t('add.subFood', { n: f.kcal, macros: macroText(f), unit: unitLabel(f.unit || 'г') })
   const chevron = f.builder || f.hasVariants || f.kind === 'composite' || f.dairy ? '›' : '＋'

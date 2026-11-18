@@ -37,6 +37,9 @@ import { t } from '../lib/i18n.js'
 const AuthSheet = lazyWithReload(() => import('./AuthSheet.jsx'))
 const MyProfileSheet = lazyWithReload(() => import('./MyProfileSheet.jsx'))
 const ChallengesScreen = lazyWithReload(() => import('./ChallengesScreen.jsx'))
+// «Мои продукты» открывают не на каждом заходе в профиль — редактор со
+// сканером и поиском по базе в стартовый бандл не нужен.
+const MyProductsScreen = lazyWithReload(() => import('./MyProductsScreen.jsx'))
 
 // Заголовок списка — та же подпись, что у счётчика, по которому его открыли.
 const LIST_TITLE = { followers: 'counts.followers', following: 'counts.following', friends: 'counts.friends' }
@@ -60,7 +63,7 @@ function GearIcon() {
 }
 
 export default function ProfileScreen({ setTab, onOpenChat }) {
-  const { profile, days, dayOf, customFoods, user, supabaseEnabled } = useStore()
+  const { profile, days, dayOf, customFoods, products, user, supabaseEnabled } = useStore()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
@@ -72,6 +75,7 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
   const [eventTab, setEventTab] = useState('feed')
   const [unreadEvents, setUnreadEvents] = useState(0)
   const [focusTab, setFocusTab] = useState(null)
+  const [productsOpen, setProductsOpen] = useState(false)
 
   const uid = user?.id
 
@@ -173,6 +177,28 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
         </button>
       </div>
 
+      {/* «Мои продукты» — личное, как настройки, а не часть витрины: друг их
+          не видит. Поэтому отдельная строка над профилем, а не вкладка в нём,
+          и она есть и у гостя — продукты живут и без аккаунта. */}
+      <button
+        className="card"
+        style={{ width: '100%', textAlign: 'start', padding: '13px 14px', marginBottom: 16 }}
+        onClick={() => setProductsOpen(true)}
+      >
+        <div className="row between" style={{ alignItems: 'center', gap: 12 }}>
+          <span className="row gap12" style={{ alignItems: 'center', minWidth: 0 }}>
+            <span className="meal-emoji" style={{ flex: '0 0 auto' }}>🛒</span>
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 15, fontWeight: 600 }}>{t('products.title')}</span>
+              <span className="meal-meta" style={{ display: 'block' }}>
+                {products.length ? t('products.count', { count: products.length }) : t('products.rowHint')}
+              </span>
+            </span>
+          </span>
+          <span className="muted" style={{ fontSize: 18, lineHeight: 1, flex: '0 0 auto' }}>›</span>
+        </div>
+      </button>
+
       <UserProfileView
         isOwnProfile
         userId={uid || null}
@@ -260,6 +286,18 @@ export default function ProfileScreen({ setTab, onOpenChat }) {
           onOpenProfile={setOpenProfile}
           onOpenChat={onOpenChat ? (peer) => { setOpenProfile(null); onOpenChat(peer.id) } : null}
         />
+      )}
+
+      {productsOpen && (
+        <PushScreen onClose={() => setProductsOpen(false)}>
+          {(close) => (
+            <LazyBoundary onClose={close}>
+              <Suspense fallback={<div className="screen"><p className="muted" style={{ fontSize: 14 }}>{t('social.loading')}</p></div>}>
+                <MyProductsScreen onClose={close} />
+              </Suspense>
+            </LazyBoundary>
+          )}
+        </PushScreen>
       )}
 
       {settingsOpen && (

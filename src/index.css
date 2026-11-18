@@ -1849,6 +1849,8 @@ input, select { font-family: inherit; font-size: 16px; color: inherit; }
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   color: #fff; font-size: 16px;
 }
+/* Фонарик включён — кнопка светлая, как сам фонарик. */
+.scanner-x.on { background: rgba(255, 255, 255, 0.92); color: #000; }
 
 /* Рамка: вырез в затемнении делает огромная тень, а не отдельные накладки. */
 .scanner-frame {

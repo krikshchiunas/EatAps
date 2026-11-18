@@ -25,6 +25,7 @@ const state = {
   },
   customFoods: [{ id: 'cf1', name: 'Мой батончик' }],
   customIngredients: [{ id: 'ci1', name: 'Мука' }],
+  products: [{ id: 'p1', name: 'Гауда 45%', brand: 'Ламбер', kcal: 356, barcode: '4601234567893' }],
   favorites: [{ id: 'f1' }],
   templates: [{ id: 't1' }],
   recipes: [{ id: 'r1' }],
@@ -38,7 +39,7 @@ const now = new Date('2026-11-12T10:00:00Z')
 
 test('сырой слой содержит каждый раздел состояния без исключений', () => {
   const out = buildExport(state, { now })
-  for (const key of ['profile', 'theme', 'days', 'customFoods', 'customIngredients', 'favorites', 'templates', 'recipes', 'supplements', 'recents', 'prefs', 'subscription']) {
+  for (const key of ['profile', 'theme', 'days', 'customFoods', 'customIngredients', 'products', 'favorites', 'templates', 'recipes', 'supplements', 'recents', 'prefs', 'subscription']) {
     assert.deepEqual(out.raw[key], state[key], key)
   }
 })

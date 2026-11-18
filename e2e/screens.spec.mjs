@@ -52,6 +52,29 @@ const SCREENS = [
     await nav(L, 'nav.profile')(page)
     await page.getByRole('button', { name: L('profile.tabSelf'), exact: true }).first().click()
   }],
+  ['мои продукты', async (page, L) => {
+    await nav(L, 'nav.profile')(page)
+    await btn(page, L('products.title')).click()
+  }],
+  ['новый продукт', async (page, L) => {
+    await nav(L, 'nav.profile')(page)
+    await btn(page, L('products.title')).click()
+    await page.getByRole('button', { name: L('products.add') }).first().click()
+  }],
+  ['свой продукт: правка', async (page, L) => {
+    await nav(L, 'nav.profile')(page)
+    await btn(page, L('products.title')).click()
+    await page.getByRole('button', { name: /Gouda 45% · Lambert/ }).first().click()
+  }],
+  ['добавление: мои продукты', async (page, L) => {
+    await btn(page, L('day.addFood')).click()
+    await page.getByRole('button', { name: L('add.sec.products'), exact: true }).first().click()
+  }],
+  ['рецепт: мой или обычный', async (page, L) => {
+    await btn(page, L('day.addFood')).click()
+    await page.getByRole('button', { name: /Omelette/ }).first().click()
+    await page.getByRole('button', { name: L('add.editRecipe') }).first().click()
+  }],
   ['настройки', async (page, L) => {
     await nav(L, 'nav.profile')(page)
     await btn(page, L('settings.title')).click()

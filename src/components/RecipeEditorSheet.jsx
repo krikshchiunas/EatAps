@@ -2,8 +2,11 @@ import { useState, useMemo } from 'react'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { FOODS, scale, searchLocal, sanitizeAmount, macroLabel, getPortions, unitLabel } from '../lib/foods.js'
 import { foodName } from '../lib/foodNames.js'
+import { catalogId } from '../lib/catalog.js'
 import { t } from '../lib/i18n.js'
 import { makeRecipe, recipeTotals, recipePerServing, MAX_RECIPE_ITEMS } from '../lib/library.js'
+import { productsAsFoods, productAsFood, productById, productsForBase, ownProductsFirst } from '../lib/myProducts.js'
+import { useStore } from '../store.jsx'
 
 const num = (v) => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0 }
 const EMOJI = ['🍲', '🥘', '🍜', '🥗', '🍝', '🍛', '🥧', '🍰', '🥣', '🍚', '🫕', '🥙']
@@ -13,6 +16,31 @@ const EMOJI = ['🍲', '🥘', '🍜', '🥗', '🍝', '🍛', '🥧', '🍰', '
 const INGREDIENT_POOL = FOODS.filter(
   (f) => !f.builder && f.kind !== 'composite' && f.kcal != null && Number(f.kcal) >= 0,
 )
+const POOL_BY_ID = new Map(INGREDIENT_POOL.filter((f) => f.foodId).map((f) => [f.foodId, f]))
+
+// Значения продукта на 100 г, которые едут в строку рецепта. Сахар, насыщенные
+// жиры и клетчатка — только если известны: «не знаем» не должно стать нулём.
+function per100Of(food) {
+  const out = { kcal: food.kcal, protein: food.protein, carbs: food.carbs, fat: food.fat }
+  for (const k of ['sugar', 'satFat', 'fiber']) if (food[k] != null) out[k] = food[k]
+  return out
+}
+
+// Строка рецепта из продукта: базы или своего. productId — чей это продукт,
+// baseId — вариантом какого продукта базы он является (у продукта базы это
+// он сам). По этим двум ссылкам строка и переключается «мой ↔ обычный».
+function rowFrom(food, grams, key) {
+  return {
+    key,
+    name: food.name,
+    emoji: food.emoji || '🍽️',
+    unit: food.unit || 'г',
+    grams: String(grams),
+    per100: per100Of(food),
+    productId: food.source === 'product' ? food.productId : null,
+    baseId: food.source === 'product' ? food.baseId || null : food.foodId || catalogId('foods', food.name),
+  }
+}
 
 // Абсолютные значения ингредиента → значения на 100 г. Неизвестное (null)
 // таковым и остаётся: делить «мы не знаем» бессмысленно, а `null * 100 / g`
@@ -56,8 +84,17 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
       // проверки `null * 100 / grams` давало 0, и открытие рецепта на правку
       // молча превращало «БЖУ неизвестны» в «БЖУ нулевые».
       per100: back100(it),
+      productId: it.productId || null,
+      // У рецептов, сохранённых до «Моих продуктов», ссылки нет — продукт
+      // базы узнаём по названию.
+      baseId: it.baseId || (it.productId ? null : catalogId('foods', it.name)),
     })),
   )
+  const { products } = useStore()
+  // Свои продукты идут в поиск вместе с базой. Пул пересобирается только при
+  // смене списка продуктов: индекс поиска кэшируется по массиву.
+  const productFoods = useMemo(() => productsAsFoods(products), [products])
+  const pool = useMemo(() => [...productFoods, ...INGREDIENT_POOL], [productFoods])
 
   // В рецепт кладут СЫРЫЕ продукты, поэтому берём базовые значения продукта, а
   // не способ приготовления. Исключаем только конструкторы («Бутерброд»,
@@ -77,21 +114,31 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
     const q = query.trim()
     if (q.length < 2) return []
     const chosen = new Set(chosenNames ? chosenNames.split('\u0000') : [])
-    return searchLocal(q, { items: INGREDIENT_POOL }).filter((f) => !chosen.has(f.name)).slice(0, 6)
-  }, [query, chosenNames])
+    return ownProductsFirst(searchLocal(q, { items: pool })).filter((f) => !chosen.has(f.name)).slice(0, 6)
+  }, [query, chosenNames, pool])
 
   const addRow = (food) => {
     if (rows.length >= MAX_RECIPE_ITEMS) return
     const start = getPortions(food)?.[0]?.grams || food.defaultGrams || 100
-    setRows((p) => [...p, {
-      key: 'r' + Date.now() + Math.random(),
-      name: food.name,
-      emoji: food.emoji || '🍽️',
-      unit: food.unit || 'г',
-      grams: String(start),
-      per100: { kcal: food.kcal, protein: food.protein, carbs: food.carbs, fat: food.fat },
-    }])
+    setRows((p) => [...p, rowFrom(food, start, 'r' + Date.now() + Math.random())])
     setQuery('')
+  }
+
+  // «Мой ↔ обычный»: тот же ингредиент другим продуктом, вес остаётся.
+  // У своего продукта — его продукт базы; у продукта базы — свои продукты,
+  // которые на него ссылаются (сыр Гауда → «Гауда 45% · Ламбер»).
+  const swapsFor = (r) => {
+    if (r.productId) {
+      const own = productById(products, r.productId)
+      const base = POOL_BY_ID.get(own?.baseId || r.baseId)
+      return base ? [{ food: base, mine: false }] : []
+    }
+    return productsForBase(products, r.baseId).slice(0, 3)
+      .map((p) => ({ food: productAsFood(p), mine: true }))
+      .filter((x) => x.food)
+  }
+  const swapRow = (r, food) => {
+    setRows((p) => p.map((x) => (x.key === r.key ? rowFrom(food, x.grams, x.key) : x)))
   }
 
   // Черновик рецепта из текущих полей — по нему же считается предпросмотр,
@@ -99,7 +146,12 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
   const draft = useMemo(() => {
     const items = rows
       .filter((r) => num(r.grams) > 0)
-      .map((r) => ({ name: r.name, emoji: r.emoji, unit: r.unit, grams: num(r.grams), ...scale(r.per100, num(r.grams)) }))
+      .map((r) => {
+        const item = { name: r.name, emoji: r.emoji, unit: r.unit, grams: num(r.grams), ...scale(r.per100, num(r.grams)) }
+        if (r.productId) item.productId = r.productId
+        if (r.baseId) item.baseId = r.baseId
+        return item
+      })
     return makeRecipe({ name: name.trim() || '—', emoji, servings: num(servings) || 1, items, notes })
   }, [rows, name, emoji, servings, notes])
 
@@ -204,13 +256,14 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
             <div style={{ marginTop: 8 }}>
               {results.map((f) => (
                 <button
-                  key={f.name}
+                  key={(f.productId ? 'p:' : '') + f.name}
                   onClick={() => addRow(f)}
                   className="row between"
                   style={{ width: '100%', minHeight: 44, padding: '8px 4px', textAlign: 'start', gap: 10 }}
                 >
                   <span style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {f.emoji} {foodName(f.name)}
+                    {f.source === 'product' && <span style={{ color: 'var(--primary)', fontSize: 12.5, fontWeight: 600 }}> · {t('products.tag')}</span>}
                   </span>
                   <span style={{ color: 'var(--primary)', fontSize: 20, flex: '0 0 auto' }}>＋</span>
                 </button>
@@ -228,12 +281,15 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
             {rows.map((r, i) => {
               const g = num(r.grams)
               const m = g > 0 ? scale(r.per100, g) : null
+              const swaps = swapsFor(r)
               return (
-                <div key={r.key} className="row gap8" style={{ alignItems: 'center', padding: '6px 0', borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                <div key={r.key} style={{ padding: '6px 0', borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                <div className="row gap8" style={{ alignItems: 'center' }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {r.emoji} {foodName(r.name)}
                     <span className="tabular" style={{ color: 'var(--ink-3)', fontSize: 12.5, display: 'block' }}>
                       {m ? t('units.kcalN', { n: m.kcal }) : t('recipe.enterWeight')}
+                      {r.productId ? ` · ${t('products.tag')}` : ''}
                     </span>
                   </span>
                   <input
@@ -254,6 +310,29 @@ export default function RecipeEditorSheet({ recipe, onSave, onClose }) {
                     aria-label={t('recipe.removeAria', { name: foodName(r.name) })}
                     style={{ width: 34, minHeight: 44, flex: '0 0 auto', color: 'var(--ink-3)', fontSize: 17 }}
                   >✕</button>
+                </div>
+                {/* Свой продукт вместо обычного — и обратно. Вес тот же: это
+                    тот же ингредиент, просто с цифрами с другой этикетки. */}
+                {swaps.length > 0 && (
+                  <div className="row wrap gap8" style={{ marginTop: 4 }}>
+                    {swaps.map(({ food, mine }) => {
+                      const label = mine ? food.name : foodName(food.name)
+                      return (
+                        <button
+                          key={(mine ? 'p:' : 'b:') + (food.productId || food.foodId || food.name)}
+                          className="chip"
+                          onClick={() => swapRow(r, food)}
+                          aria-label={t('recipe.swapAria', { from: foodName(r.name), to: label })}
+                          style={{ fontSize: 13, maxWidth: '100%', minWidth: 0 }}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                            ⇄ {mine ? t('recipe.swapMine', { name: label }) : t('recipe.swapBase', { name: label })}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
                 </div>
               )
             })}

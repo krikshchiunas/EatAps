@@ -439,13 +439,53 @@ export function toLuma(rgba, width, height) {
   return out
 }
 
-// Скан кадра: горизонтальные линии, затем вертикальные — чтобы не заставлять
-// человека доворачивать телефон под штрихкод.
+// Диагональ кадра под 45°: dir = 1 — сверху слева вниз направо, −1 — сверху
+// справа вниз налево. offset — сдвиг диагонали поперёк неё, от центра кадра.
+// Пиксели берём ровно по сетке (x±t, y+t): никакой интерполяции не нужно,
+// декодеру важны только ОТНОШЕНИЯ ширин полос, а их наклон не меняет — все
+// полосы растягиваются в одно и то же число раз.
+function diagonalLine(luma, width, height, dir, offset, out) {
+  // Точка диагонали, ближайшая к центру кадра, со сдвигом поперёк неё.
+  const cx = Math.floor(width / 2) + offset
+  const cy = Math.floor(height / 2)
+  if (cx < 0 || cx >= width) return 0
+  // Назад до края кадра…
+  const back = dir > 0 ? Math.min(cx, cy) : Math.min(width - 1 - cx, cy)
+  let x = cx - dir * back
+  let y = cy - back
+  if (x < 0 || x >= width || y < 0) return 0
+  // …и вперёд до другого края.
+  let n = 0
+  while (x >= 0 && x < width && y < height) {
+    out[n++] = luma[y * width + x]
+    x += dir
+    y += 1
+  }
+  return n
+}
+
+// Сдвиги диагоналей: от центра в обе стороны, шагом в долю короткой стороны.
+function diagonalOffsets(width, height, count) {
+  const step = Math.max(2, Math.round(Math.min(width, height) / (count + 2)))
+  const out = [0]
+  for (let k = 1; out.length < count; k++) out.push(k * step, -k * step)
+  return out.slice(0, count)
+}
+
+// Скан кадра: горизонтальные линии, затем вертикальные, затем диагонали —
+// чтобы не заставлять человека доворачивать телефон под штрихкод.
+//
+// Почему диагонали. Горизонтальная строка пересекает все штрихи, только пока
+// наклон кода меньше ~30°: дальше она выходит за верх или низ символа раньше,
+// чем дойдёт до конца (высота EAN-13 — примерно 0.6 его ширины). Вертикальные
+// столбцы закрывают наклон от ~60°. Между ними — слепая зона в 30°, и в Safari,
+// где нет системного распознавателя, упаковку «под углом» приходилось
+// доворачивать руками. Диагонали под ±45° закрывают её с запасом.
 //
 // Возвращает { code, hits }, где hits — сколько линий дали один и тот же код.
 // Вызывающий по числу совпадений решает, доверять ли результату сразу: одна
 // строка с верной контрольной суммой ошибается редко, но всё же ошибается.
-export function scanLuma(luma, width, height, { rows = 14, cols = 10 } = {}) {
+export function scanLuma(luma, width, height, { rows = 14, cols = 10, diagonals = 6 } = {}) {
   const found = new Map()
   const bump = (code) => found.set(code, (found.get(code) || 0) + 1)
 
@@ -460,6 +500,20 @@ export function scanLuma(luma, width, height, { rows = 14, cols = 10 } = {}) {
       for (let y = 0; y < height; y++) column[y] = luma[y * width + x]
       const code = decodeLine(column, height)
       if (code) bump(code)
+    }
+  }
+
+  // Диагонали дороже (их пиксели не лежат подряд в памяти), поэтому только
+  // когда прямые линии не нашли ничего.
+  if (found.size === 0 && diagonals > 0) {
+    const buf = new Uint8Array(Math.min(width, height))
+    for (const dir of [1, -1]) {
+      for (const offset of diagonalOffsets(width, height, diagonals)) {
+        const n = diagonalLine(luma, width, height, dir, offset, buf)
+        if (n < 60) continue
+        const code = decodeLine(buf.subarray(0, n), n)
+        if (code) bump(code)
+      }
     }
   }
 

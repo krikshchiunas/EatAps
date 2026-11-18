@@ -289,6 +289,58 @@ test('scanLuma читает штрихкод, повёрнутый на 90°', (
   assert.equal(hit.code, code)
 })
 
+// Штрихкод, повёрнутый на произвольный угол. Для каждого пикселя считаем его
+// координату вдоль оси символа и берём яркость с эталонной строки — так в
+// кадре получается ровно тот наклон, который задан, без интерполяции полос.
+function renderRotated(bits, { width, height, angle, module = 3, barHeight = 140, seed = 3 } = {}) {
+  const line = renderLine(bits, { module, quiet: 20 })
+  const rand = rng(seed)
+  const img = new Uint8Array(width * height)
+  const a = (angle * Math.PI) / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const cx = width / 2
+  const cy = height / 2
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const dx = x - cx
+      const dy = y - cy
+      const u = dx * cos + dy * sin + line.length / 2
+      const v = -dx * sin + dy * cos
+      const bg = Math.round(200 + (rand() - 0.5) * 20)
+      img[y * width + x] = Math.abs(v) < barHeight / 2 && u >= 0 && u < line.length ? line[Math.floor(u)] : bg
+    }
+  }
+  return { luma: img, width, height }
+}
+
+test('scanLuma читает штрихкод под углом 45° — там, где строки и столбцы слепы', () => {
+  const code = '4006381333931'
+  for (const angle of [45, -45, 40, -50, 35]) {
+    // Модуль 3.5 px, а не 2–3, как у строк: по диагонали шаг между пикселями
+    // в √2 раза длиннее, и узкий штрих в неё просто не попадает. Поэтому
+    // сканер гоняет диагонали по кадру в полном разрешении, без ужатия.
+    const { luma, width, height } = renderRotated(encodeEan13(code), { width: 520, height: 520, angle, module: 3.5, barHeight: 160 })
+    // Без диагоналей такой кадр не читается — ради этого они и добавлены.
+    if (Math.abs(Math.abs(angle) - 45) < 1) {
+      assert.equal(scanLuma(luma, width, height, { diagonals: 0 }), null, `при ${angle}° код прочитан и без диагоналей — тест ничего не доказывает`)
+    }
+    const hit = scanLuma(luma, width, height)
+    assert.ok(hit, `код под углом ${angle}° не найден`)
+    assert.equal(hit.code, code)
+  }
+})
+
+test('небольшой наклон по-прежнему читается обычными строками', () => {
+  const code = '5901234123457'
+  for (const angle of [0, 12, -20]) {
+    const { luma, width, height } = renderRotated(encodeEan13(code), { width: 560, height: 320, angle, module: 3, barHeight: 150 })
+    const hit = scanLuma(luma, width, height, { diagonals: 0 })
+    assert.ok(hit, `наклон ${angle}°`)
+    assert.equal(hit.code, code)
+  }
+})
+
 test('scanLuma на кадре без штрихкода возвращает null', () => {
   const rand = rng(99)
   const width = 480

@@ -28,7 +28,7 @@ const dist = resolve(root, 'dist')
 const manifestPath = resolve(dist, '.vite/manifest.json')
 
 // Дополнительные ленивые точки входа, обязательные офлайн.
-export const OFFLINE_ENTRIES = ['src/lib/search/index.js', 'src/lib/search/names.js', 'src/components/BarcodeScanner.jsx']
+export const OFFLINE_ENTRIES = ['src/lib/search/index.js', 'src/lib/search/names.js', 'src/components/BarcodeScanner.jsx', 'src/components/MyProductsScreen.jsx']
 
 const fail = (msg) => {
   console.error(`inject-precache: ✗ ${msg}`)

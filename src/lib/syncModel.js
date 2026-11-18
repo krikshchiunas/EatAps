@@ -28,7 +28,7 @@ export const STATE_VERSION = 2
 
 // Ключи, которые уезжают в облако. subscription сюда НЕ входит: её источник
 // истины — таблица subscriptions, которую пишет только вебхук Stripe.
-export const SYNC_KEYS = ['profile', 'theme', 'days', 'customFoods', 'customIngredients', 'favorites', 'templates', 'recipes', 'supplements', 'recents', 'prefs', 'meta']
+export const SYNC_KEYS = ['profile', 'theme', 'days', 'customFoods', 'customIngredients', 'products', 'favorites', 'templates', 'recipes', 'supplements', 'recents', 'prefs', 'meta']
 
 // Тумбстоуны старше этого срока выбрасываем: иначе meta растёт бесконечно.
 // Устройство, пролежавшее офлайн дольше, может «воскресить» удалённую запись —
@@ -77,6 +77,7 @@ export const tombTemplate = (id) => `tpl:${id}`
 export const tombRecipe = (id) => `rcp:${id}`
 export const tombSupp = (date, id) => `d:${date}:p:${id}`
 export const tombSupplement = (id) => `sup:${id}`
+export const tombProduct = (id) => `prd:${id}`
 
 // ── Нормализация ─────────────────────────────────────────────────────────────
 // Приводит любой вход (пустой, легаси, повреждённый, чужой) к рабочей форме.
@@ -223,6 +224,9 @@ export function normalizeState(raw) {
     days,
     customFoods: normalizeEntities(s.customFoods),
     customIngredients: normalizeEntities(s.customIngredients),
+    // «Мои продукты» — товары с полки (см. lib/myProducts.js). Сущность с id и
+    // меткой, как свои продукты: список собран руками и сливается по записям.
+    products: normalizeEntities(s.products),
     favorites: normalizeEntities(s.favorites),
     // Шаблоны приёмов и рецепты — обычные сущности с id и меткой времени,
     // сливаются тем же правилом, что избранное и свои продукты.
@@ -409,6 +413,7 @@ export function mergeState(baseRaw, incomingRaw) {
     days,
     customFoods: mergeEntities(base.customFoods, inc.customFoods, tombstones, tombCustomFood),
     customIngredients: mergeEntities(base.customIngredients, inc.customIngredients, tombstones, tombCustomIngredient),
+    products: mergeEntities(base.products, inc.products, tombstones, tombProduct),
     favorites: mergeEntities(base.favorites, inc.favorites, tombstones, tombFavorite),
     templates: mergeEntities(base.templates, inc.templates, tombstones, tombTemplate),
     recipes: mergeEntities(base.recipes, inc.recipes, tombstones, tombRecipe),
@@ -488,6 +493,7 @@ export function clearedState(state, ts) {
   }
   for (const f of s.customFoods) tombstones[tombCustomFood(f.id)] = ts
   for (const i of s.customIngredients) tombstones[tombCustomIngredient(i.id)] = ts
+  for (const p of s.products) tombstones[tombProduct(p.id)] = ts
   for (const f of s.favorites) tombstones[tombFavorite(f.id)] = ts
   for (const t of s.templates) tombstones[tombTemplate(t.id)] = ts
   for (const r of s.recipes) tombstones[tombRecipe(r.id)] = ts
@@ -505,6 +511,7 @@ export function clearedState(state, ts) {
     days: {},
     customFoods: [],
     customIngredients: [],
+    products: [],
     favorites: [],
     templates: [],
     recipes: [],
