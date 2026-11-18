@@ -7,16 +7,25 @@ import { dict, openApp, auditScreen } from './helpers.mjs'
 
 test('офлайн: выбранный язык, переключение на незагруженный язык, поиск', async ({ page, context }) => {
   const errors = await openApp(page, { lang: 'de' })
-  // Ждём, пока service worker установится и разложит всё по кэшу.
-  await page.waitForFunction(async () => {
+  // Ждём, пока service worker установится, активируется, возьмёт страницу под
+  // контроль и разложит всё по кэшу.
+  //
+  // Именно expect.poll, а не page.waitForFunction: проверка асинхронная
+  // (caches.*, getRegistration), а waitForFunction промис не дожидается —
+  // промис сам по себе истинен, и «ожидание» заканчивалось после первой же
+  // проверки, пока первая установка ещё шла. Офлайн-перезагрузка тогда
+  // уходила в сеть мимо service worker'а → ERR_INTERNET_DISCONNECTED.
+  await expect.poll(() => page.evaluate(async () => {
     const reg = await navigator.serviceWorker.getRegistration()
-    if (!reg?.active || !navigator.serviceWorker.controller) return false
+    // Никакой установки параллельно: она ещё пишет в кэш.
+    if (reg?.active?.state !== 'activated' || reg.installing || reg.waiting) return false
+    if (!navigator.serviceWorker.controller) return false
     const keys = await caches.keys()
     if (!keys.length) return false
     const cache = await caches.open(keys[0])
     const urls = (await cache.keys()).map((r) => new URL(r.url).pathname)
     return ['ar-', 'tr-', 'names-'].every((p) => urls.some((u) => u.startsWith(`/assets/${p}`)))
-  }, null, { timeout: 30_000, polling: 500 })
+  }), { message: 'service worker установлен и закэшировал все языки', timeout: 30_000, intervals: [250] }).toBe(true)
 
   await context.setOffline(true)
   await page.reload()
