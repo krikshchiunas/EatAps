@@ -21,21 +21,28 @@ export const MICRO = 1_000_000 // микродолларов в долларе
 export const PRICES = Object.freeze({
   'claude-haiku-4-5': { in: 1, out: 5, cacheWrite: 1.25, cacheRead: 0.1 },
   'claude-sonnet-4-6': { in: 3, out: 15, cacheWrite: 3.75, cacheRead: 0.3 },
-  // Проверка штрихкодов (BARCODE_CHECK_MODEL). Две ставки по длине запроса;
-  // наши запросы — пара тысяч токенов, всегда первая (до 100K).
-  'claude-haiku-5-5': { in: 0.1, out: 0.5, cacheWrite: 0.125, cacheRead: 0.01 },
+  // Проверка штрихкодов (BARCODE_CHECK_MODEL).
+  'claude-sonnet-5-5': { in: 2, out: 10, cacheWrite: 2.5, cacheRead: 0.1 },
 })
 
-// Проверка товара по штрихкоду ИИ (только Carrot Premium). Своя модель, а не
-// модель тарифа: ответ обязан приходить строго по JSON-схеме (structured
-// outputs), а Sonnet 4.6 их не поддерживает. Haiku 5.5 — самая дешёвая из
-// моделей, которые умеют и это, и читать фото таблицы состава: проверка стоит
-// порядка $0.001. Точность держат схема, фото этикетки и sanitizeCheck на
-// сервере, а не цена модели.
-export const BARCODE_CHECK_MODEL = 'claude-haiku-5-5'
-// На такой цене экономить на размышлении незачем: medium (умолчание модели)
-// заметно надёжнее читает мелкие цифры таблицы, а стоит доли цента.
+// Веб-поиск (серверный инструмент Anthropic) — $10 за 1000 запросов, сверх
+// токенов: 10 000 микродолларов за поиск.
+export const WEB_SEARCH_MICRO = 10_000
+
+// Проверка товара по штрихкоду ИИ (только Carrot Premium).
+//
+// Модель — Sonnet 5.5. Haiku дёшев, но только переписывает базу: «55 г
+// клетчатки в чипсах» он подтвердит, потому что так написано. Здесь нужно
+// рассуждать — сверять цифры с видом продукта, читать мелкую таблицу на фото,
+// искать данные производителя, когда что-то не сходится. Opus умеет то же, но
+// вдвое дороже. Своя модель, а не модель тарифа: ответ обязан приходить строго
+// по схеме (strict tool use), а Sonnet 4.6 этого не умеет.
+export const BARCODE_CHECK_MODEL = 'claude-sonnet-5-5'
+// medium — уровень, на котором Sonnet 5.5 обдумывает каждую проверку и
+// пользуется поиском, не уходя в дорогие долгие размышления.
 export const BARCODE_CHECK_EFFORT = 'medium'
+// Сколько поисков в интернете разрешено на одну проверку.
+export const BARCODE_CHECK_SEARCHES = 3
 
 // Уровень усилий — medium везде, где модель вообще принимает этот параметр.
 // Ответ у нас в 1–3 предложения: заводской high тут переплата, а у AI+ потолка
@@ -49,7 +56,7 @@ export const DEFAULT_EFFORT = 'medium'
 
 export const EFFORT_CAPABLE = Object.freeze([
   'claude-sonnet-4-6',
-  'claude-haiku-5-5',
+  'claude-sonnet-5-5',
 ])
 
 export function effortFor(model) {
@@ -99,9 +106,9 @@ export const MAX_OUTPUT_TOKENS = Object.freeze({
   chat: 700,
   vision: 900,
   digest: 2000, // разбор недели/месяца
-  // У Haiku 5.5 размышление включено по умолчанию и тратит те же токены
-  // ответа: сам JSON — пара сотен токенов, остальное — запас на размышление.
-  barcode: 4000,
+  // Размышление Sonnet 5.5 тратит те же токены ответа: отчёт с витаминами —
+  // около тысячи токенов, остальное — запас на размышление между поисками.
+  barcode: 12000,
 })
 
 export function modelForTier(tier) {
@@ -142,7 +149,9 @@ export function costOf(usage, model) {
     (usage.input_tokens || 0) * p.in +
     (usage.output_tokens || 0) * p.out +
     (usage.cache_creation_input_tokens || 0) * p.cacheWrite +
-    (usage.cache_read_input_tokens || 0) * p.cacheRead
+    (usage.cache_read_input_tokens || 0) * p.cacheRead +
+    // Поиски в интернете оплачиваются отдельно от токенов.
+    (usage.server_tool_use?.web_search_requests || 0) * WEB_SEARCH_MICRO
   return Math.ceil(cost)
 }
 

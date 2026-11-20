@@ -12,6 +12,7 @@
 // неуверенная правка опаснее, чем ошибка базы, которую видно и можно поправить.
 // ─────────────────────────────────────────────────────────────────────────────
 import { hasAIPremium } from './subscription.js'
+import { cleanMicros, microsDiffer, microsCount } from './labelMicros.js'
 
 // Ключ настройки в prefs (синхронизируется между устройствами).
 export const BARCODE_AI_PREF = 'barcodeAI'
@@ -48,13 +49,16 @@ function withPortions(food, serving, pack) {
   return [...out, ...rest]
 }
 
-// Товар + ответ проверки → { food, changes, applied }.
+// Товар + ответ проверки → { food, changes, applied, notes, sources }.
 //   changes — [{ field, from, to, reason }] для показа «было → стало»;
 //   applied — false, если проверку применять нельзя (низкая уверенность,
-//             нечего проверять): тогда food — исходный товар.
+//             нечего проверять): тогда food — исходный товар;
+//   notes   — короткие замечания ИИ о товаре (подсластители, лактоза…);
+//   sources — на чём держатся цифры (фото этикетки, сайт производителя…).
 export function applyCheck(food, check) {
-  if (!food || !check) return { food, changes: [], applied: false }
-  if (check.confidence === 'low' || check.status === 'unverifiable') return { food, changes: [], applied: false }
+  const extra = { notes: check?.notes || [], sources: check?.sources || [] }
+  if (!food || !check) return { food, changes: [], applied: false, ...extra }
+  if (check.confidence === 'low' || check.status === 'unverifiable') return { food, changes: [], applied: false, ...extra }
 
   const reasons = new Map((check.corrections || []).map((c) => [c.field, c.reason]))
   const next = { ...food }
@@ -84,6 +88,14 @@ export function applyCheck(food, check) {
     if (newServing) next.defaultGrams = Math.round(newServing)
   }
 
+  // Витамины, минералы и прочее с этикетки или от производителя. Набор ИИ
+  // заменяет набор базы целиком: он видел его и проверил каждое число.
+  const micros = cleanMicros(check.micros)
+  if (micros && microsDiffer(food.micros, micros)) {
+    changes.push({ field: 'micros', from: microsCount(food.micros), to: microsCount(micros), reason: reasons.get('micros') || '' })
+    next.micros = micros
+  }
+
   if (check.name && check.name !== food.title) {
     const brand = food.brand || ''
     next.title = check.name
@@ -95,7 +107,7 @@ export function applyCheck(food, check) {
   // оценка: сахар с таким происхождением считается измеренным (см. scale).
   if (changes.some((c) => c.field === 'sugar')) next.sugarSrc = 'measured'
   next.aiChecked = true
-  return { food: next, changes, applied: true }
+  return { food: next, changes, applied: true, ...extra }
 }
 
 // Черновик своего продукта (товар без состава в базе) + ответ проверки, где
@@ -112,6 +124,8 @@ export function fillDraft(draft, check) {
   if (!filled) return null
   // Этикетка надёжнее догадки по строке количества: «мл» на ней — значит напиток.
   if (check.unit === 'ml') out.unit = 'мл'
+  const micros = cleanMicros(check.micros)
+  if (micros && !out.micros) out.micros = micros
   if (check.servingSize && !out.portionGrams) out.portionGrams = check.servingSize
   if (check.packSize && !out.packGrams) out.packGrams = check.packSize
   if (check.name && !out.title) out.title = check.name

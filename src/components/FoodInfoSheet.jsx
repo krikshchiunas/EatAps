@@ -203,6 +203,7 @@ export default function FoodInfoSheet({ food, profile, microGoals = {}, onClose 
           {t('foodInfo.srcMacros')}{' '}
           {micro.confidence === 'estimated' && `${t('foodInfo.srcEstimated')} `}
           {micro.confidence === 'category' && `${t('foodInfo.srcCategory')} `}
+          {micro.confidence === 'label' && `${t('foodInfo.srcLabel')} `}
           {t('foodInfo.srcNote')}
         </p>
       </div>

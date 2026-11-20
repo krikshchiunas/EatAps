@@ -284,6 +284,7 @@ export default {
     namePh: 'Ej. Gouda 45 %',
     nameFromDb: 'Este nombre viene de la base de códigos de barras: cámbialo por el tuyo, p. ej. «Queso para bocadillos». El producto se seguirá encontrando por el nombre del envase.',
     dbNameNote: 'En el envase: «{name}»; también se encuentra por ese nombre.',
+    microsFromLabel: 'Vitaminas, minerales y otras sustancias de la etiqueta: {count}',
     brand: 'Marca',
     brandPh: 'Ej. García Baquero',
     base: 'Es un tipo de',

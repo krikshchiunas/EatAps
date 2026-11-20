@@ -23,6 +23,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { isCatalogId } from './catalog.js'
 import { normalizeName } from './text.js'
+import { cleanMicros } from './labelMicros.js'
 
 // Своих продуктов у человека — десятки. Потолок защищает размер состояния
 // (оно целиком ездит в облако одним блобом), а не ограничивает обычную жизнь.
@@ -145,6 +146,9 @@ export function normalizeProduct(raw) {
     const v = numIn(raw[key], 0, 100)
     if (v != null) out[key] = v
   }
+  // Витамины, минералы и прочее с этикетки — на 100 г, ключами справочника.
+  const micros = cleanMicros(raw.micros)
+  if (micros) out.micros = micros
   if (typeof raw.cat === 'string' && /^[a-z0-9_]{1,20}$/.test(raw.cat)) out.cat = raw.cat
   // Ссылка — только на то, что в каталоге есть. Мусорный id превратил бы
   // переключатель «мой ↔ обычный» в кнопку, ведущую в никуда.
@@ -184,7 +188,7 @@ export function productAsFood(p) {
     source: 'product',
     productId: clean.id ?? null,
   }
-  for (const key of ['sugar', 'satFat', 'fiber', 'cat', 'baseId', 'barcode', 'photo']) {
+  for (const key of ['sugar', 'satFat', 'fiber', 'cat', 'baseId', 'barcode', 'photo', 'micros']) {
     if (clean[key] != null) food[key] = clean[key]
   }
   if (clean.brand) food.brand = clean.brand
@@ -251,6 +255,7 @@ export function productDraftFrom(food, extra = {}) {
     baseId: isCatalogId('foods', src.baseId) ? src.baseId : isCatalogId('foods', src.foodId) ? src.foodId : null,
     barcode: cleanBarcode(src.barcode),
     photo: src.photo || null,
+    micros: cleanMicros(src.micros),
     // Название, под которым товар записан в базе штрихкодов. Человек вправе
     // назвать его по-своему; это остаётся для поиска и подсказки в форме.
     dbName: src.dbName ?? (cleanBarcode(src.barcode) && (src.source === 'off' || src.title) ? name : null),

@@ -447,12 +447,13 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     barcodeAI.check(code)
       .then((check) => {
         const res = applyCheck(food, check)
+        const extra = { notes: res.notes, sources: res.sources }
         if (!res.applied) {
-          setAiCheck((c) => (mine(c) ? { code, status: 'unsure', summary: check?.summary || '' } : c))
+          setAiCheck((c) => (mine(c) ? { code, status: 'unsure', summary: check?.summary || '', ...extra } : c))
           return
         }
         const status = res.changes.length ? 'fixed' : 'ok'
-        setAiCheck((c) => (mine(c) ? { code, status, changes: res.changes, original: food, fixed: res.food, summary: check.summary } : c))
+        setAiCheck((c) => (mine(c) ? { code, status, changes: res.changes, original: food, fixed: res.food, summary: check.summary, ...extra } : c))
         if (res.changes.length) showFood(food, res.food)
       })
       .catch(() => setAiCheck((c) => (mine(c) ? { code, status: 'failed' } : c)))
@@ -2423,6 +2424,7 @@ function FoodThumb({ food }) {
 // и новым числом и причиной: человек должен видеть, ЧТО поменялось, а не верить
 // на слово, — и вернуть как в базе одним касанием.
 function aiValue(field, v, unit) {
+  if (field === 'micros') return t('barcodeAI.microsN', { count: Number(v) || 0 })
   if (v == null || v === '') return '—'
   if (field === 'name') return String(v)
   if (field === 'unit') return unitLabel(v)
@@ -2437,6 +2439,22 @@ function AICheckNote({ state, unit, onRevert, onReapply }) {
   const muted = { fontSize: 13, color: 'var(--ink-3)', margin: 0, lineHeight: 1.45 }
   const link = { fontSize: 14, color: 'var(--primary)', fontWeight: 550, marginTop: 6 }
 
+  // Замечания ИИ о товаре и на чём держатся цифры — под любым итогом проверки.
+  const extras = (
+    <>
+      {state.notes?.length > 0 && (
+        <ul style={{ margin: '6px 0 0', paddingInlineStart: 18, fontSize: 13, lineHeight: 1.45 }}>
+          {state.notes.map((n, i) => <li key={i}>{n}</li>)}
+        </ul>
+      )}
+      {state.sources?.length > 0 && (
+        <p style={{ ...muted, fontSize: 12, marginTop: 6 }}>
+          {t('barcodeAI.sources', { list: state.sources.map((x) => t(`barcodeAI.src.${x}`)).join(', ') })}
+        </p>
+      )}
+    </>
+  )
+
   if (state.status === 'checking') {
     return (
       <div className="card" role="status" aria-live="polite" style={box}>
@@ -2449,6 +2467,7 @@ function AICheckNote({ state, unit, onRevert, onReapply }) {
       <div className="card" role="status" style={box}>
         {title(`✓ ${t('barcodeAI.okTitle')}`)}
         <p style={muted}>{state.summary || t('barcodeAI.okText')}</p>
+        {extras}
       </div>
     )
   }
@@ -2456,6 +2475,7 @@ function AICheckNote({ state, unit, onRevert, onReapply }) {
     return (
       <div className="card" role="status" style={box}>
         <p style={muted}>🤖 {state.status === 'unsure' ? t('barcodeAI.unsure') : t('barcodeAI.failed')}</p>
+        {state.status === 'unsure' && extras}
       </div>
     )
   }
@@ -2482,6 +2502,7 @@ function AICheckNote({ state, unit, onRevert, onReapply }) {
           {c.reason && <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 12.5 }}>{c.reason}</span>}
         </div>
       ))}
+      {extras}
       <button className="tap44" style={link} onClick={onRevert}>{t('barcodeAI.revert')}</button>
     </div>
   )

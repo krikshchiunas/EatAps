@@ -222,3 +222,15 @@ test('своё название товара со штрихкода: назва
   // Продукт, заведённый руками без штрихкода, названия «из базы» не получает.
   assert.equal(productDraftFrom({ name: 'Гречка', kcal: 330 }).dbName, null)
 })
+
+test('витамины с этикетки едут в запись дневника на порцию и в расчёт микронутриентов', async () => {
+  const { microsForEntry } = await import('./foodMicros.js')
+  const f = productAsFood({ id: 'e1', name: 'Volt Energy', unit: 'мл', kcal: 46, protein: 0, carbs: 11, fat: 0, micros: { caffeine: 32, taurine: 400, b12: 0.5, junk: 7 } })
+  assert.deepEqual(f.micros, { caffeine: 32, taurine: 400, b12: 0.5 }, 'неизвестный ключ отброшен')
+  const entry = { name: f.name, unit: 'мл', grams: 250, ...scale(f, 250) }
+  assert.equal(entry.micros.caffeine, 80)
+  const r = microsForEntry(entry)
+  assert.equal(r.confidence, 'label')
+  assert.equal(r.values.caffeine, 80)
+  assert.equal(r.values.taurine, 1000)
+})

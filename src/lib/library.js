@@ -15,6 +15,7 @@
 // и обращений к стору — так их можно тестировать и переиспользовать.
 // ─────────────────────────────────────────────────────────────────────────────
 import { normalizeName } from './text.js'
+import { cleanMicros, scaleMicros } from './labelMicros.js'
 
 const r1 = (n) => Math.round((Number(n) || 0) * 10) / 10
 const r0 = (n) => Math.round(Number(n) || 0)
@@ -56,6 +57,10 @@ export function foodSnapshot(food) {
   // Мой продукт помнит, чей он и вариантом чего является: по этим ссылкам
   // ингредиент рецепта переключается между «моим» и «обычным» (см.
   // RecipeEditorSheet), не теряя веса.
+  // Витамины и минералы с этикетки — в том же базисе, что и остальные цифры
+  // снимка (на 100 или на порцию).
+  const micros = cleanMicros(food.micros)
+  if (micros) snap.micros = micros
   if (typeof food.productId === 'string' && food.productId) snap.productId = food.productId
   if (typeof food.baseId === 'string' && food.baseId) snap.baseId = food.baseId
   return snap
@@ -513,6 +518,8 @@ export function toPer100(entry) {
   if (Number.isFinite(Number(entry.sugar))) out.sugar = r1(Number(entry.sugar) * k)
   if (Number.isFinite(Number(entry.satFat))) out.satFat = r1(Number(entry.satFat) * k)
   if (Number.isFinite(Number(entry.fiber))) out.fiber = r1(Number(entry.fiber) * k)
+  const micros = scaleMicros(entry.micros, k)
+  if (micros) out.micros = micros
   return out
 }
 
@@ -538,6 +545,9 @@ export function scaleSnapshot(snap, grams) {
   if (Number.isFinite(Number(snap.sugar))) out.sugar = r1(Number(snap.sugar) * k)
   if (Number.isFinite(Number(snap.satFat))) out.satFat = r1(Number(snap.satFat) * k)
   if (Number.isFinite(Number(snap.fiber))) out.fiber = r1(Number(snap.fiber) * k)
+  const micros = scaleMicros(snap.micros, k)
+  if (micros) out.micros = micros
+  else delete out.micros
   return out
 }
 

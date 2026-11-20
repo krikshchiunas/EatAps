@@ -97,3 +97,17 @@ test('повторный скан того же товара не проверя
   // На другом языке пояснения другие — проверка своя.
   assert.equal(cachedCheck('4601234567893', 'de'), null)
 })
+
+test('витамины от ИИ заменяют набор базы, замечания и источники доходят до экрана', () => {
+  const food = { ...FOOD, micros: { ca: 120 } }
+  const r = applyCheck(food, check({ micros: { ca: 125, na: 40, b12: 0.4 }, notes: ['Содержит лактозу.'], sources: ['label_photo'] }))
+  assert.deepEqual(r.food.micros, { ca: 125, na: 40, b12: 0.4 })
+  const m = r.changes.find((c) => c.field === 'micros')
+  assert.deepEqual([m.from, m.to], [1, 3])
+  assert.deepEqual(r.notes, ['Содержит лактозу.'])
+  assert.deepEqual(r.sources, ['label_photo'])
+  // Тот же набор с шумом округления — не правка.
+  assert.ok(!applyCheck({ ...FOOD, micros: { ca: 120 } }, check({ micros: { ca: 121 } })).changes.some((c) => c.field === 'micros'))
+  // Даже неприменённая проверка отдаёт замечания — их стоит показать.
+  assert.deepEqual(applyCheck(FOOD, check({ confidence: 'low', notes: ['x'] })).notes, ['x'])
+})

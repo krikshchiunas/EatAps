@@ -189,6 +189,7 @@ export default {
     srcMacros: 'Kalorien und Makros stammen aus der Produktkarte.',
     srcEstimated: 'Vitamine und Mineralstoffe sind Referenzwerte für diese Art von Lebensmittel.',
     srcCategory: 'Vitamine und Mineralstoffe sind über die Lebensmittelgruppe gemittelt, die Genauigkeit ist geringer als sonst.',
+    srcLabel: 'Vitamine und Mineralstoffe stammen vom Etikett; was dort fehlt, sind Referenzwerte für diese Art von Lebensmittel.',
     srcNote: 'Das Zeichen „≈“ steht dort, wo ein Wert nach Lebensmittelart geschätzt und nicht vom Etikett übernommen wurde. All das zeigt, wie viel eines Nährstoffs im Gegessenen war, nicht wie viel aufgenommen wurde: eine Orientierung, kein medizinischer Wert.',
   },
   activityLevel: {

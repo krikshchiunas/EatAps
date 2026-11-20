@@ -116,3 +116,33 @@ test('сеть: один обрыв связи переживается повт
     globalThis.fetch = realFetch
   }
 })
+
+test('витамины и минералы с этикетки: граммы базы → единицы справочника', () => {
+  const energy = {
+    product_name: 'Energy Drink', brands: 'Volt', product_quantity: 250, product_quantity_unit: 'ml',
+    nutriments: {
+      'energy-kcal_100g': 46, proteins_100g: 0, carbohydrates_100g: 11, sugars_100g: 11, fat_100g: 0,
+      caffeine_100g: 0.032, taurine_100g: 0.4, 'vitamin-b12_100g': 0.0000005, 'vitamin-b6_100g': 0.0005,
+      salt_100g: 0.2,
+      // Ошибка единиц: «60» мг витамина C вписаны в поле граммов — 60 000 мг на 100 мл.
+      'vitamin-c_100g': 60,
+    },
+  }
+  const f = parseOffProduct(energy, '9002490100070').food
+  assert.equal(f.micros.caffeine, 32)
+  assert.equal(f.micros.taurine, 400)
+  assert.equal(f.micros.b12, 0.5)
+  assert.equal(f.micros.b6, 0.5)
+  assert.equal(f.micros.na, 80, 'натрий из соли: 0.2 г соли = 80 мг натрия')
+  assert.equal(f.micros.vitC, undefined, 'невозможное количество в дневник не идёт')
+})
+
+test('55 г клетчатки в чипсах из базы в дневник не попадают', () => {
+  const chips = {
+    product_name: 'Paprika chips', brands: 'Crunchy', product_quantity: 150, product_quantity_unit: 'g',
+    nutriments: { 'energy-kcal_100g': 536, proteins_100g: 6, carbohydrates_100g: 50, fat_100g: 33, fiber_100g: 55 },
+  }
+  assert.equal(parseOffProduct(chips, '4000000000000').food.fiber, undefined)
+  const ok = { ...chips, nutriments: { ...chips.nutriments, fiber_100g: 4.2 } }
+  assert.equal(parseOffProduct(ok, '4000000000000').food.fiber, 4.2)
+})

@@ -189,6 +189,7 @@ export default {
     srcMacros: 'Las calorías y los macros vienen de la ficha del producto.',
     srcEstimated: 'Las vitaminas y los minerales son valores de referencia para este tipo de alimento.',
     srcCategory: 'Las vitaminas y los minerales son una media del grupo de alimentos, con menos precisión de lo habitual.',
+    srcLabel: 'Las vitaminas y los minerales vienen de la etiqueta; lo que no figura en ella son valores de referencia para este tipo de alimento.',
     srcNote: 'El signo «≈» indica valores estimados por tipo de alimento y no tomados de la etiqueta. Todo esto muestra cuánto nutriente había en lo que comiste, no cuánto se absorbió: es una orientación, no un indicador médico.',
   },
   activityLevel: {

@@ -5,6 +5,7 @@ import { t, fmtNum, getLang, SOURCE_LANG } from './i18n.js'
 import { foodName } from './foodNames.js'
 import { catalogId, canonicalName } from './catalog.js'
 import { categoryFromOff, categoryFromName, isDrinkTag } from './foodCategory.js'
+import { offMicros, scaleMicros } from './labelMicros.js'
 // Русские названия продуктов — в словаре по id (src/locales/ru/data/foods.js),
 // здесь только id и цифры: название хранится один раз, а не дважды.
 import ruFoods from '../locales/ru/data/foods.js'
@@ -725,6 +726,11 @@ export function scale(food, grams) {
   }
   if (food.satFat != null) out.satFat = +(food.satFat * k).toFixed(1)
   if (food.fiber != null) out.fiber = +(food.fiber * k).toFixed(1)
+  // Витамины и минералы с этикетки (товар со штрихкода, свой продукт) едут в
+  // запись так же, как БЖУ, — уже на порцию. Без них дневник брал бы только
+  // оценку по виду продукта и не видел обогащения, кофеина, натрия с упаковки.
+  const micros = scaleMicros(food.micros, k)
+  if (micros) out.micros = micros
   return out
 }
 
@@ -1489,6 +1495,17 @@ export function parseOffProduct(product, code) {
   if (satFat != null) food.satFat = +(+satFat).toFixed(1)
   const fiber = per100(n, 'fiber', serving)
   if (fiber != null) food.fiber = +(+fiber).toFixed(1)
+  // Клетчатка, которая не помещается в 100 г вместе с БЖУ, — ошибка базы
+  // («55 г клетчатки» у чипсов), а не свойство продукта: такое число в дневник
+  // не пускаем. Неизвестно — честнее, чем невозможно. Если клетчатки не больше
+  // углеводов, она может уже входить в них (американская этикетка: у орехов
+  // «углеводы 21, из них клетчатка 8»), и складывать её второй раз нельзя.
+  if (food.fiber != null && [food.protein, food.carbs, food.fat].every((v) => v != null)) {
+    const rest = food.protein + food.carbs + food.fat
+    if (food.fiber > food.carbs && rest <= 100 && rest + food.fiber > 105) delete food.fiber
+  }
+  const micros = offMicros(n)
+  if (Object.keys(micros).length) food.micros = micros
 
   // Сколько подставить в поле количества. Порция с упаковки — лучший ответ;
   // маленькую пачку человек обычно съедает целиком; иначе просто круглое число,

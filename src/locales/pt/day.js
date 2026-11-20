@@ -189,6 +189,7 @@ export default {
     srcMacros: 'Calorias e macros vêm da ficha do produto.',
     srcEstimated: 'Vitaminas e minerais são valores de referência para este tipo de alimento.',
     srcCategory: 'Vitaminas e minerais são médias do grupo de alimentos, com precisão menor que o normal.',
+    srcLabel: 'Vitaminas e minerais vêm do rótulo; o que não consta nele são valores de referência para este tipo de alimento.',
     srcNote: 'O sinal “≈” aparece onde o valor foi estimado pelo tipo de alimento, e não tirado do rótulo. Tudo isso mostra quanto do nutriente havia no que você comeu, não quanto foi absorvido: é uma orientação, não um indicador médico.',
   },
   activityLevel: {

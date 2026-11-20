@@ -722,21 +722,42 @@ export function massOf(entry) {
 //   values     — { ключ: количество в базовой единице ключа } для этой порции;
 //   confidence — 'estimated' (нашли профиль по названию),
 //                'category'  (только по категории),
+//                'label'     (вещества с этикетки товара, недостающие —
+//                             по профилю продукта, если он есть),
 //                'unknown'   (не опознали ИЛИ не знаем массу порции).
 //
 // 'unknown' — не то же самое, что «ноль»: см. шапку файла.
 export function microsForEntry(entry) {
+  // С этикетки (товар со штрихкода, свой продукт): количества уже на порцию,
+  // как kcal записи, — масса для них не нужна. Этикетка главнее оценки: что
+  // на ней заявлено, берём оттуда, остального на ней обычно просто нет (кто
+  // пишет на сыре калий?) — это добираем из профиля продукта.
+  const label = labelMicrosOf(entry)
   const mass = massOf(entry)
-  if (mass == null) return { values: {}, confidence: 'unknown' }
+  if (mass == null) {
+    return label ? { values: label, confidence: 'label' } : { values: {}, confidence: 'unknown' }
+  }
   const profile = microProfileFor(entry)
-  if (!profile) return { values: {}, confidence: 'unknown' }
+  if (!profile) return label ? { values: label, confidence: 'label' } : { values: {}, confidence: 'unknown' }
   const k = mass / 100
   const values = {}
   for (const key in profile.per100) {
     const v = profile.per100[key] * k
     if (v > 0) values[key] = v
   }
+  if (label) return { values: { ...values, ...label }, confidence: 'label', profileId: profile.id }
   return { values, confidence: profile.confidence, profileId: profile.id }
+}
+
+function labelMicrosOf(entry) {
+  const m = entry?.micros
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null
+  const out = {}
+  for (const k in m) {
+    const v = Number(m[k])
+    if (Number.isFinite(v) && v > 0) out[k] = v
+  }
+  return Object.keys(out).length ? out : null
 }
 
 // Сумма по всем записям дня.

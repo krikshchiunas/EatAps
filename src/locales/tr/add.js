@@ -284,6 +284,7 @@ export default {
     namePh: 'Örn. Kaşar peyniri',
     nameFromDb: 'Bu ad barkod veritabanından geliyor — kendi adınla değiştir, örn. “Kahvaltılık peynir”. Ürün ambalajdaki adla da bulunur.',
     dbNameNote: 'Ambalajda: “{name}” — ürün bu adla da bulunur.',
+    microsFromLabel: 'Etiketteki vitaminler, mineraller ve diğer maddeler: {count}',
     brand: 'Marka',
     brandPh: 'Örn. Pınar',
     base: 'Bunun bir çeşidi',

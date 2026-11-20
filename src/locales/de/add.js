@@ -284,6 +284,7 @@ export default {
     namePh: 'Z. B. Gouda 45 %',
     nameFromDb: 'Dieser Name stammt aus der Barcode-Datenbank – ersetz ihn durch deinen eigenen, z. B. „Käse fürs Brot“. Unter dem Namen auf der Packung findest du das Produkt trotzdem.',
     dbNameNote: 'Auf der Packung: „{name}“ – auch darunter findest du das Produkt.',
+    microsFromLabel: 'Vitamine, Mineralstoffe und andere Stoffe vom Etikett: {count}',
     brand: 'Marke',
     brandPh: 'Z. B. Milram',
     base: 'Das ist eine Sorte von',

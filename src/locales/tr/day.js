@@ -189,6 +189,7 @@ export default {
     srcMacros: 'Kalori ve makrolar ürün kartından gelir.',
     srcEstimated: 'Vitaminler ve mineraller bu tür besin için referans değerlerdir.',
     srcCategory: 'Vitaminler ve mineraller besin grubunun ortalamasıdır, doğruluk normalden düşüktür.',
+    srcLabel: 'Vitaminler ve mineraller etiketten alınır; etikette olmayanlar bu tür besin için referans değerlerdir.',
     srcNote: '“≈” işareti, değerin etiketten alınmayıp besin türüne göre tahmin edildiği yerlerde durur. Bunların hepsi yediğinde ne kadar besin öğesi olduğunu gösterir, ne kadarının emildiğini değil: bir yol gösterici, tıbbi bir değer değil.',
   },
   activityLevel: {

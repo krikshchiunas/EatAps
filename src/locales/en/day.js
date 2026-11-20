@@ -189,6 +189,7 @@ export default {
     srcMacros: 'Calories and macros come from the food card.',
     srcEstimated: 'Vitamins and minerals are reference values for this type of food.',
     srcCategory: 'Vitamins and minerals are averaged over the food group, so accuracy is lower than usual.',
+    srcLabel: 'Vitamins and minerals come from the label; what it doesn’t list uses reference values for this type of food.',
     srcNote: 'The “≈” sign marks values estimated by food type rather than taken from the label. All of this shows how much of a nutrient was in what you ate, not how much was absorbed: it’s a guide, not a medical measurement.',
   },
   activityLevel: {

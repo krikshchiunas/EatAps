@@ -53,6 +53,8 @@ function toForm(src) {
     barcode: d.barcode || '',
     photo: d.photo || null,
     dbName: d.dbName || '',
+    // С этикетки — не правится руками, но едет вместе с продуктом.
+    micros: d.micros || null,
   }
   for (const k of FIELDS) form[k] = str(d[k])
   return form
@@ -227,6 +229,7 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
       baseId: form.baseId,
       barcode: form.barcode,
       dbName: form.dbName,
+      micros: form.micros,
       photo: form.photo,
     }
     for (const k of FIELDS) out[k] = form[k] === '' ? null : form[k]
@@ -415,6 +418,11 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
         <NumField label={t('add.fiberField')} value={form.fiber} onChange={(v) => set({ fiber: v })} nested optional />
         <NumField label={t('add.fatField')} value={form.fat} onChange={(v) => set({ fat: v })} />
         <NumField label={t('add.satFatField')} value={form.satFat} onChange={(v) => set({ satFat: v })} nested optional />
+        {form.micros && Object.keys(form.micros).length > 0 && (
+          <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '-4px 0 14px', lineHeight: 1.4 }}>
+            {t('products.microsFromLabel', { count: Object.keys(form.micros).length })}
+          </p>
+        )}
 
         <div className="row gap8">
           <div style={{ flex: 1, minWidth: 0 }}>

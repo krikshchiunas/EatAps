@@ -130,8 +130,9 @@ const REQUEST_TIMEOUT_MS = 60_000
 // Единственное место, где мы ходим в Anthropic.
 //
 // effort — переопределить уровень по умолчанию (effortFor); format — JSON-схема
-// ответа (structured outputs, output_config.format).
-export async function callClaude({ model, system, messages, maxTokens, effort: effortOverride, format }) {
+// ответа (structured outputs, output_config.format); tools — инструменты
+// (серверные вроде веб-поиска и свои); timeoutMs — свой предел на этот вызов.
+export async function callClaude({ model, system, messages, maxTokens, effort: effortOverride, format, tools, timeoutMs = REQUEST_TIMEOUT_MS }) {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) throw new Error('ANTHROPIC_API_KEY is not set')
 
@@ -141,7 +142,7 @@ export async function callClaude({ model, system, messages, maxTokens, effort: e
     ...(format ? { format } : {}),
   }
   const stop = new AbortController()
-  const timer = setTimeout(() => stop.abort(), REQUEST_TIMEOUT_MS)
+  const timer = setTimeout(() => stop.abort(), timeoutMs)
 
   let res
   try {
@@ -158,6 +159,7 @@ export async function callClaude({ model, system, messages, maxTokens, effort: e
         max_tokens: maxTokens,
         system,
         messages,
+        ...(tools?.length ? { tools } : {}),
         ...(Object.keys(outputConfig).length ? { output_config: outputConfig } : {}),
       }),
     })

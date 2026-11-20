@@ -284,6 +284,7 @@ export default {
     namePh: 'E.g. Gouda 45%',
     nameFromDb: 'This name comes from the barcode database — replace it with your own, e.g. “Sandwich cheese”. The product will still be found by the package name.',
     dbNameNote: 'On the package: “{name}” — the product can be found by it too.',
+    microsFromLabel: 'Vitamins, minerals and other substances from the label: {count}',
     brand: 'Brand',
     brandPh: 'E.g. Arla',
     base: 'This is a kind of',

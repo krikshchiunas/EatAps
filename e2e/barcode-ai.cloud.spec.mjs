@@ -69,8 +69,11 @@ const PRODUCT = {
 const CHECK = {
   status: 'corrected', name: null, unit: 'g',
   per100: { kcal: 157, protein: 16, carbs: 3, sugar: null, fat: 9, satFat: null, fiber: null },
+  micros: { ca: 120, na: 40 },
   servingSize: 30, packSize: 200,
   corrections: [{ field: 'kcal', reason: 'Per-serving values were entered as per 100 g.' }],
+  notes: ['Contains lactose.'],
+  sources: ['label_photo'],
   confidence: 'high', summary: 'Values were per 30 g serving.',
 }
 
@@ -112,9 +115,12 @@ test('ИИ исправляет ошибку базы, видно «было →
   const calls = await open(page, { aiPref: true })
   await scan(page, T)
 
-  // Калории, белки, углеводы, жиры и порция с упаковки.
-  await expect(page.getByText(/AI corrected 5 values/)).toBeVisible()
+  // Калории, белки, углеводы, жиры, витамины с минералами и порция с упаковки.
+  await expect(page.getByText(/AI corrected 6 values/)).toBeVisible()
   await expect(page.getByText('Per-serving values were entered as per 100 g.')).toBeVisible()
+  await expect(page.getByText(`${T('barcodeAI.field.micros')}:`)).toBeVisible()
+  await expect(page.getByText('Contains lactose.')).toBeVisible()
+  await expect(page.getByText(T('barcodeAI.sources', { list: T('barcodeAI.src.label_photo') }))).toBeVisible()
   // Количество по умолчанию было «вся пачка» (200 г): человек его не трогал,
   // поэтому оно стало порцией с упаковки — 30 г. 157 ккал на 100 г → 47.
   const add = (n) => page.getByRole('button', { name: T('add.addKcal', { n }) })

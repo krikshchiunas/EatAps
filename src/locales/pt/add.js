@@ -284,6 +284,7 @@ export default {
     namePh: 'Ex.: Queijo prato 45%',
     nameFromDb: 'Este nome vem da base de códigos de barras — troque pelo seu, ex.: “Queijo do sanduíche”. O produto continua sendo encontrado pelo nome da embalagem.',
     dbNameNote: 'Na embalagem: “{name}” — o produto também é encontrado por ele.',
+    microsFromLabel: 'Vitaminas, minerais e outras substâncias do rótulo: {count}',
     brand: 'Marca',
     brandPh: 'Ex.: Tirolez',
     base: 'É um tipo de',
