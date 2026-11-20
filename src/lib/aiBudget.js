@@ -21,7 +21,22 @@ export const MICRO = 1_000_000 // микродолларов в долларе
 export const PRICES = Object.freeze({
   'claude-haiku-4-5': { in: 1, out: 5, cacheWrite: 1.25, cacheRead: 0.1 },
   'claude-sonnet-4-6': { in: 3, out: 15, cacheWrite: 3.75, cacheRead: 0.3 },
+  // Проверка штрихкодов (BARCODE_CHECK_MODEL) и модели, на которые API может
+  // переключить запрос при отказе (server-side fallback): без цены расход
+  // такого ответа записался бы нулём.
+  'claude-opus-5-5': { in: 4, out: 20, cacheWrite: 5, cacheRead: 0.2 },
+  'claude-opus-5': { in: 5, out: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  'claude-opus-4-8': { in: 5, out: 25, cacheWrite: 6.25, cacheRead: 0.5 },
 })
+
+// Проверка товара по штрихкоду ИИ (только Carrot Premium). Своя модель, а не
+// модель тарифа: ответ обязан приходить строго по JSON-схеме (structured
+// outputs), а Sonnet 4.6 их не поддерживает. Плюс модель читает фото этикетки —
+// там мелкие цифры таблицы состава.
+export const BARCODE_CHECK_MODEL = 'claude-opus-5-5'
+// Сверка цифр с этикеткой — рутинная работа: глубокое рассуждение тут почти
+// ничего не добавляет, а человек ждёт на экране количества.
+export const BARCODE_CHECK_EFFORT = 'low'
 
 // Уровень усилий — medium везде, где модель вообще принимает этот параметр.
 // Ответ у нас в 1–3 предложения: заводской high тут переплата, а у AI+ потолка
@@ -35,6 +50,7 @@ export const DEFAULT_EFFORT = 'medium'
 
 export const EFFORT_CAPABLE = Object.freeze([
   'claude-sonnet-4-6',
+  'claude-opus-5-5',
 ])
 
 export function effortFor(model) {
@@ -84,6 +100,9 @@ export const MAX_OUTPUT_TOKENS = Object.freeze({
   chat: 700,
   vision: 900,
   digest: 2000, // разбор недели/месяца
+  // У Opus 5.5 размышление включено всегда и тратит те же токены ответа:
+  // сам JSON — пара сотен токенов, остальное — запас на размышление.
+  barcode: 4000,
 })
 
 export function modelForTier(tier) {

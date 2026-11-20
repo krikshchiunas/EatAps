@@ -20,6 +20,7 @@ import {
   AccountPanel, PrivacyPanel, NotificationsPanel, AppearancePanel, LanguagePanel, DataPanel, AboutPanel, SupportPanel, PromoPanel,
 } from './SettingsPanels.jsx'
 import AITonePanel from './AITonePanel.jsx'
+import BarcodeAIPanel, { barcodeAIValue } from './BarcodeAIPanel.jsx'
 import BodyPanel from './BodyPanel.jsx'
 import { profileTargets } from '../lib/body.js'
 import { TONES, DEFAULT_TONE, TONE_PREF } from '../lib/aiTones.js'
@@ -90,6 +91,12 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
         <Row label={t('settings.row.promo')} value={promoValue} onClick={() => setPanel('promo')} />
       </Group>
 
+      {/* Штрихкод — своей группой: «помощь ИИ» ищут именно здесь, по слову
+          «штрихкод», а не среди настроек ассистента. */}
+      <Group title={t('barcodeAI.group')}>
+        <Row icon="📷" label={t('barcodeAI.row')} value={barcodeAIValue({ prefs, subscription })} onClick={() => setPanel('barcodeAI')} />
+      </Group>
+
       <Group title={t('settings.grp.appearance')}>
         <Row label={t('settings.row.theme')} value={themeLabel} onClick={() => setPanel('appearance')} />
       </Group>
@@ -114,6 +121,7 @@ export default function SettingsScreen({ onClose, onOpenFriends }) {
       {panel === 'notifications' && <NotificationsPanel onClose={close} />}
       {panel === 'aiTone' && <AITonePanel onClose={close} />}
       {panel === 'promo' && <PromoPanel onClose={close} />}
+      {panel === 'barcodeAI' && <BarcodeAIPanel onClose={close} />}
       {panel === 'appearance' && <AppearancePanel onClose={close} />}
       {panel === 'language' && <LanguagePanel onClose={close} />}
       {panel === 'data' && <DataPanel onClose={close} />}

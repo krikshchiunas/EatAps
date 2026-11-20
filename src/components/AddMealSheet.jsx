@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, Suspense } from 
 import { MILKS, BASE_GROUPS, FOODS, CONSTRUCTOR_ING, scale, searchLocal, searchLocalDetailed, searchByName, searchIngredients, searchOpenFoodFacts, getPortions, normalizeQuery, sanitizeAmount, hasMacros, macroLabel, amountLabel, unitLabel, formatAmount } from '../lib/foods.js'
 import { foodName, catalogName, methodLabel, portionLabel, alcLabel } from '../lib/foodNames.js'
 import { canonicalName, methodId } from '../lib/catalog.js'
-import { t, getLang, locale } from '../lib/i18n.js'
+import { t, getLang, locale, fmtNum, isRtl } from '../lib/i18n.js'
 import {
   memoryBoost, frequentFoods, recentFoods, memoryPortion,
   repeatEntry, toPer100, favoriteKey, MAX_FAVORITES,
@@ -18,6 +18,8 @@ import ProductEditorSheet from './ProductEditorSheet.jsx'
 import { ProductRow, useProductFilter } from './ProductRow.jsx'
 import { productsAsFoods, productAsFood, findProductByBarcode, productById, productLabel, productsForBase, ownProductsFirst } from '../lib/myProducts.js'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
+import { useBarcodeAI } from '../lib/useBarcodeAI.js'
+import { applyCheck, fillDraft } from '../lib/barcodeAI.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
 
 // Сканер нужен не каждому и не сразу — в стартовый бандл не входит (но лежит в
@@ -111,6 +113,11 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
   // then: 'pick' — после сохранения сразу открыть продукт на экране количества
   // (так работает «нет в базе → завести свой → записать съеденное»).
   const [productEditor, setProductEditor] = useState(null)
+  // «Штрихкод: помощь ИИ» (Carrot Premium): проверка товара после скана.
+  // null | { code, status: 'checking'|'ok'|'fixed'|'reverted'|'unsure'|'failed',
+  //          changes, original, fixed, summary }
+  const barcodeAI = useBarcodeAI()
+  const [aiCheck, setAiCheck] = useState(null)
   const [productQuery, setProductQuery] = useState('')
 
   // Тост может нести действие «Отменить», поэтому это не строка, а объект.
@@ -383,6 +390,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     const last = remembered || recents.find((r) => r.name === food.name && r.unit === u && r.grams)?.grams
     // Свой продукт знает порцию с упаковки — она точнее нейтральных 150 г.
     setGrams(last ? String(last) : food.defaultGrams ? String(food.defaultGrams) : u === 'мл' ? '250' : '150')
+    setAiCheck(null)
   }
 
   // Тап по строке памяти → экран количества. Сначала ищем канонический продукт
@@ -422,6 +430,53 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     setGrams(food.defaultGrams ? String(food.defaultGrams) : fallback)
   }
 
+  // ── Штрихкод: помощь ИИ ─────────────────────────────────────────────────────
+  // Товар показывается сразу, с цифрами базы, а ИИ проверяет его в фоне: ждать
+  // проверки, чтобы записать съеденное, не нужно. Исправления приходят на тот
+  // же экран — с «было → стало» по каждому полю и кнопкой «вернуть как в базе».
+  // Порцию в поле меняем, только если человек её ещё не трогал.
+  const showFood = (from, to) => {
+    setSelected((cur) => (cur && cur.barcode === to.barcode && cur.source === 'off' ? to : cur))
+    setGrams((g) => (from.defaultGrams && to.defaultGrams && g === String(from.defaultGrams) ? String(to.defaultGrams) : g))
+  }
+
+  const startCheck = (food) => {
+    const code = food.barcode
+    const mine = (c) => c?.code === code
+    setAiCheck({ code, status: 'checking' })
+    barcodeAI.check(code)
+      .then((check) => {
+        const res = applyCheck(food, check)
+        if (!res.applied) {
+          setAiCheck((c) => (mine(c) ? { code, status: 'unsure', summary: check?.summary || '' } : c))
+          return
+        }
+        const status = res.changes.length ? 'fixed' : 'ok'
+        setAiCheck((c) => (mine(c) ? { code, status, changes: res.changes, original: food, fixed: res.food, summary: check.summary } : c))
+        if (res.changes.length) showFood(food, res.food)
+      })
+      .catch(() => setAiCheck((c) => (mine(c) ? { code, status: 'failed' } : c)))
+  }
+
+  const onScanned = (food) => {
+    pickScanned(food)
+    setAiCheck(null)
+    // Свой продукт не проверяем: цифры в нём — слово самого человека.
+    if (barcodeAI.enabled && food.source === 'off' && food.barcode) startCheck(food)
+  }
+
+  const revertCheck = () => {
+    if (!aiCheck?.original) return
+    showFood(aiCheck.fixed, aiCheck.original)
+    setAiCheck({ ...aiCheck, status: 'reverted' })
+  }
+
+  const reapplyCheck = () => {
+    if (!aiCheck?.fixed) return
+    showFood(aiCheck.original, aiCheck.fixed)
+    setAiCheck({ ...aiCheck, status: 'fixed' })
+  }
+
   // Сканер сначала смотрит в «Мои продукты»: однажды заведённая пачка
   // узнаётся мгновенно, без сети и со своими цифрами.
   const findOwnProduct = (code) => {
@@ -434,7 +489,13 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
   // сканер узнает пачку сам (см. findOwnProduct).
   const productFromScan = (draft) => {
     setScanning(false)
-    setProductEditor({ draft, then: 'pick' })
+    // Товар в базе есть, но без состава — ИИ читает цифры с фото этикетки, пока
+    // человек смотрит на форму. Совсем неизвестный код проверять не по чему.
+    const canFill = barcodeAI.enabled && draft?.barcode && (draft.title || draft.name)
+    const pendingFill = canFill
+      ? barcodeAI.check(draft.barcode).then((check) => fillDraft(draft, check)).catch(() => null)
+      : null
+    setProductEditor({ draft, then: 'pick', pendingFill })
   }
 
   // Открыть редактор своего продукта на основе того, что сейчас выбрано:
@@ -478,6 +539,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
     setSelected(null)
     setMethod(null)
     setSugar(0)
+    setAiCheck(null)
   }
 
   // Открыли продукт — показываем его с начала; вернулись в список — возвращаем
@@ -600,6 +662,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
           product={productEditor.product}
           draft={productEditor.draft}
           note={productEditor.note}
+          pendingFill={productEditor.pendingFill}
           onClose={() => setProductEditor(null)}
           onSaved={onProductSaved}
           onDeleted={() => {
@@ -1148,6 +1211,10 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
               >{favKeys.has(favoriteKey(selected)) ? '★' : '☆'}</button>
             </div>
 
+            {aiCheck && selected.barcode === aiCheck.code && (
+              <AICheckNote state={aiCheck} unit={unit} onRevert={revertCheck} onReapply={reapplyCheck} />
+            )}
+
             {selected.hasVariants && (
               <div style={{ marginBottom: 18 }}>
                 <label style={{ display: 'block', fontSize: 14, color: 'var(--ink-2)', marginBottom: 10, fontWeight: 500 }}>{t('add.method')}</label>
@@ -1388,7 +1455,7 @@ export default function AddMealSheet({ onClose, onAdd, onAddMany, onRemove, meal
         <Suspense fallback={null}>
           <BarcodeScanner
             onClose={() => setScanning(false)}
-            onFound={pickScanned}
+            onFound={onScanned}
             onManual={manualFromScan}
             onMissing={productFromScan}
             findOwn={findOwnProduct}
@@ -2349,6 +2416,74 @@ function FoodThumb({ food }) {
         food.emoji
       )}
     </span>
+  )
+}
+
+// Итог проверки товара ИИ («Штрихкод: помощь ИИ»). Каждая правка — со старым
+// и новым числом и причиной: человек должен видеть, ЧТО поменялось, а не верить
+// на слово, — и вернуть как в базе одним касанием.
+function aiValue(field, v, unit) {
+  if (v == null || v === '') return '—'
+  if (field === 'name') return String(v)
+  if (field === 'unit') return unitLabel(v)
+  if (field === 'kcal') return t('units.kcalN', { n: fmtNum(Math.round(v)) })
+  if (field === 'servingSize' || field === 'packSize') return amountLabel(v, unit)
+  return t('units.gN', { n: fmtNum(v, { maximumFractionDigits: 1 }) })
+}
+
+function AICheckNote({ state, unit, onRevert, onReapply }) {
+  const box = { padding: 12, marginBottom: 14, boxShadow: 'none', background: 'var(--surface-2)', border: 'none' }
+  const title = (text) => <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{text}</div>
+  const muted = { fontSize: 13, color: 'var(--ink-3)', margin: 0, lineHeight: 1.45 }
+  const link = { fontSize: 14, color: 'var(--primary)', fontWeight: 550, marginTop: 6 }
+
+  if (state.status === 'checking') {
+    return (
+      <div className="card" role="status" aria-live="polite" style={box}>
+        <p style={muted}>🤖 {t('barcodeAI.checking')}</p>
+      </div>
+    )
+  }
+  if (state.status === 'ok') {
+    return (
+      <div className="card" role="status" style={box}>
+        {title(`✓ ${t('barcodeAI.okTitle')}`)}
+        <p style={muted}>{state.summary || t('barcodeAI.okText')}</p>
+      </div>
+    )
+  }
+  if (state.status === 'unsure' || state.status === 'failed') {
+    return (
+      <div className="card" role="status" style={box}>
+        <p style={muted}>🤖 {state.status === 'unsure' ? t('barcodeAI.unsure') : t('barcodeAI.failed')}</p>
+      </div>
+    )
+  }
+  if (state.status === 'reverted') {
+    return (
+      <div className="card" role="status" style={box}>
+        <p style={muted}>{t('barcodeAI.reverted')}</p>
+        <button className="tap44" style={link} onClick={onReapply}>{t('barcodeAI.reapply')}</button>
+      </div>
+    )
+  }
+  return (
+    <div className="card" role="status" style={box}>
+      {title(`🤖 ${t('barcodeAI.fixedTitle', { count: state.changes.length })}`)}
+      {state.summary && <p style={{ ...muted, marginBottom: 6 }}>{state.summary}</p>}
+      {state.changes.map((c) => (
+        <div key={c.field} style={{ padding: '4px 0', fontSize: 13.5, lineHeight: 1.4 }}>
+          <span style={{ fontWeight: 550 }}>{t(`barcodeAI.field.${c.field}`)}:</span>{' '}
+          <span className="tabular" style={{ color: 'var(--ink-3)', textDecoration: 'line-through' }}>{aiValue(c.field, c.from, unit)}</span>
+          {/* Стрелка — по направлению письма: «было → стало» читается слева
+              направо, а по-арабски «стало ← было». */}
+          {isRtl() ? ' ← ' : ' → '}
+          <span className="tabular" style={{ fontWeight: 600 }}>{aiValue(c.field, c.to, unit)}</span>
+          {c.reason && <span style={{ display: 'block', color: 'var(--ink-3)', fontSize: 12.5 }}>{c.reason}</span>}
+        </div>
+      ))}
+      <button className="tap44" style={link} onClick={onRevert}>{t('barcodeAI.revert')}</button>
+    </div>
   )
 }
 

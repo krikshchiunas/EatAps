@@ -85,6 +85,11 @@ const SCREENS = [
     await page.getByRole('button', { name: L('lang.title') }).first().click()
     await page.getByRole('listbox').waitFor()
   }],
+  ['штрихкод: помощь ИИ', async (page, L) => {
+    await nav(L, 'nav.profile')(page)
+    await btn(page, L('settings.title')).click()
+    await page.getByRole('button', { name: L('barcodeAI.row') }).first().click()
+  }],
   ['уведомления', async (page, L) => {
     await nav(L, 'nav.profile')(page)
     await btn(page, L('settings.title')).click()

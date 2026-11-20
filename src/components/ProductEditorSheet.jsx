@@ -8,6 +8,8 @@ import { t } from '../lib/i18n.js'
 import { checkManualFood } from '../lib/manualFood.js'
 import { useSearchNames } from '../lib/useSearchNames.js'
 import { lazyWithReload } from '../lib/lazyWithReload.js'
+import { useBarcodeAI } from '../lib/useBarcodeAI.js'
+import { applyCheck, fillDraft } from '../lib/barcodeAI.js'
 import {
   normalizeProduct, productDraftFrom, findProductByBarcode, productLabel, cleanBarcode, MAX_PRODUCTS,
 } from '../lib/myProducts.js'
@@ -81,7 +83,9 @@ function NumField({ label, value, onChange, placeholder = '0', nested, optional,
 
 // product — правка существующего; draft — черновик нового (со штрихкода, из
 // экрана количества, пустой). onSaved(entry, { existing }) — после сохранения.
-export default function ProductEditorSheet({ product, draft, note: startNote = null, onClose, onSaved, onDeleted }) {
+// pendingFill — обещание черновика с цифрами, которые ИИ прочитал с фото
+// этикетки («Штрихкод: помощь ИИ»); они лягут только в пустые поля.
+export default function ProductEditorSheet({ product, draft, note: startNote = null, pendingFill = null, onClose, onSaved, onDeleted }) {
   const { sheetProps, backdropProps, close } = useSheetDrag(onClose)
   const { products, saveProduct, removeProduct } = useStore()
   const editing = product?.id ? product : null
@@ -97,6 +101,7 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
   const [confirmExit, setConfirmExit] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const namesReady = useSearchNames()
+  const barcodeAI = useBarcodeAI()
 
   const set = (patch) => { setForm((f) => ({ ...f, ...patch })); setError(null) }
 
@@ -137,8 +142,9 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
   }
 
   // Со штрихкода: найденное перекрывает пустое, а не наоборот — человек мог
-  // уже вписать название по-своему.
-  const fillFrom = (src, nextNote) => {
+  // уже вписать название по-своему. onlyEmpty — заполнить только пустые поля
+  // (цифры, прочитанные ИИ, пока человек уже что-то вписывал).
+  const fillFrom = (src, nextNote, { onlyEmpty = false } = {}) => {
     const scanned = toForm(productDraftFrom(src))
     setForm((f) => {
       const out = { ...f }
@@ -146,6 +152,7 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
         // Единицу берём, только если база её знает: «не найден» не должен
         // молча переключить напиток обратно на граммы.
         if (k === 'unit' && !src?.unit) continue
+        if (onlyEmpty && f[k] != null && f[k] !== '') continue
         const v = scanned[k]
         if (v != null && v !== '') out[k] = v
       }
@@ -154,6 +161,50 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
     })
     setNote(nextNote)
     setScanning(false)
+  }
+
+  // ИИ читает этикетку товара, у которого в базе нет состава (pendingFill
+  // приходит из листа добавления), — форма уже открыта, цифры появятся сами.
+  useEffect(() => {
+    if (!pendingFill) return undefined
+    let alive = true
+    setNote('aiFilling')
+    pendingFill.then((filled) => {
+      if (!alive) return
+      if (filled) fillFrom(filled, 'aiFilled', { onlyEmpty: true })
+      else setNote((n) => (n === 'aiFilling' ? 'noNutrition' : n))
+    })
+    return () => { alive = false }
+    // fillFrom — функция этого же рендера; повторять заполнение при её смене незачем.
+  }, [pendingFill])
+
+  // Свой скан в форме: товар из базы → ИИ проверяет его так же, как в листе
+  // добавления; исправленное ложится в форму, человек видит пометку.
+  const onScanFound = (food) => {
+    fillFrom(food, 'filled')
+    if (!barcodeAI.enabled || food.source !== 'off' || !food.barcode) return
+    setNote('aiChecking')
+    barcodeAI.check(food.barcode)
+      .then((check) => {
+        const res = applyCheck(food, check)
+        if (!res.applied) setNote('aiUnsure')
+        else if (res.changes.length) fillFrom(res.food, 'aiFixed')
+        else setNote('aiOk')
+      })
+      .catch(() => setNote('filled'))
+  }
+
+  const onScanMissing = (d) => {
+    fillFrom(d, d.title || d.name ? 'noNutrition' : 'notInDb')
+    if (!barcodeAI.enabled || !d.barcode || !(d.title || d.name)) return
+    setNote('aiFilling')
+    barcodeAI.check(d.barcode)
+      .then((check) => {
+        const filled = fillDraft(d, check)
+        if (filled) fillFrom(filled, 'aiFilled', { onlyEmpty: true })
+        else setNote('noNutrition')
+      })
+      .catch(() => setNote('noNutrition'))
   }
 
   const barcode = cleanBarcode(form.barcode)
@@ -434,8 +485,8 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
           <BarcodeScanner
             zIndex={SCANNER_LAYER}
             onClose={() => setScanning(false)}
-            onFound={(food) => fillFrom(food, 'filled')}
-            onMissing={(d) => fillFrom(d, d.title || d.name ? 'noNutrition' : 'notInDb')}
+            onFound={onScanFound}
+            onMissing={onScanMissing}
             onManual={() => setScanning(false)}
           />
         </Suspense>

@@ -24,6 +24,9 @@ import { activeGrant, bestTier } from '../../src/lib/subscription.js'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
+// Отказ модели (stop_reason: refusal) — API сам повторит запрос на другой
+// модели, выбранной по категории отказа.
+const FALLBACK_BETA = 'server-side-fallback-2026-07-01'
 
 let _admin
 export function admin() {
@@ -128,11 +131,19 @@ export function settle(userId, { reserved, actual }, period) {
 const REQUEST_TIMEOUT_MS = 60_000
 
 // Единственное место, где мы ходим в Anthropic.
-export async function callClaude({ model, system, messages, maxTokens }) {
+//
+// effort — переопределить уровень по умолчанию (effortFor); format — JSON-схема
+// ответа (structured outputs, output_config.format); fallback — разрешить API
+// при отказе модели переключить запрос на другую (server-side fallback, beta).
+export async function callClaude({ model, system, messages, maxTokens, effort: effortOverride, format, fallback = false }) {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) throw new Error('ANTHROPIC_API_KEY is not set')
 
-  const effort = effortFor(model)
+  const effort = effortOverride || effortFor(model)
+  const outputConfig = {
+    ...(effort ? { effort } : {}),
+    ...(format ? { format } : {}),
+  }
   const stop = new AbortController()
   const timer = setTimeout(() => stop.abort(), REQUEST_TIMEOUT_MS)
 
@@ -145,13 +156,15 @@ export async function callClaude({ model, system, messages, maxTokens }) {
         'content-type': 'application/json',
         'x-api-key': key,
         'anthropic-version': ANTHROPIC_VERSION,
+        ...(fallback ? { 'anthropic-beta': FALLBACK_BETA } : {}),
       },
       body: JSON.stringify({
         model,
         max_tokens: maxTokens,
         system,
         messages,
-        ...(effort ? { output_config: { effort } } : {}),
+        ...(Object.keys(outputConfig).length ? { output_config: outputConfig } : {}),
+        ...(fallback ? { fallbacks: 'default' } : {}),
       }),
     })
   } catch (e) {

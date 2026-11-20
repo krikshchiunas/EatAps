@@ -11,6 +11,7 @@
 // клиент не сообщает и сообщить не может.
 // ─────────────────────────────────────────────────────────────────────────────
 import { t, getLang } from './i18n.js'
+import { cachedCheck, rememberCheck } from './barcodeAI.js'
 
 export class AIError extends Error {
   constructor(message, { code, status, usage, serverMessage } = {}) {
@@ -72,6 +73,18 @@ export function sendChat({ history, context, prefs, session }) {
 // Одно фото или несколько (сколько разрешает тариф) — одним запросом с текстом.
 export function sendPhoto({ images, note, context, prefs, session }) {
   return post('/api/ai/vision', { images, note, context, prefs }, session)
+}
+
+// Проверка товара по штрихкоду (Carrot Premium). Отправляется только код —
+// данные товара сервер берёт из Open Food Facts сам. Ответ кэшируется на время
+// жизни вкладки: повторный скан того же товара не ждёт и не стоит денег.
+export async function verifyBarcode({ code, session }) {
+  const lang = getLang()
+  const hit = cachedCheck(code, lang)
+  if (hit) return hit
+  const data = await post('/api/ai/barcode', { code }, session)
+  rememberCheck(code, lang, data.check)
+  return data.check
 }
 
 // Декодирование с запасными путями: старые Safari не знают параметров
