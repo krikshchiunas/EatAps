@@ -13,6 +13,7 @@
 // запятой, граммы вместо миллилитров, пустой состав. Модель сверяет цифры
 // между собой и с фото таблицы состава с упаковки (база хранит его снимок) и
 // возвращает исправленные значения строго по JSON-схеме (structured outputs).
+// Модель — самая дешёвая из подходящих (BARCODE_CHECK_MODEL в aiBudget.js).
 import {
   getUser, tierOf, spentThisPeriod, reserve, settle, callClaude, costOf, periodKey, budgetForTier, roughTokens,
 } from './_shared.js'
@@ -313,14 +314,13 @@ export default async function handler(req, res) {
   let data
   try {
     try {
-      data = await ask({ messages, fallback: true })
+      data = await ask({ messages })
     } catch (e) {
       // 400 — запрос отвергнут до генерации (токены не потрачены). Чаще всего
       // это фото, которое база уже удалила или не отдаёт по ссылке. Проверка по
-      // одним цифрам базы всё равно полезна: повторяем без фото и без
-      // запасной модели, чтобы отказ одной из бета-функций не выключил всё.
-      if (e.status !== 400) throw e
-      data = await ask({ messages: [{ role: 'user', content: buildContent(facts, []) }], fallback: false })
+      // одним цифрам базы всё равно полезна: повторяем без фото.
+      if (e.status !== 400 || !images.length) throw e
+      data = await ask({ messages: [{ role: 'user', content: buildContent(facts, []) }] })
     }
   } catch (e) {
     await settle(user.id, { reserved, actual: e.usage ? costOf(e.usage, model) : 0 }, period)
@@ -328,9 +328,7 @@ export default async function handler(req, res) {
     return res.status(status).json({ error: 'upstream', message: 'Could not check the product.' })
   }
 
-  // Ответ мог дать запасной модель (server-side fallback) — считаем по ней,
-  // если её цена известна.
-  const cost = costOf(data.usage, data.model && costOf(data.usage, data.model) ? data.model : model)
+  const cost = costOf(data.usage, model)
   await settle(user.id, { reserved, actual: cost }, period)
 
   const check = parseCheck(data)

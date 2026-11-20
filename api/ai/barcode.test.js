@@ -146,3 +146,14 @@ test('без входа в аккаунт — 401, и ни базы, ни мод
     globalThis.fetch = realFetch
   }
 })
+
+test('у модели проверки есть цена и effort — иначе расход запишется нулём', async () => {
+  const { PRICES, BARCODE_CHECK_MODEL, BARCODE_CHECK_EFFORT, EFFORT_CAPABLE, costOf } = await import('../../src/lib/aiBudget.js')
+  assert.equal(BARCODE_CHECK_MODEL, 'claude-haiku-5-5')
+  assert.ok(PRICES[BARCODE_CHECK_MODEL])
+  assert.ok(EFFORT_CAPABLE.includes(BARCODE_CHECK_MODEL))
+  assert.ok(['low', 'medium', 'high'].includes(BARCODE_CHECK_EFFORT))
+  // Типичная проверка: ~2500 токенов входа с двумя фото, ~1500 ответа с размышлением.
+  const micro = costOf({ input_tokens: 2500, output_tokens: 1500 }, BARCODE_CHECK_MODEL)
+  assert.ok(micro > 0 && micro < 2000, `проверка стоит ${micro} микродолларов`)
+})

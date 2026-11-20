@@ -201,3 +201,24 @@ test('свой продукт находится по продукту базы 
   const plain = productsAsFoods([{ id: 'p2', name: 'Ламбер', kcal: 356 }])
   assert.ok(!search.searchItems([...plain, ...FOODS], 'gouda').results.some((f) => f.productId === 'p2'))
 })
+
+test('своё название товара со штрихкода: название с упаковки остаётся для поиска', async () => {
+  const scanned = { name: 'Quark 9% · Milbona', title: 'Quark 9%', brand: 'Milbona', source: 'off', barcode: '4006381333931', kcal: 157 }
+  const d = productDraftFrom(scanned)
+  assert.equal(d.name, 'Quark 9%')
+  assert.equal(d.dbName, 'Quark 9%')
+  // Оставил как в базе — второй копии названия не храним.
+  assert.equal('dbName' in normalizeProduct({ ...d }), false)
+  // Назвал по-своему — показывается своё, название с упаковки хранится.
+  const own = normalizeProduct({ ...d, name: 'Творожок к завтраку' })
+  assert.equal(own.dbName, 'Quark 9%')
+  const food = productAsFood({ ...own, id: 'p9' })
+  assert.equal(food.name, 'Творожок к завтраку · Milbona')
+  assert.equal(food.dbName, 'Quark 9%')
+  // Поиск находит его и по названию с пачки.
+  const search = await import('./search/index.js')
+  await search.loadSearchNames()
+  assert.equal(search.searchItems([food], 'quark').results[0]?.productId, 'p9')
+  // Продукт, заведённый руками без штрихкода, названия «из базы» не получает.
+  assert.equal(productDraftFrom({ name: 'Гречка', kcal: 330 }).dbName, null)
+})

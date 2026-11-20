@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, Suspense } from 'react'
+import { useState, useMemo, useEffect, useRef, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { useSheetDrag } from '../lib/useSheetDrag.js'
 import { useStore } from '../store.jsx'
@@ -52,6 +52,7 @@ function toForm(src) {
     cat: d.cat || null,
     barcode: d.barcode || '',
     photo: d.photo || null,
+    dbName: d.dbName || '',
   }
   for (const k of FIELDS) form[k] = str(d[k])
   return form
@@ -93,6 +94,10 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
   const [initial] = useState(() => toForm(editing || productDraftFrom(draft || {}, {})))
   const [form, setForm] = useState(initial)
   const [emojiTouched, setEmojiTouched] = useState(Boolean(editing?.emoji))
+  // Название и бренд, вписанные человеком, — его решение: ни повторный скан,
+  // ни цифры, прочитанные ИИ, их не перетирают. Ref, а не state: заполнение
+  // приходит из промиса, и state в его замыкании был бы вчерашним.
+  const touched = useRef({ name: Boolean(editing), brand: Boolean(editing) })
   const [baseQuery, setBaseQuery] = useState('')
   const [baseSkip, setBaseSkip] = useState(false)
   const [scanning, setScanning] = useState(false)
@@ -152,6 +157,7 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
         // Единицу берём, только если база её знает: «не найден» не должен
         // молча переключить напиток обратно на граммы.
         if (k === 'unit' && !src?.unit) continue
+        if ((k === 'name' || k === 'brand') && touched.current[k] && f[k]) continue
         if (onlyEmpty && f[k] != null && f[k] !== '') continue
         const v = scanned[k]
         if (v != null && v !== '') out[k] = v
@@ -220,6 +226,7 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
       cat: form.cat || base?.cat || null,
       baseId: form.baseId,
       barcode: form.barcode,
+      dbName: form.dbName,
       photo: form.photo,
     }
     for (const k of FIELDS) out[k] = form[k] === '' ? null : form[k]
@@ -305,11 +312,26 @@ export default function ProductEditorSheet({ product, draft, note: startNote = n
 
         <div className="field">
           <label>{t('template.name')}</label>
-          <input className="input" placeholder={t('products.namePh')} value={form.name} onChange={(e) => set({ name: e.target.value })} />
+          <input
+            className="input"
+            placeholder={form.dbName || t('products.namePh')}
+            value={form.name}
+            onChange={(e) => { touched.current.name = true; set({ name: e.target.value }) }}
+            // Название пришло из базы штрихкодов — касание выделяет его целиком:
+            // своё название пишется сразу, без стирания чужого по букве.
+            onFocus={(e) => { if (form.dbName && form.name === form.dbName) e.currentTarget.select() }}
+          />
+          {form.dbName && (
+            <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '6px 0 0', lineHeight: 1.4 }}>
+              {form.name.trim() && form.name.trim() !== form.dbName
+                ? t('products.dbNameNote', { name: form.dbName })
+                : t('products.nameFromDb')}
+            </p>
+          )}
         </div>
         <div className="field">
           <label>{t('products.brand')} <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>{t('common.optional')}</span></label>
-          <input className="input" placeholder={t('products.brandPh')} value={form.brand} onChange={(e) => set({ brand: e.target.value })} />
+          <input className="input" placeholder={t('products.brandPh')} value={form.brand} onChange={(e) => { touched.current.brand = true; set({ brand: e.target.value }) }} />
         </div>
 
         <div className="seg" style={{ marginBottom: 18 }}>

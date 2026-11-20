@@ -282,6 +282,8 @@ export default {
       aiUnsure: 'Values from the package are filled in. AI isn’t sure about them — check against the label.',
     },
     namePh: 'E.g. Gouda 45%',
+    nameFromDb: 'This name comes from the barcode database — replace it with your own, e.g. “Sandwich cheese”. The product will still be found by the package name.',
+    dbNameNote: 'On the package: “{name}” — the product can be found by it too.',
     brand: 'Brand',
     brandPh: 'E.g. Arla',
     base: 'This is a kind of',

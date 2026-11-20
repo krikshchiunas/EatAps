@@ -282,6 +282,8 @@ export default {
       aiUnsure: 'Die Werte von der Verpackung sind eingetragen. Die KI ist sich nicht sicher – gleich sie mit dem Etikett ab.',
     },
     namePh: 'Z. B. Gouda 45 %',
+    nameFromDb: 'Dieser Name stammt aus der Barcode-Datenbank – ersetz ihn durch deinen eigenen, z. B. „Käse fürs Brot“. Unter dem Namen auf der Packung findest du das Produkt trotzdem.',
+    dbNameNote: 'Auf der Packung: „{name}“ – auch darunter findest du das Produkt.',
     brand: 'Marke',
     brandPh: 'Z. B. Milram',
     base: 'Das ist eine Sorte von',

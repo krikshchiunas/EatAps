@@ -96,6 +96,9 @@ export function productEntity(item, i) {
   if (!item || typeof item.name !== 'string') return null
   const fields = [{ text: item.name, kind: 'name', lang: '', primary: true }]
   if (item.brand) fields.push({ text: item.brand, kind: 'keyword', lang: '' })
+  // Название с упаковки, если человек назвал продукт по-своему: искать будут
+  // и по тому, что написано на пачке.
+  if (item.dbName) fields.push({ text: item.dbName, kind: 'alias', lang: '' })
   // Категория на языке интерфейса («Сыры», «Cheese»): у «Гауды» в названии
   // нет слова «сыр», а свой сыр человек ищет именно так.
   if (item.cat && hasOwn(`add.sec.${item.cat}`)) fields.push({ text: t(`add.sec.${item.cat}`), kind: 'keyword', lang: getLang() })

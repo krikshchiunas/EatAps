@@ -151,3 +151,27 @@ test('без включённой настройки ИИ не вызывает�
   expect(calls).toHaveLength(0)
   await expect(page.getByText(/AI corrected/)).toHaveCount(0)
 })
+
+test('свой продукт по штрихкоду называется по-своему и находится по названию с упаковки', async ({ page }) => {
+  const T = await dict('en')
+  await open(page, { aiPref: false })
+  await page.locator('nav.bottomnav button', { hasText: T('nav.profile') }).first().click()
+  await page.getByRole('button', { name: T('products.title') }).first().click()
+  await page.getByRole('button', { name: T('products.scan') }).first().click()
+
+  // Форма открылась с названием из базы и подсказкой, что его можно заменить.
+  const name = page.getByPlaceholder('Quark 9%')
+  await expect(name).toHaveValue('Quark 9%', { timeout: 20_000 })
+  await expect(page.getByText(T('products.nameFromDb'))).toBeVisible()
+  await name.fill('Breakfast quark')
+  await expect(page.getByText(T('products.dbNameNote', { name: 'Quark 9%' }))).toBeVisible()
+  await page.getByRole('button', { name: T('products.save'), exact: true }).click()
+  await expect(page.getByRole('button', { name: /Breakfast quark · Milbona/ })).toBeVisible()
+
+  // В листе добавления — находится по названию с пачки, показывается своё.
+  await page.getByRole('button', { name: T('common.back') }).first().click()
+  await page.locator('nav.bottomnav button', { hasText: T('nav.day') }).first().click()
+  await page.getByRole('button', { name: T('day.addFood') }).first().click()
+  await page.getByLabel(T('add.searchAria')).first().fill('quark')
+  await expect(page.getByRole('button', { name: /Breakfast quark · Milbona/ }).first()).toBeVisible()
+})

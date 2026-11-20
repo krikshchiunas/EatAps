@@ -24,9 +24,6 @@ import { activeGrant, bestTier } from '../../src/lib/subscription.js'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
-// Отказ модели (stop_reason: refusal) — API сам повторит запрос на другой
-// модели, выбранной по категории отказа.
-const FALLBACK_BETA = 'server-side-fallback-2026-07-01'
 
 let _admin
 export function admin() {
@@ -133,9 +130,8 @@ const REQUEST_TIMEOUT_MS = 60_000
 // Единственное место, где мы ходим в Anthropic.
 //
 // effort — переопределить уровень по умолчанию (effortFor); format — JSON-схема
-// ответа (structured outputs, output_config.format); fallback — разрешить API
-// при отказе модели переключить запрос на другую (server-side fallback, beta).
-export async function callClaude({ model, system, messages, maxTokens, effort: effortOverride, format, fallback = false }) {
+// ответа (structured outputs, output_config.format).
+export async function callClaude({ model, system, messages, maxTokens, effort: effortOverride, format }) {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) throw new Error('ANTHROPIC_API_KEY is not set')
 
@@ -156,7 +152,6 @@ export async function callClaude({ model, system, messages, maxTokens, effort: e
         'content-type': 'application/json',
         'x-api-key': key,
         'anthropic-version': ANTHROPIC_VERSION,
-        ...(fallback ? { 'anthropic-beta': FALLBACK_BETA } : {}),
       },
       body: JSON.stringify({
         model,
@@ -164,7 +159,6 @@ export async function callClaude({ model, system, messages, maxTokens, effort: e
         system,
         messages,
         ...(Object.keys(outputConfig).length ? { output_config: outputConfig } : {}),
-        ...(fallback ? { fallbacks: 'default' } : {}),
       }),
     })
   } catch (e) {

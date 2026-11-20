@@ -282,6 +282,8 @@ export default {
       aiUnsure: 'Ambalajdaki bilgiler dolduruldu. Yapay zekâ emin değil — etiketle karşılaştır.',
     },
     namePh: 'Örn. Kaşar peyniri',
+    nameFromDb: 'Bu ad barkod veritabanından geliyor — kendi adınla değiştir, örn. “Kahvaltılık peynir”. Ürün ambalajdaki adla da bulunur.',
+    dbNameNote: 'Ambalajda: “{name}” — ürün bu adla da bulunur.',
     brand: 'Marka',
     brandPh: 'Örn. Pınar',
     base: 'Bunun bir çeşidi',

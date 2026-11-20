@@ -136,6 +136,11 @@ export function normalizeProduct(raw) {
 
   const brand = text(raw.brand, BRAND_MAX)
   if (brand) out.brand = brand
+  // Название из базы штрихкодов, если человек назвал продукт по-своему
+  // («Сыр для бутербродов» вместо «Сыр полутвёрдый Гауда 45% м.д.ж. в сухом
+  // веществе»). Показывается своё, а по этому продукт тоже находится поиском.
+  const dbName = text(raw.dbName, NAME_MAX + BRAND_MAX)
+  if (dbName && normalizeName(dbName) !== normalizeName(name)) out.dbName = dbName
   for (const key of ['sugar', 'satFat', 'fiber']) {
     const v = numIn(raw[key], 0, 100)
     if (v != null) out[key] = v
@@ -183,6 +188,7 @@ export function productAsFood(p) {
     if (clean[key] != null) food[key] = clean[key]
   }
   if (clean.brand) food.brand = clean.brand
+  if (clean.dbName) food.dbName = clean.dbName
   // Порции с упаковки идут первыми в подсказках количества: они точнее любой
   // усреднённой «тарелки». Подписи — каталожные порции, они переводятся.
   const portions = []
@@ -245,6 +251,9 @@ export function productDraftFrom(food, extra = {}) {
     baseId: isCatalogId('foods', src.baseId) ? src.baseId : isCatalogId('foods', src.foodId) ? src.foodId : null,
     barcode: cleanBarcode(src.barcode),
     photo: src.photo || null,
+    // Название, под которым товар записан в базе штрихкодов. Человек вправе
+    // назвать его по-своему; это остаётся для поиска и подсказки в форме.
+    dbName: src.dbName ?? (cleanBarcode(src.barcode) && (src.source === 'off' || src.title) ? name : null),
     // Черновик может прийти уже разобранным (повторный разбор не должен
     // ничего терять) — тогда вес пачки и порции лежат в своих полях.
     packGrams: src.packGrams ?? null,

@@ -282,6 +282,8 @@ export default {
       aiUnsure: 'Se han rellenado los datos del envase. La IA no está segura: compruébalos con la etiqueta.',
     },
     namePh: 'Ej. Gouda 45 %',
+    nameFromDb: 'Este nombre viene de la base de códigos de barras: cámbialo por el tuyo, p. ej. «Queso para bocadillos». El producto se seguirá encontrando por el nombre del envase.',
+    dbNameNote: 'En el envase: «{name}»; también se encuentra por ese nombre.',
     brand: 'Marca',
     brandPh: 'Ej. García Baquero',
     base: 'Es un tipo de',
